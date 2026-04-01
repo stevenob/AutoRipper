@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
@@ -27,6 +28,8 @@ class EncodeTab(ttk.Frame):
         self._disc_name: str = ""
         self._audio_vars: list[tuple[int, tk.BooleanVar]] = []
         self._subtitle_vars: list[tuple[int, tk.BooleanVar]] = []
+        self._proc: subprocess.Popen | None = None
+        self._aborted = False
 
         self._build_ui()
         self._load_presets()
@@ -104,6 +107,11 @@ class EncodeTab(ttk.Frame):
             btn_row, text="Encode", command=self._on_encode, state=tk.DISABLED
         )
         self.encode_btn.pack(side=tk.LEFT)
+
+        self.abort_btn = ttk.Button(
+            btn_row, text="Abort", command=self._on_abort, state=tk.DISABLED
+        )
+        self.abort_btn.pack(side=tk.LEFT, padx=(5, 0))
 
         self.progress_var = tk.IntVar(value=0)
         self.progress_bar = ttk.Progressbar(
@@ -236,6 +244,8 @@ class EncodeTab(ttk.Frame):
         subtitles = [idx for idx, var in self._subtitle_vars if var.get()]
 
         self.encode_btn.configure(state=tk.DISABLED)
+        self.abort_btn.configure(state=tk.NORMAL)
+        self._aborted = False
         self.progress_bar.configure(mode="determinate")
         self.progress_var.set(0)
         self.progress_label.configure(text="Starting encode…")
@@ -246,6 +256,14 @@ class EncodeTab(ttk.Frame):
             daemon=True,
         ).start()
         self.after(100, self._poll_queue)
+
+    def _on_abort(self):
+        """Kill the running HandBrake process."""
+        self._aborted = True
+        if self._proc and self._proc.poll() is None:
+            self._proc.kill()
+        self.abort_btn.configure(state=tk.DISABLED)
+        self.progress_label.configure(text="Aborting…")
 
     def _encode_worker(
         self,
@@ -258,6 +276,9 @@ class EncodeTab(ttk.Frame):
         def _progress_cb(percent: int, msg: str):
             self._msg_queue.put(("encode_progress", (percent, msg)))
 
+        def _proc_cb(proc):
+            self._proc = proc
+
         try:
             result_path = encode(
                 input_path,
@@ -266,10 +287,14 @@ class EncodeTab(ttk.Frame):
                 audio_tracks=audio or None,
                 subtitle_tracks=subtitles or None,
                 progress_callback=_progress_cb,
+                proc_callback=_proc_cb,
             )
             self._msg_queue.put(("encode_done", result_path))
         except (HandBrakeNotFoundError, HandBrakeError) as exc:
-            self._msg_queue.put(("encode_err", str(exc)))
+            if self._aborted:
+                self._msg_queue.put(("encode_err", "Encoding aborted by user"))
+            else:
+                self._msg_queue.put(("encode_err", str(exc)))
         except Exception as exc:
             self._msg_queue.put(("encode_err", f"Unexpected error: {exc}"))
 
@@ -317,6 +342,7 @@ class EncodeTab(ttk.Frame):
                 elif msg_type == "encode_err":
                     self.progress_label.configure(text="Encode failed")
                     self.encode_btn.configure(state=tk.NORMAL)
+                    self.abort_btn.configure(state=tk.DISABLED)
                     messagebox.showerror("Encode Error", str(payload))
 
                 elif msg_type == "encode_done":
@@ -324,6 +350,7 @@ class EncodeTab(ttk.Frame):
                     self.progress_var.set(100)
                     self.progress_label.configure(text="Encode complete")
                     self.encode_btn.configure(state=tk.NORMAL)
+                    self.abort_btn.configure(state=tk.DISABLED)
                     self.app.set_status("Encoding complete")
                     self.app.on_encode_complete(result_path, self._disc_name)
                     messagebox.showinfo(

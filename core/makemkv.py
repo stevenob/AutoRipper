@@ -153,6 +153,7 @@ def rip_title(
     output_dir: str,
     progress_callback: Optional[Callable[[int, str], None]] = None,
     log_callback: Optional[Callable[[str], None]] = None,
+    proc_callback: Optional[Callable] = None,
 ) -> str:
     """Rip a single title from disc to the output directory.
 
@@ -162,6 +163,8 @@ def rip_title(
         progress_callback: Optional ``(percent, message)`` callback for
             progress updates.
         log_callback: Optional callback receiving each raw output line.
+        proc_callback: Optional callback receiving the Popen object
+            (for abort support).
 
     Returns:
         Full path to the ripped MKV file.
@@ -182,6 +185,9 @@ def rip_title(
         raise MakeMKVNotFoundError(f"Could not execute makemkvcon: {exc}") from exc
     except OSError as exc:
         raise MakeMKVError(f"Failed to start makemkvcon: {exc}") from exc
+
+    if proc_callback:
+        proc_callback(proc)
 
     output_file = ""
     import time

@@ -163,6 +163,7 @@ def encode(
     audio_tracks: Optional[list[int]] = None,
     subtitle_tracks: Optional[list[int]] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    proc_callback: Optional[Callable] = None,
 ) -> str:
     """Encode a video file using HandBrakeCLI.
 
@@ -173,6 +174,8 @@ def encode(
         audio_tracks: Optional list of audio track indices to include.
         subtitle_tracks: Optional list of subtitle track indices to include.
         progress_callback: Optional ``(percent, message)`` callback.
+        proc_callback: Optional callback receiving the Popen object
+            (for abort support).
 
     Returns:
         Path to the encoded output file.
@@ -203,6 +206,9 @@ def encode(
         raise HandBrakeNotFoundError(f"Could not execute HandBrakeCLI: {exc}") from exc
     except OSError as exc:
         raise HandBrakeError(f"Failed to start HandBrakeCLI: {exc}") from exc
+
+    if proc_callback:
+        proc_callback(proc)
 
     # Read stderr for progress (HandBrake writes progress to stderr)
     for line in proc.stderr:  # type: ignore[union-attr]

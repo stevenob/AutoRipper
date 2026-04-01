@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import queue
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -37,6 +38,8 @@ class RipTab(ttk.Frame):
         self.disc_info: DiscInfo | None = None
         self._check_vars: dict[int, tk.BooleanVar] = {}
         self._msg_queue: queue.Queue = queue.Queue()
+        self._proc: subprocess.Popen | None = None
+        self._aborted = False
 
         self._build_ui()
 
@@ -97,6 +100,16 @@ class RipTab(ttk.Frame):
             sel_frame, text="Rip Selected", command=self._on_rip, state=tk.DISABLED
         )
         self.rip_btn.pack(side=tk.RIGHT)
+
+        self.abort_btn = ttk.Button(
+            sel_frame, text="Abort", command=self._on_abort, state=tk.DISABLED
+        )
+        self.abort_btn.pack(side=tk.RIGHT, padx=(0, 5))
+
+        self.auto_eject_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            sel_frame, text="Eject disc after rip", variable=self.auto_eject_var
+        ).pack(side=tk.RIGHT, padx=(0, 15))
 
         # -- Progress section --
         prog_frame = ttk.LabelFrame(self, text="Progress")
@@ -215,6 +228,8 @@ class RipTab(ttk.Frame):
 
         self.scan_btn.configure(state=tk.DISABLED)
         self.rip_btn.configure(state=tk.DISABLED)
+        self.abort_btn.configure(state=tk.NORMAL)
+        self._aborted = False
         self.progress_bar.configure(mode="determinate")
         self.progress_var.set(0)
         self.progress_label.configure(text="Starting rip…")
@@ -227,10 +242,21 @@ class RipTab(ttk.Frame):
         ).start()
         self.after(100, self._poll_queue)
 
+    def _on_abort(self):
+        """Kill the running MakeMKV process."""
+        self._aborted = True
+        if self._proc and self._proc.poll() is None:
+            self._proc.kill()
+        self.abort_btn.configure(state=tk.DISABLED)
+        self.progress_label.configure(text="Aborting…")
+
     def _rip_worker(self, title_ids: list[int], output_dir: str):
         total = len(title_ids)
         ripped_files: list[str] = []
         for idx, tid in enumerate(title_ids, 1):
+            if self._aborted:
+                self._msg_queue.put(("rip_err", "Rip aborted by user"))
+                return
 
             def _progress_cb(percent, msg, _idx=idx, _total=total):
                 overall = int((((_idx - 1) / _total) + (max(percent, 0) / 100 / _total)) * 100)
@@ -240,14 +266,28 @@ class RipTab(ttk.Frame):
             def _log_cb(line):
                 self._msg_queue.put(("rip_log", line))
 
+            def _proc_cb(proc):
+                self._proc = proc
+
             try:
-                path = rip_title(tid, output_dir, progress_callback=_progress_cb, log_callback=_log_cb)
+                path = rip_title(
+                    tid, output_dir,
+                    progress_callback=_progress_cb,
+                    log_callback=_log_cb,
+                    proc_callback=_proc_cb,
+                )
                 ripped_files.append(path)
             except (RipError, MakeMKVError) as exc:
-                self._msg_queue.put(("rip_err", f"Failed to rip title {tid}:\n{exc}"))
+                if self._aborted:
+                    self._msg_queue.put(("rip_err", "Rip aborted by user"))
+                else:
+                    self._msg_queue.put(("rip_err", f"Failed to rip title {tid}:\n{exc}"))
                 return
             except Exception as exc:
-                self._msg_queue.put(("rip_err", f"Unexpected error ripping title {tid}:\n{exc}"))
+                if self._aborted:
+                    self._msg_queue.put(("rip_err", "Rip aborted by user"))
+                else:
+                    self._msg_queue.put(("rip_err", f"Unexpected error ripping title {tid}:\n{exc}"))
                 return
 
         self._msg_queue.put(("rip_done", ripped_files))
@@ -296,6 +336,7 @@ class RipTab(ttk.Frame):
                     self.progress_label.configure(text="Rip failed")
                     self.scan_btn.configure(state=tk.NORMAL)
                     self.rip_btn.configure(state=tk.NORMAL)
+                    self.abort_btn.configure(state=tk.DISABLED)
                     messagebox.showerror("Rip Error", str(payload))
 
                 elif msg_type == "rip_done":
@@ -304,8 +345,12 @@ class RipTab(ttk.Frame):
                     self.progress_label.configure(text="Rip complete")
                     self.scan_btn.configure(state=tk.NORMAL)
                     self.rip_btn.configure(state=tk.NORMAL)
+                    self.abort_btn.configure(state=tk.DISABLED)
                     self.app.set_status(f"Ripped {len(ripped)} title(s)")
-                    # Pass the last ripped file to the organize tab
+                    # Auto-eject disc
+                    if self.auto_eject_var.get():
+                        self._eject_disc()
+                    # Pass the last ripped file to the encode tab
                     if ripped:
                         disc_name = self.disc_info.name if self.disc_info else ""
                         self.app.on_rip_complete(ripped[-1], disc_name)
@@ -320,3 +365,11 @@ class RipTab(ttk.Frame):
         # Keep polling while buttons are disabled (operation in progress)
         if str(self.scan_btn.cget("state")) == "disabled":
             self.after(100, self._poll_queue)
+
+    def _eject_disc(self):
+        """Eject the disc drive using macOS drutil."""
+        try:
+            subprocess.run(["drutil", "eject"], capture_output=True, timeout=10)
+            self.app.set_status("Disc ejected")
+        except Exception:
+            pass  # non-critical, don't bother the user
