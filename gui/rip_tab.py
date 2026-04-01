@@ -73,7 +73,8 @@ class RipTab(ttk.Frame):
         self.scan_btn.pack(side=tk.LEFT)
 
         ttk.Label(btn_row, text="Min duration (s):").pack(side=tk.LEFT, padx=(15, 0))
-        self.min_duration_var = tk.IntVar(value=120)
+        config = load_config()
+        self.min_duration_var = tk.IntVar(value=config.get("min_duration", 120))
         self.min_duration_spin = ttk.Spinbox(
             btn_row, from_=0, to=9999, width=6,
             textvariable=self.min_duration_var
@@ -131,7 +132,7 @@ class RipTab(ttk.Frame):
         )
         self.abort_btn.pack(side=tk.RIGHT, padx=(0, 5))
 
-        self.auto_eject_var = tk.BooleanVar(value=True)
+        self.auto_eject_var = tk.BooleanVar(value=config.get("auto_eject", True))
         ttk.Checkbutton(
             sel_frame, text="Eject disc after rip", variable=self.auto_eject_var
         ).pack(side=tk.RIGHT, padx=(0, 15))

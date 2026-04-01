@@ -111,6 +111,48 @@ class AutoRipperApp(tk.Tk):
             side=tk.LEFT, fill=tk.X, expand=True
         )
 
+        # -- Preferences --
+        prefs_group = ttk.LabelFrame(frame, text="Preferences")
+        prefs_group.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        # Min duration
+        prow1 = ttk.Frame(prefs_group)
+        prow1.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(prow1, text="Min title duration (seconds):").pack(side=tk.LEFT, padx=(0, 5))
+        self.settings_min_dur_var = tk.IntVar(value=config.get("min_duration", 120))
+        ttk.Spinbox(prow1, from_=0, to=9999, width=6, textvariable=self.settings_min_dur_var).pack(
+            side=tk.LEFT
+        )
+
+        # Auto-eject
+        prow2 = ttk.Frame(prefs_group)
+        prow2.pack(fill=tk.X, padx=10, pady=5)
+        self.settings_auto_eject_var = tk.BooleanVar(value=config.get("auto_eject", True))
+        ttk.Checkbutton(prow2, text="Auto-eject disc after rip", variable=self.settings_auto_eject_var).pack(
+            side=tk.LEFT
+        )
+
+        # Default preset
+        prow3 = ttk.Frame(prefs_group)
+        prow3.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(prow3, text="Default HandBrake preset:").pack(side=tk.LEFT, padx=(0, 5))
+        self.settings_preset_var = tk.StringVar(value=config.get("default_preset", "HQ 1080p30 Surround"))
+        ttk.Entry(prow3, textvariable=self.settings_preset_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+
+        # Default media type
+        prow4 = ttk.Frame(prefs_group)
+        prow4.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(prow4, text="Default media type:").pack(side=tk.LEFT, padx=(0, 5))
+        self.settings_media_type_var = tk.StringVar(value=config.get("default_media_type", "movie"))
+        ttk.Radiobutton(prow4, text="Movie", variable=self.settings_media_type_var, value="movie").pack(
+            side=tk.LEFT, padx=(0, 10)
+        )
+        ttk.Radiobutton(prow4, text="TV Show", variable=self.settings_media_type_var, value="tvshow").pack(
+            side=tk.LEFT
+        )
+
         # Save button
         btn_row = ttk.Frame(settings_group)
         btn_row.pack(fill=tk.X, padx=10, pady=(5, 10))
@@ -131,6 +173,10 @@ class AutoRipperApp(tk.Tk):
             "makemkv_path": self.settings_mkv_var.get().strip(),
             "handbrake_path": self.settings_hb_var.get().strip(),
             "tmm_path": self.settings_tmm_var.get().strip(),
+            "min_duration": self.settings_min_dur_var.get(),
+            "auto_eject": self.settings_auto_eject_var.get(),
+            "default_preset": self.settings_preset_var.get().strip(),
+            "default_media_type": self.settings_media_type_var.get(),
         }
         try:
             save_config(config)

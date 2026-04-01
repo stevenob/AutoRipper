@@ -37,7 +37,9 @@ class TmmTab(ttk.Frame):
         type_row = ttk.Frame(type_frame)
         type_row.pack(fill=tk.X, padx=10, pady=5)
 
-        self.media_type_var = tk.StringVar(value="movie")
+        from config import load_config as _load_cfg
+        _cfg = _load_cfg()
+        self.media_type_var = tk.StringVar(value=_cfg.get("default_media_type", "movie"))
         ttk.Radiobutton(
             type_row, text="Movie", variable=self.media_type_var, value="movie",
         ).pack(side=tk.LEFT, padx=(0, 10))

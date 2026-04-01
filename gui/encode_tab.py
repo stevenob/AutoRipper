@@ -58,7 +58,9 @@ class EncodeTab(ttk.Frame):
         preset_row = ttk.Frame(preset_frame)
         preset_row.pack(fill=tk.X, padx=10, pady=5)
 
-        self.preset_var = tk.StringVar(value="HQ 1080p30 Surround")
+        from config import load_config as _load_cfg
+        _cfg = _load_cfg()
+        self.preset_var = tk.StringVar(value=_cfg.get("default_preset", "HQ 1080p30 Surround"))
         self.preset_combo = ttk.Combobox(
             preset_row, textvariable=self.preset_var, state="readonly", width=40
         )
