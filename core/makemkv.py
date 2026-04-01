@@ -54,7 +54,7 @@ def _parse_size_to_bytes(size_str: str) -> int:
     return int(value * multipliers[unit])
 
 
-def scan_disc() -> DiscInfo:
+def scan_disc(log_callback: Optional[Callable[[str], None]] = None) -> DiscInfo:
     """Scan the disc in the default drive and return parsed disc info.
 
     Runs ``makemkvcon -r info disc:0`` and parses the
@@ -64,30 +64,35 @@ def scan_disc() -> DiscInfo:
     cmd = [mkv_path, "-r", "info", "disc:0"]
 
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=600,
         )
-    except subprocess.TimeoutExpired as exc:
-        raise MakeMKVError("Disc scan timed out after 10 minutes") from exc
     except FileNotFoundError as exc:
         raise MakeMKVNotFoundError(f"Could not execute makemkvcon: {exc}") from exc
     except OSError as exc:
         raise MakeMKVError(f"Failed to run makemkvcon: {exc}") from exc
 
-    output = result.stdout + result.stderr
+    output_lines: list[str] = []
+    for line in proc.stdout:  # type: ignore[union-attr]
+        line = line.rstrip()
+        output_lines.append(line)
+        if log_callback:
+            log_callback(line)
+
+    proc.wait()
+    output = "\n".join(output_lines)
 
     if "no disc" in output.lower() or "INSERT DISC" in output:
         raise DiscNotFoundError("No disc found in the drive")
 
     disc_name = ""
     disc_type = "dvd"
-    # title_id -> {attr_code -> value}
     titles_data: dict[int, dict[int, str]] = {}
 
-    for line in output.splitlines():
+    for line in output_lines:
         # Disc-level info: CINFO:attr_id,attr_code,"value"
         cinfo_match = re.match(r'CINFO:(\d+),\d+,"(.+)"', line)
         if cinfo_match:
@@ -140,9 +145,9 @@ def scan_disc() -> DiscInfo:
             )
         )
 
-    if not titles and result.returncode != 0:
+    if not titles and proc.returncode != 0:
         raise MakeMKVError(
-            f"makemkvcon exited with code {result.returncode} and produced no titles"
+            f"makemkvcon exited with code {proc.returncode} and produced no titles"
         )
 
     return DiscInfo(name=disc_name, type=disc_type, titles=titles)

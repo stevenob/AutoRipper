@@ -201,12 +201,19 @@ class RipTab(ttk.Frame):
         self.progress_bar.configure(mode="indeterminate")
         self.progress_bar.start(15)
 
+        self.log_text.configure(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.configure(state=tk.DISABLED)
+
         threading.Thread(target=self._scan_worker, daemon=True).start()
         self.after(100, self._poll_queue)
 
     def _scan_worker(self):
+        def _log_cb(line):
+            self._msg_queue.put(("scan_log", line))
+
         try:
-            disc = scan_disc()
+            disc = scan_disc(log_callback=_log_cb)
             # Auto-lookup TMDb to get the proper title
             tmdb_title = ""
             if disc.name:
@@ -316,7 +323,13 @@ class RipTab(ttk.Frame):
             while True:
                 msg_type, payload = self._msg_queue.get_nowait()
 
-                if msg_type == "scan_ok":
+                if msg_type == "scan_log":
+                    self.log_text.configure(state=tk.NORMAL)
+                    self.log_text.insert(tk.END, payload + "\n")
+                    self.log_text.see(tk.END)
+                    self.log_text.configure(state=tk.DISABLED)
+
+                elif msg_type == "scan_ok":
                     disc, tmdb_title = payload
                     self.disc_info = disc
                     self._tmdb_title = tmdb_title
