@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from config import load_config, save_config
+from core.organizer import build_movie_path, organize_file, clean_filename
+from core.metadata import search_media
 from gui.rip_tab import RipTab
 from gui.encode_tab import EncodeTab
 from gui.metadata_tab import MetadataTab
+from gui.tmm_tab import TmmTab
 
 
 class AutoRipperApp(tk.Tk):
@@ -31,11 +35,13 @@ class AutoRipperApp(tk.Tk):
         self.rip_tab = RipTab(self.notebook, app=self)
         self.encode_tab = EncodeTab(self.notebook, app=self)
         self.metadata_tab = MetadataTab(self.notebook, app=self)
+        self.tmm_tab = TmmTab(self.notebook, app=self)
         self.settings_frame = self._build_settings_tab()
 
         self.notebook.add(self.rip_tab, text="Rip")
         self.notebook.add(self.encode_tab, text="Encode")
         self.notebook.add(self.metadata_tab, text="Organize")
+        self.notebook.add(self.tmm_tab, text="tinyMediaManager")
         self.notebook.add(self.settings_frame, text="Settings")
 
         # Status bar
@@ -91,6 +97,20 @@ class AutoRipperApp(tk.Tk):
             side=tk.LEFT, fill=tk.X, expand=True
         )
 
+        # tinyMediaManager path
+        row5 = ttk.Frame(settings_group)
+        row5.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(row5, text="tMM path:").pack(side=tk.LEFT, padx=(0, 5))
+        self.settings_tmm_var = tk.StringVar(
+            value=config.get(
+                "tmm_path",
+                "/Applications/tinyMediaManager.app/Contents/Resources/Java",
+            )
+        )
+        ttk.Entry(row5, textvariable=self.settings_tmm_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+
         # Save button
         btn_row = ttk.Frame(settings_group)
         btn_row.pack(fill=tk.X, padx=10, pady=(5, 10))
@@ -110,6 +130,7 @@ class AutoRipperApp(tk.Tk):
             "tmdb_api_key": self.settings_tmdb_var.get().strip(),
             "makemkv_path": self.settings_mkv_var.get().strip(),
             "handbrake_path": self.settings_hb_var.get().strip(),
+            "tmm_path": self.settings_tmm_var.get().strip(),
         }
         try:
             save_config(config)
@@ -125,9 +146,43 @@ class AutoRipperApp(tk.Tk):
         self.notebook.select(self.encode_tab)
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):
-        """Called by EncodeTab when encoding finishes — forwards file to Organize."""
-        self.metadata_tab.set_file(file_path, disc_name)
-        self.notebook.select(self.metadata_tab)
+        """Called by EncodeTab when encoding finishes — auto-organize and go to tMM."""
+        config = load_config()
+        output_dir = config.get("output_dir", "")
+
+        if disc_name and output_dir:
+            # Look up TMDb for proper title and year
+            try:
+                results = search_media(disc_name)
+                if results:
+                    title = results[0].title
+                    year = results[0].year
+                    dest = build_movie_path(output_dir, title, year)
+                else:
+                    dest = build_movie_path(output_dir, clean_filename(disc_name))
+            except Exception:
+                dest = build_movie_path(output_dir, clean_filename(disc_name))
+
+            try:
+                final_path = organize_file(file_path, dest)
+                self.set_status(f"Organized: {os.path.basename(final_path)}")
+            except Exception as exc:
+                self.set_status(f"Auto-organize failed: {exc}")
+                # Fall back to manual organize
+                self.metadata_tab.set_file(file_path, disc_name)
+                self.notebook.select(self.metadata_tab)
+                return
+        else:
+            # No disc name or output dir — fall back to manual organize
+            self.metadata_tab.set_file(file_path, disc_name)
+            self.notebook.select(self.metadata_tab)
+            return
+
+        self.notebook.select(self.tmm_tab)
+
+    def on_organize_complete(self):
+        """Called after organizing finishes — switches to the tMM tab."""
+        self.notebook.select(self.tmm_tab)
 
     def set_status(self, text: str):
         """Update the status bar text."""
