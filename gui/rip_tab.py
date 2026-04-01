@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import queue
 import subprocess
 import threading
@@ -225,6 +226,10 @@ class RipTab(ttk.Frame):
         if not output_dir:
             messagebox.showerror("Error", "Output directory not configured. Check Settings tab.")
             return
+
+        # Create a subfolder named after the disc
+        if self.disc_info and self.disc_info.name:
+            output_dir = os.path.join(output_dir, self.disc_info.name)
 
         self.scan_btn.configure(state=tk.DISABLED)
         self.rip_btn.configure(state=tk.DISABLED)
