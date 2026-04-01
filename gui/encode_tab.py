@@ -67,6 +67,23 @@ class EncodeTab(ttk.Frame):
         )
         self.preset_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # Quick H.265 preset buttons
+        quick_frame = ttk.Frame(preset_frame)
+        quick_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        ttk.Label(quick_frame, text="H.265 Quick:").pack(side=tk.LEFT, padx=(0, 5))
+        for label, preset in [
+            ("480p", "H.265 MKV 480p30"),
+            ("720p", "H.265 MKV 720p30"),
+            ("1080p", "H.265 MKV 1080p30"),
+            ("4K", "H.265 MKV 2160p60 4K"),
+            ("1080p HW ⚡", "H.265 Apple VideoToolbox 1080p"),
+            ("4K HW ⚡", "H.265 Apple VideoToolbox 2160p 4K"),
+        ]:
+            ttk.Button(
+                quick_frame, text=label, width=10,
+                command=lambda p=preset: self.preset_var.set(p),
+            ).pack(side=tk.LEFT, padx=2)
+
         # -- Audio tracks section --
         self.audio_frame = ttk.LabelFrame(self, text="Audio Tracks")
         self.audio_frame.pack(fill=tk.X, padx=10, pady=5)
