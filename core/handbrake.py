@@ -163,6 +163,7 @@ def encode(
     audio_tracks: Optional[list[int]] = None,
     subtitle_tracks: Optional[list[int]] = None,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    log_callback: Optional[Callable[[str], None]] = None,
     proc_callback: Optional[Callable] = None,
 ) -> str:
     """Encode a video file using HandBrakeCLI.
@@ -174,6 +175,7 @@ def encode(
         audio_tracks: Optional list of audio track indices to include.
         subtitle_tracks: Optional list of subtitle track indices to include.
         progress_callback: Optional ``(percent, message)`` callback.
+        log_callback: Optional callback receiving each raw output line.
         proc_callback: Optional callback receiving the Popen object
             (for abort support).
 
@@ -199,7 +201,7 @@ def encode(
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
         )
     except FileNotFoundError as exc:
@@ -210,16 +212,22 @@ def encode(
     if proc_callback:
         proc_callback(proc)
 
-    # Read stderr for progress (HandBrake writes progress to stderr)
-    for line in proc.stderr:  # type: ignore[union-attr]
+    # HandBrake writes both info and progress to stderr; merged via STDOUT redirect
+    for line in proc.stdout:  # type: ignore[union-attr]
         line = line.rstrip()
+        if not line:
+            continue
+
+        if log_callback:
+            log_callback(line)
+
         # Progress line: Encoding: task 1 of 1, 45.23 % (30.15 fps, avg 28.44 fps, ETA 00h12m30s)
         m = re.search(r"(\d+\.\d+)\s*%", line)
         if m and progress_callback:
             percent = int(float(m.group(1)))
             # Extract ETA if present
             eta_m = re.search(r"ETA\s+(\S+)", line)
-            eta = f", ETA {eta_m.group(1)}" if eta_m else ""
+            eta = f" — ETA {eta_m.group(1)}" if eta_m else ""
             progress_callback(min(percent, 100), f"Encoding: {percent}%{eta}")
 
     proc.wait()

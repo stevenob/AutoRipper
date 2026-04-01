@@ -122,6 +122,16 @@ class EncodeTab(ttk.Frame):
         self.progress_label = ttk.Label(action_frame, text="Idle")
         self.progress_label.pack(padx=10, pady=(0, 5))
 
+        # -- Log output --
+        log_frame = ttk.LabelFrame(self, text="Log")
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        self.log_text = tk.Text(log_frame, height=6, wrap=tk.WORD, state=tk.DISABLED)
+        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+
     # --------------------------------------------------------- file handling
     def _browse_file(self):
         path = filedialog.askopenfilename(
@@ -249,6 +259,9 @@ class EncodeTab(ttk.Frame):
         self.progress_bar.configure(mode="determinate")
         self.progress_var.set(0)
         self.progress_label.configure(text="Starting encode…")
+        self.log_text.configure(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.configure(state=tk.DISABLED)
 
         threading.Thread(
             target=self._encode_worker,
@@ -276,6 +289,9 @@ class EncodeTab(ttk.Frame):
         def _progress_cb(percent: int, msg: str):
             self._msg_queue.put(("encode_progress", (percent, msg)))
 
+        def _log_cb(line: str):
+            self._msg_queue.put(("encode_log", line))
+
         def _proc_cb(proc):
             self._proc = proc
 
@@ -287,6 +303,7 @@ class EncodeTab(ttk.Frame):
                 audio_tracks=audio or None,
                 subtitle_tracks=subtitles or None,
                 progress_callback=_progress_cb,
+                log_callback=_log_cb,
                 proc_callback=_proc_cb,
             )
             self._msg_queue.put(("encode_done", result_path))
@@ -338,6 +355,12 @@ class EncodeTab(ttk.Frame):
                     percent, label = payload
                     self.progress_var.set(percent)
                     self.progress_label.configure(text=label)
+
+                elif msg_type == "encode_log":
+                    self.log_text.configure(state=tk.NORMAL)
+                    self.log_text.insert(tk.END, payload + "\n")
+                    self.log_text.see(tk.END)
+                    self.log_text.configure(state=tk.DISABLED)
 
                 elif msg_type == "encode_err":
                     self.progress_label.configure(text="Encode failed")
