@@ -118,6 +118,15 @@ class AutoRipperApp(ctk.CTk):
             side="left", fill="x", expand=True
         )
 
+        # Discord webhook URL
+        row5 = ctk.CTkFrame(settings_group, fg_color="transparent")
+        row5.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(row5, text="Discord webhook:").pack(side="left", padx=(0, 5))
+        self.settings_discord_var = tk.StringVar(value=config.get("discord_webhook", ""))
+        ctk.CTkEntry(row5, textvariable=self.settings_discord_var).pack(
+            side="left", fill="x", expand=True
+        )
+
         # -- Preferences (auto-saved) --
         ctk.CTkLabel(frame, text="Preferences (auto-saved)", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=10, pady=(10, 0)
@@ -181,6 +190,7 @@ class AutoRipperApp(ctk.CTk):
             "tmdb_api_key": self.settings_tmdb_var.get().strip(),
             "makemkv_path": self.settings_mkv_var.get().strip(),
             "handbrake_path": self.settings_hb_var.get().strip(),
+            "discord_webhook": self.settings_discord_var.get().strip(),
             "min_duration": self.settings_min_dur_var.get(),
             "auto_eject": self.settings_auto_eject_var.get(),
             "default_preset": self.settings_preset_var.get().strip(),

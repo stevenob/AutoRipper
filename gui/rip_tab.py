@@ -480,6 +480,8 @@ class RipTab(ctk.CTkFrame):
                     self.progress_label.configure(text="Scan complete")
                     self.scan_btn.configure(state="normal")
                     self.app.set_status(f"Scanned: {display_name}")
+                    from core.discord_notify import notify_info
+                    notify_info(f"🔍 Scanned: {display_name} ({disc.type.upper()}, {len(disc.titles)} titles)")
 
                 elif msg_type == "scan_err":
                     self.progress_bar.stop()
@@ -519,6 +521,9 @@ class RipTab(ctk.CTkFrame):
                     self.full_auto_btn.configure(state="normal")
                     self.abort_btn.configure(state="disabled")
                     self.app.set_status(f"Ripped {len(ripped)} title(s)")
+                    disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
+                    from core.discord_notify import notify_progress
+                    notify_progress(f"🎬 Ripped: {disc_name}")
                     # Auto-eject disc
                     if self.auto_eject_var.get():
                         self._eject_disc()

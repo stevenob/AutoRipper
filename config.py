@@ -15,6 +15,7 @@ DEFAULTS = {
     "auto_eject": True,
     "default_preset": "HQ 1080p30 Surround",
     "default_media_type": "movie",
+    "discord_webhook": "",
 }
 
 

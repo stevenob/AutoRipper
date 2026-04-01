@@ -101,6 +101,7 @@ class JobQueue:
         from core.organizer import build_movie_path, organize_file, clean_filename
         from core.metadata import search_media
         from core.artwork import scrape_and_save
+        from core.discord_notify import notify_info, notify_progress, notify_success, notify_error
 
         config = load_config()
 
@@ -109,6 +110,7 @@ class JobQueue:
         job.progress = 0
         job.progress_text = "Encoding..."
         self._notify()
+        notify_info(f"🎬 Encoding: {job.disc_name}")
 
         try:
             base, _ext = os.path.splitext(job.ripped_file)
@@ -135,6 +137,7 @@ class JobQueue:
             job.error = f"Encode failed: {exc}"
             job.progress_text = "Encode failed"
             self._notify()
+            notify_error(f"🎬 {job.disc_name}\n❌ {job.error}")
             return
 
         # Step 2: Organize
@@ -142,6 +145,7 @@ class JobQueue:
         job.progress = 0
         job.progress_text = "Organizing..."
         self._notify()
+        notify_progress(f"📂 Organizing: {job.disc_name}")
 
         try:
             output_dir = config.get("output_dir", "")
@@ -167,6 +171,7 @@ class JobQueue:
             job.error = f"Organize failed: {exc}"
             job.progress_text = "Organize failed"
             self._notify()
+            notify_error(f"🎬 {job.disc_name}\n❌ {job.error}")
             return
 
         # Step 3: Scrape metadata & artwork (non-critical)
@@ -185,3 +190,4 @@ class JobQueue:
         job.progress = 100
         job.progress_text = "Complete"
         self._notify()
+        notify_success(f"🎬 {job.disc_name}\n📂 {job.organized_file}")
