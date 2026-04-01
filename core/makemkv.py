@@ -69,6 +69,7 @@ def scan_disc(log_callback: Optional[Callable[[str], None]] = None) -> DiscInfo:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
     except FileNotFoundError as exc:
         raise MakeMKVNotFoundError(f"Could not execute makemkvcon: {exc}") from exc
@@ -76,7 +77,12 @@ def scan_disc(log_callback: Optional[Callable[[str], None]] = None) -> DiscInfo:
         raise MakeMKVError(f"Failed to run makemkvcon: {exc}") from exc
 
     output_lines: list[str] = []
-    for line in proc.stdout:  # type: ignore[union-attr]
+    while True:
+        line = proc.stdout.readline()  # type: ignore[union-attr]
+        if not line and proc.poll() is not None:
+            break
+        if not line:
+            continue
         line = line.rstrip()
         output_lines.append(line)
         if log_callback:
@@ -185,6 +191,7 @@ def rip_title(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
         )
     except FileNotFoundError as exc:
         raise MakeMKVNotFoundError(f"Could not execute makemkvcon: {exc}") from exc
@@ -198,7 +205,12 @@ def rip_title(
     import time
     start_time = time.monotonic()
 
-    for line in proc.stdout:  # type: ignore[union-attr]
+    while True:
+        line = proc.stdout.readline()  # type: ignore[union-attr]
+        if not line and proc.poll() is not None:
+            break
+        if not line:
+            continue
         line = line.rstrip()
 
         if log_callback:
