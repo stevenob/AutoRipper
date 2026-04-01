@@ -32,6 +32,19 @@ def _human_size(size_bytes: int) -> str:
     return f"{size_bytes:.1f} PB"
 
 
+def _duration_to_secs(duration: str) -> int:
+    """Convert a duration string like '1:52:30' to total seconds."""
+    parts = duration.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        elif len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        return int(parts[0])
+    except ValueError:
+        return 0
+
+
 class RipTab(ttk.Frame):
     """Tab for scanning a disc and ripping selected titles."""
 
@@ -58,6 +71,14 @@ class RipTab(ttk.Frame):
 
         self.scan_btn = ttk.Button(btn_row, text="Scan Disc", command=self._on_scan)
         self.scan_btn.pack(side=tk.LEFT)
+
+        ttk.Label(btn_row, text="Min duration (s):").pack(side=tk.LEFT, padx=(15, 0))
+        self.min_duration_var = tk.IntVar(value=120)
+        self.min_duration_spin = ttk.Spinbox(
+            btn_row, from_=0, to=9999, width=6,
+            textvariable=self.min_duration_var
+        )
+        self.min_duration_spin.pack(side=tk.LEFT, padx=(5, 0))
 
         self.disc_label = ttk.Label(btn_row, text="No disc scanned")
         self.disc_label.pack(side=tk.LEFT, padx=(15, 0))
@@ -173,13 +194,19 @@ class RipTab(ttk.Frame):
         self._check_vars.clear()
         if not self.disc_info:
             return
+
+        min_secs = self.min_duration_var.get()
+
+        # Filter titles by minimum duration
+        filtered = [t for t in self.disc_info.titles if _duration_to_secs(t.duration) >= min_secs]
+
         # Find the largest title to auto-select it
         largest_id = max(
-            (t for t in self.disc_info.titles),
+            filtered,
             key=lambda t: t.size_bytes,
             default=None,
         )
-        for t in self.disc_info.titles:
+        for t in filtered:
             selected = largest_id is not None and t.id == largest_id.id
             var = tk.BooleanVar(value=selected)
             self._check_vars[t.id] = var
