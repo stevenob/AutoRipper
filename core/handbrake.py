@@ -212,23 +212,34 @@ def encode(
     if proc_callback:
         proc_callback(proc)
 
-    # HandBrake writes both info and progress to stderr; merged via STDOUT redirect
-    for line in proc.stdout:  # type: ignore[union-attr]
-        line = line.rstrip()
-        if not line:
+    # HandBrake uses \r for progress updates — read char by char to catch them
+    buf = []
+    while True:
+        ch = proc.stdout.read(1)  # type: ignore[union-attr]
+        if not ch:
+            if proc.poll() is not None:
+                break
             continue
+        if ch in ("\r", "\n"):
+            line = "".join(buf).strip()
+            buf.clear()
+            if not line:
+                continue
 
-        if log_callback:
-            log_callback(line)
+            if log_callback and not line.startswith("Encoding: task"):
+                log_callback(line)
 
-        # Progress line: Encoding: task 1 of 1, 45.23 % (30.15 fps, avg 28.44 fps, ETA 00h12m30s)
-        m = re.search(r"(\d+\.\d+)\s*%", line)
-        if m and progress_callback:
-            percent = int(float(m.group(1)))
-            # Extract ETA if present
-            eta_m = re.search(r"ETA\s+(\S+)", line)
-            eta = f" — ETA {eta_m.group(1)}" if eta_m else ""
-            progress_callback(min(percent, 100), f"Encoding: {percent}%{eta}")
+            # Progress line: Encoding: task 1 of 1, 45.23 % (30.15 fps, avg 28.44 fps, ETA 00h12m30s)
+            m = re.search(r"(\d+\.\d+)\s*%", line)
+            if m and progress_callback:
+                percent = int(float(m.group(1)))
+                eta_m = re.search(r"ETA\s+(\S+)", line)
+                eta = f" — ETA {eta_m.group(1)}" if eta_m else ""
+                fps_m = re.search(r"(\d+\.\d+)\s*fps", line)
+                fps = f" ({fps_m.group(1)} fps)" if fps_m else ""
+                progress_callback(min(percent, 100), f"Encoding: {percent}%{eta}{fps}")
+        else:
+            buf.append(ch)
 
     proc.wait()
 

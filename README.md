@@ -1,22 +1,37 @@
 # AutoRipper 🎬
 
-A Python GUI app that wraps [MakeMKV](https://www.makemkv.com/) to rip DVDs/Blu-rays, auto-detect titles via TMDb, and organize files into a clean folder structure.
+A Python GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip → Encode → Organize → Scrape metadata** — all hands-free with one click.
 
 ## Features
 
-- **Scan & Rip** — Detect discs, browse titles (duration, size, chapters), and rip selected tracks with a progress bar
-- **Auto-detect metadata** — Search [TMDb](https://www.themoviedb.org/) for movie/TV show info (title, year, season, episode)
+- **⚡ Full Auto Mode** — One click to rip, encode, organize, and scrape metadata automatically
+- **Scan & Rip** — Detect discs, browse titles with min duration filter, file-size progress with ETA
+- **HandBrake Encoding** — Compress with preset selection, audio/subtitle track chooser, real-time progress
+- **Auto-detect metadata** — [TMDb](https://www.themoviedb.org/) lookup for movie/TV show titles and years
 - **Clean & Organize** — Rename and sort files into structured folders:
   - Movies: `Title (Year)/Title (Year).mkv`
   - TV Shows: `Show/Season 01/Show - S01E01 - Episode Name.mkv`
-- **Configurable** — Set output directory, TMDb API key, and MakeMKV path via the Settings tab
+- **tinyMediaManager** — Optional post-organize scrape for artwork, NFO files, and subtitles
+- **Auto-eject** — Eject disc after ripping (configurable)
+- **Abort** — Cancel any running operation at any time
+- **Persistent Preferences** — Settings auto-save between sessions
+- **Streaming Logs** — Real-time output from MakeMKV, HandBrake, and tMM
+
+## Pipeline Flow
+
+```
+Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
+                      └── ⚡ Full Auto runs all steps hands-free
+```
 
 ## Requirements
 
 - **macOS** (tested on Apple Silicon)
-- **Python 3.10+**
+- **Python 3.9+** (Python 3.13 via Homebrew recommended)
 - **[MakeMKV](https://www.makemkv.com/)** installed at `/Applications/MakeMKV.app`
+- **[HandBrake CLI](https://handbrake.fr/)** — install via `brew install handbrake`
 - **TMDb API key** (free) — [get one here](https://www.themoviedb.org/settings/api)
+- **[tinyMediaManager](https://www.tinymediamanager.org/)** (optional) — for artwork and NFO scraping
 
 ## Installation
 
@@ -27,54 +42,69 @@ cd AutoRipper
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Install HandBrake CLI (if not already installed)
+brew install handbrake
 ```
 
 ## Usage
 
 ```bash
-python main.py
+python3.13 main.py
 ```
 
 ### First-time setup
 
 1. Open the **Settings** tab
 2. Set your **TMDb API key**
-3. Verify the **MakeMKV path** (default: `/Applications/MakeMKV.app/Contents/MacOS/makemkvcon`)
+3. Verify tool paths: MakeMKV, HandBrake, tinyMediaManager
 4. Set your **Output directory** (default: `~/Desktop/Ripped`)
 5. Click **Save Settings**
+6. Adjust **Preferences** (auto-saved): min duration, auto-eject, HandBrake preset, media type
 
-### Ripping a disc
+### Full Auto (recommended)
 
 1. Insert a DVD or Blu-ray
-2. Go to the **Rip** tab and click **Scan Disc**
-3. Select the titles you want to rip
-4. Click **Rip Selected** and wait for completion
+2. Click **Scan Disc**
+3. Click **⚡ Full Auto**
+4. Walk away — AutoRipper handles everything:
+   - Rips the largest title
+   - Encodes with your default HandBrake preset
+   - Organizes into `Title (Year)/Title (Year).mkv`
+   - Runs tinyMediaManager to scrape metadata
+   - Ejects the disc when done
 
-### Organizing files
+### Manual Mode
 
-1. After ripping, AutoRipper switches to the **Organize** tab
-2. Click **Search TMDb** to auto-detect the title
-3. Select the correct match or manually enter the title
-4. Choose **Movie** or **TV Show** and fill in details
-5. Click **Preview** to verify the destination path
-6. Click **Organize** to move the file
+Use **Rip Selected** instead to control each step individually. Each tab (Rip, Encode, Organize, tMM) can be used independently.
+
+## Running Tests
+
+```bash
+python3.13 -m unittest discover -s tests -v
+```
 
 ## Project Structure
 
 ```
 AutoRipper/
 ├── main.py              # Entry point
-├── config.py            # Settings (output dir, API key, MakeMKV path)
+├── config.py            # Settings & preferences (JSON persistence)
 ├── requirements.txt     # Python dependencies
 ├── core/
 │   ├── disc.py          # Disc/title data models
 │   ├── makemkv.py       # MakeMKV CLI wrapper
+│   ├── handbrake.py     # HandBrake CLI wrapper
 │   ├── metadata.py      # TMDb API integration
-│   └── organizer.py     # File renaming & folder organization
-└── gui/
-    ├── app.py           # Main application window
-    ├── rip_tab.py       # Disc scanning & ripping UI
-    └── metadata_tab.py  # Metadata lookup & file organization UI
+│   ├── organizer.py     # File renaming & folder organization
+│   └── tmm.py           # tinyMediaManager CLI wrapper
+├── gui/
+│   ├── app.py           # Main application window & settings
+│   ├── rip_tab.py       # Disc scanning & ripping UI
+│   ├── encode_tab.py    # HandBrake encoding UI
+│   ├── metadata_tab.py  # Manual metadata & organize UI
+│   └── tmm_tab.py       # tinyMediaManager UI
+└── tests/               # Unit tests (41 tests, all mocked)
 ```
 
 ## License

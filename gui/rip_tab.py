@@ -490,11 +490,12 @@ class RipTab(ttk.Frame):
                     if self.auto_eject_var.get():
                         self._eject_disc()
                     # Pass the last ripped file to the encode tab
+                    auto = self._full_auto
+                    self._full_auto = False
                     if ripped:
                         disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
-                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=self._full_auto)
-                    self._full_auto = False
-                    if not ripped or not self._full_auto:
+                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=auto)
+                    if not auto:
                         messagebox.showinfo(
                             "Rip Complete",
                             f"Successfully ripped {len(ripped)} title(s).",
