@@ -303,6 +303,7 @@ class RipTab(ttk.Frame):
         self.progress_label.configure(text="Aborting…")
 
     def _rip_worker(self, title_ids: list[int], output_dir: str):
+        import time
         total = len(title_ids)
         ripped_files: list[str] = []
         for idx, tid in enumerate(title_ids, 1):
@@ -310,10 +311,60 @@ class RipTab(ttk.Frame):
                 self._msg_queue.put(("rip_err", "Rip aborted by user"))
                 return
 
-            def _progress_cb(percent, msg, _idx=idx, _total=total):
-                overall = int((((_idx - 1) / _total) + (max(percent, 0) / 100 / _total)) * 100)
-                label = f"[{_idx}/{_total}] {msg}"
-                self._msg_queue.put(("rip_progress", (overall, label)))
+            # Get expected size for this title
+            expected_bytes = 0
+            if self.disc_info:
+                for t in self.disc_info.titles:
+                    if t.id == tid:
+                        expected_bytes = t.size_bytes
+                        break
+
+            # Monitor file size in a separate thread for progress
+            stop_monitor = threading.Event()
+
+            def _size_monitor(_idx=idx, _total=total):
+                start_time = time.monotonic()
+                while not stop_monitor.is_set():
+                    # Find the newest .mkv file being written
+                    try:
+                        mkv_files = [
+                            os.path.join(output_dir, f)
+                            for f in os.listdir(output_dir) if f.endswith(".mkv")
+                        ]
+                    except FileNotFoundError:
+                        stop_monitor.wait(1)
+                        continue
+                    if not mkv_files:
+                        stop_monitor.wait(1)
+                        continue
+
+                    newest = max(mkv_files, key=lambda f: os.path.getmtime(f))
+                    try:
+                        current_size = os.path.getsize(newest)
+                    except OSError:
+                        stop_monitor.wait(1)
+                        continue
+
+                    if expected_bytes > 0:
+                        percent = min(int(current_size / expected_bytes * 100), 99)
+                        elapsed = time.monotonic() - start_time
+                        if percent > 0:
+                            remaining = elapsed / (percent / 100) - elapsed
+                            mins, secs = divmod(int(remaining), 60)
+                            hrs, mins = divmod(mins, 60)
+                            eta = f"ETA {hrs}h{mins:02d}m" if hrs else f"ETA {mins}m{secs:02d}s"
+                        else:
+                            eta = "ETA calculating..."
+                        written = _human_size(current_size)
+                        total_str = _human_size(expected_bytes)
+                        overall = int((((_idx - 1) / _total) + (percent / 100 / _total)) * 100)
+                        label = f"[{_idx}/{_total}] {written} / {total_str} ({percent}%) — {eta}"
+                        self._msg_queue.put(("rip_progress", (overall, label)))
+
+                    stop_monitor.wait(2)
+
+            monitor_thread = threading.Thread(target=_size_monitor, daemon=True)
+            monitor_thread.start()
 
             # Skip scan/structural lines, only show rip progress and messages
             _SCAN_PREFIXES = ("DRV:", "TINFO:", "CINFO:", "SINFO:", "PRGV:", "PRGC:")
@@ -321,7 +372,6 @@ class RipTab(ttk.Frame):
             def _log_cb(line):
                 if line.startswith(_SCAN_PREFIXES):
                     return
-                # Skip title skip/add messages from re-scan
                 if line.startswith("MSG:3025") or line.startswith("MSG:3307"):
                     return
                 self._msg_queue.put(("rip_log", line))
@@ -332,18 +382,20 @@ class RipTab(ttk.Frame):
             try:
                 path = rip_title(
                     tid, output_dir,
-                    progress_callback=_progress_cb,
                     log_callback=_log_cb,
                     proc_callback=_proc_cb,
                 )
+                stop_monitor.set()
                 ripped_files.append(path)
             except (RipError, MakeMKVError) as exc:
+                stop_monitor.set()
                 if self._aborted:
                     self._msg_queue.put(("rip_err", "Rip aborted by user"))
                 else:
                     self._msg_queue.put(("rip_err", f"Failed to rip title {tid}:\n{exc}"))
                 return
             except Exception as exc:
+                stop_monitor.set()
                 if self._aborted:
                     self._msg_queue.put(("rip_err", "Rip aborted by user"))
                 else:
