@@ -198,9 +198,9 @@ class AutoRipperApp(tk.Tk):
             pass
 
     # --------------------------------------------------------- inter-tab API
-    def on_rip_complete(self, file_path: str, disc_name: str = ""):
+    def on_rip_complete(self, file_path: str, disc_name: str = "", auto_start: bool = False):
         """Called by RipTab when a rip finishes — forwards file to the Encode tab."""
-        self.encode_tab.set_file(file_path, disc_name, auto_start=True)
+        self.encode_tab.set_file(file_path, disc_name, auto_start=auto_start)
         self.notebook.select(self.encode_tab)
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):

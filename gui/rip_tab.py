@@ -57,6 +57,7 @@ class RipTab(ttk.Frame):
         self._proc: subprocess.Popen | None = None
         self._aborted = False
         self._tmdb_title: str = ""  # cleaned title from TMDb lookup
+        self._full_auto = False
 
         self._build_ui()
 
@@ -126,6 +127,11 @@ class RipTab(ttk.Frame):
             sel_frame, text="Rip Selected", command=self._on_rip, state=tk.DISABLED
         )
         self.rip_btn.pack(side=tk.RIGHT)
+
+        self.full_auto_btn = ttk.Button(
+            sel_frame, text="⚡ Full Auto", command=self._on_full_auto, state=tk.DISABLED
+        )
+        self.full_auto_btn.pack(side=tk.RIGHT, padx=(0, 5))
 
         self.abort_btn = ttk.Button(
             sel_frame, text="Abort", command=self._on_abort, state=tk.DISABLED
@@ -218,6 +224,7 @@ class RipTab(ttk.Frame):
                 values=("☑" if selected else "☐", t.name, t.duration, _human_size(t.size_bytes), t.chapters),
             )
         self.rip_btn.configure(state=tk.NORMAL)
+        self.full_auto_btn.configure(state=tk.NORMAL)
 
     # ---------------------------------------------------------- scan logic
     def _on_scan(self):
@@ -262,16 +269,23 @@ class RipTab(ttk.Frame):
             self._msg_queue.put(("scan_err", f"Unexpected error:\n{exc}"))
 
     # ----------------------------------------------------------- rip logic
+    def _on_full_auto(self):
+        """Rip selected titles then auto-run encode → organize → tMM."""
+        self._full_auto = True
+        self._on_rip()
+
     def _on_rip(self):
         selected = [tid for tid, var in self._check_vars.items() if var.get()]
         if not selected:
             messagebox.showwarning("Nothing selected", "Select at least one title to rip.")
+            self._full_auto = False
             return
 
         config = load_config()
         output_dir = config.get("output_dir", "")
         if not output_dir:
             messagebox.showerror("Error", "Output directory not configured. Check Settings tab.")
+            self._full_auto = False
             return
 
         # Create a subfolder named after the TMDb title (or disc name as fallback)
@@ -281,6 +295,7 @@ class RipTab(ttk.Frame):
 
         self.scan_btn.configure(state=tk.DISABLED)
         self.rip_btn.configure(state=tk.DISABLED)
+        self.full_auto_btn.configure(state=tk.DISABLED)
         self.abort_btn.configure(state=tk.NORMAL)
         self._aborted = False
         self.progress_bar.configure(mode="determinate")
@@ -457,7 +472,9 @@ class RipTab(ttk.Frame):
                     self.progress_label.configure(text="Rip failed")
                     self.scan_btn.configure(state=tk.NORMAL)
                     self.rip_btn.configure(state=tk.NORMAL)
+                    self.full_auto_btn.configure(state=tk.NORMAL)
                     self.abort_btn.configure(state=tk.DISABLED)
+                    self._full_auto = False
                     messagebox.showerror("Rip Error", str(payload))
 
                 elif msg_type == "rip_done":
@@ -466,6 +483,7 @@ class RipTab(ttk.Frame):
                     self.progress_label.configure(text="Rip complete")
                     self.scan_btn.configure(state=tk.NORMAL)
                     self.rip_btn.configure(state=tk.NORMAL)
+                    self.full_auto_btn.configure(state=tk.NORMAL)
                     self.abort_btn.configure(state=tk.DISABLED)
                     self.app.set_status(f"Ripped {len(ripped)} title(s)")
                     # Auto-eject disc
@@ -474,11 +492,13 @@ class RipTab(ttk.Frame):
                     # Pass the last ripped file to the encode tab
                     if ripped:
                         disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
-                        self.app.on_rip_complete(ripped[-1], disc_name)
-                    messagebox.showinfo(
-                        "Rip Complete",
-                        f"Successfully ripped {len(ripped)} title(s).",
-                    )
+                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=self._full_auto)
+                    self._full_auto = False
+                    if not ripped or not self._full_auto:
+                        messagebox.showinfo(
+                            "Rip Complete",
+                            f"Successfully ripped {len(ripped)} title(s).",
+                        )
 
         except queue.Empty:
             pass
