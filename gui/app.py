@@ -1,10 +1,13 @@
 """Main AutoRipper application window."""
 
+from __future__ import annotations
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from config import load_config, save_config
 from gui.rip_tab import RipTab
+from gui.encode_tab import EncodeTab
 from gui.metadata_tab import MetadataTab
 
 
@@ -26,10 +29,12 @@ class AutoRipperApp(tk.Tk):
 
         # Tabs
         self.rip_tab = RipTab(self.notebook, app=self)
+        self.encode_tab = EncodeTab(self.notebook, app=self)
         self.metadata_tab = MetadataTab(self.notebook, app=self)
         self.settings_frame = self._build_settings_tab()
 
         self.notebook.add(self.rip_tab, text="Rip")
+        self.notebook.add(self.encode_tab, text="Encode")
         self.notebook.add(self.metadata_tab, text="Organize")
         self.notebook.add(self.settings_frame, text="Settings")
 
@@ -75,6 +80,17 @@ class AutoRipperApp(tk.Tk):
             side=tk.LEFT, fill=tk.X, expand=True
         )
 
+        # HandBrake binary path
+        row4 = ttk.Frame(settings_group)
+        row4.pack(fill=tk.X, padx=10, pady=5)
+        ttk.Label(row4, text="HandBrake path:").pack(side=tk.LEFT, padx=(0, 5))
+        self.settings_hb_var = tk.StringVar(
+            value=config.get("handbrake_path", "/opt/homebrew/bin/HandBrakeCLI")
+        )
+        ttk.Entry(row4, textvariable=self.settings_hb_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True
+        )
+
         # Save button
         btn_row = ttk.Frame(settings_group)
         btn_row.pack(fill=tk.X, padx=10, pady=(5, 10))
@@ -93,6 +109,7 @@ class AutoRipperApp(tk.Tk):
             "output_dir": self.settings_output_var.get().strip(),
             "tmdb_api_key": self.settings_tmdb_var.get().strip(),
             "makemkv_path": self.settings_mkv_var.get().strip(),
+            "handbrake_path": self.settings_hb_var.get().strip(),
         }
         try:
             save_config(config)
@@ -103,7 +120,12 @@ class AutoRipperApp(tk.Tk):
 
     # --------------------------------------------------------- inter-tab API
     def on_rip_complete(self, file_path: str, disc_name: str = ""):
-        """Called by RipTab when a rip finishes — forwards info to the Organize tab."""
+        """Called by RipTab when a rip finishes — forwards file to the Encode tab."""
+        self.encode_tab.set_file(file_path, disc_name)
+        self.notebook.select(self.encode_tab)
+
+    def on_encode_complete(self, file_path: str, disc_name: str = ""):
+        """Called by EncodeTab when encoding finishes — forwards file to Organize."""
         self.metadata_tab.set_file(file_path, disc_name)
         self.notebook.select(self.metadata_tab)
 

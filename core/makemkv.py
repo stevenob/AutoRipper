@@ -152,6 +152,7 @@ def rip_title(
     title_id: int,
     output_dir: str,
     progress_callback: Optional[Callable[[int, str], None]] = None,
+    log_callback: Optional[Callable[[str], None]] = None,
 ) -> str:
     """Rip a single title from disc to the output directory.
 
@@ -160,6 +161,7 @@ def rip_title(
         output_dir: Directory where the MKV file will be written.
         progress_callback: Optional ``(percent, message)`` callback for
             progress updates.
+        log_callback: Optional callback receiving each raw output line.
 
     Returns:
         Full path to the ripped MKV file.
@@ -182,9 +184,14 @@ def rip_title(
         raise MakeMKVError(f"Failed to start makemkvcon: {exc}") from exc
 
     output_file = ""
+    import time
+    start_time = time.monotonic()
 
     for line in proc.stdout:  # type: ignore[union-attr]
         line = line.rstrip()
+
+        if log_callback:
+            log_callback(line)
 
         # Progress: PRGV:current,total,max
         prgv_match = re.match(r"PRGV:(\d+),(\d+),(\d+)", line)
@@ -192,7 +199,21 @@ def rip_title(
             current = int(prgv_match.group(1))
             pmax = int(prgv_match.group(3))
             percent = int((current / pmax) * 100) if pmax > 0 else 0
-            progress_callback(min(percent, 100), f"Ripping: {percent}%")
+            percent = min(percent, 100)
+            # Calculate ETA
+            elapsed = time.monotonic() - start_time
+            if percent > 0:
+                total_est = elapsed / (percent / 100)
+                remaining = total_est - elapsed
+                mins, secs = divmod(int(remaining), 60)
+                hrs, mins = divmod(mins, 60)
+                if hrs > 0:
+                    eta = f"ETA {hrs}h{mins:02d}m"
+                else:
+                    eta = f"ETA {mins}m{secs:02d}s"
+            else:
+                eta = "ETA calculating..."
+            progress_callback(percent, f"Ripping: {percent}% — {eta}")
             continue
 
         # Progress message: PRGC:code,id,"message"

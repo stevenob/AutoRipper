@@ -100,7 +100,7 @@ class RipTab(ttk.Frame):
 
         # -- Progress section --
         prog_frame = ttk.LabelFrame(self, text="Progress")
-        prog_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        prog_frame.pack(fill=tk.X, padx=10, pady=(5, 0))
 
         self.progress_var = tk.IntVar(value=0)
         self.progress_bar = ttk.Progressbar(
@@ -110,6 +110,16 @@ class RipTab(ttk.Frame):
 
         self.progress_label = ttk.Label(prog_frame, text="Idle")
         self.progress_label.pack(padx=10, pady=(0, 5))
+
+        # -- Log output --
+        log_frame = ttk.LabelFrame(self, text="Log")
+        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+
+        self.log_text = tk.Text(log_frame, height=6, wrap=tk.WORD, state=tk.DISABLED)
+        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
 
     # --------------------------------------------------------- tree helpers
     def _on_tree_click(self, event):
@@ -208,6 +218,9 @@ class RipTab(ttk.Frame):
         self.progress_bar.configure(mode="determinate")
         self.progress_var.set(0)
         self.progress_label.configure(text="Starting rip…")
+        self.log_text.configure(state=tk.NORMAL)
+        self.log_text.delete("1.0", tk.END)
+        self.log_text.configure(state=tk.DISABLED)
 
         threading.Thread(
             target=self._rip_worker, args=(selected, output_dir), daemon=True
@@ -224,8 +237,11 @@ class RipTab(ttk.Frame):
                 label = f"[{_idx}/{_total}] {msg}"
                 self._msg_queue.put(("rip_progress", (overall, label)))
 
+            def _log_cb(line):
+                self._msg_queue.put(("rip_log", line))
+
             try:
-                path = rip_title(tid, output_dir, progress_callback=_progress_cb)
+                path = rip_title(tid, output_dir, progress_callback=_progress_cb, log_callback=_log_cb)
                 ripped_files.append(path)
             except (RipError, MakeMKVError) as exc:
                 self._msg_queue.put(("rip_err", f"Failed to rip title {tid}:\n{exc}"))
@@ -269,6 +285,12 @@ class RipTab(ttk.Frame):
                     percent, label = payload
                     self.progress_var.set(percent)
                     self.progress_label.configure(text=label)
+
+                elif msg_type == "rip_log":
+                    self.log_text.configure(state=tk.NORMAL)
+                    self.log_text.insert(tk.END, payload + "\n")
+                    self.log_text.see(tk.END)
+                    self.log_text.configure(state=tk.DISABLED)
 
                 elif msg_type == "rip_err":
                     self.progress_label.configure(text="Rip failed")

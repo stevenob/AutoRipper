@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 
@@ -7,6 +9,7 @@ CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
 DEFAULTS = {
     "output_dir": os.path.expanduser("~/Desktop/Ripped"),
     "makemkv_path": "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
+    "handbrake_path": "/opt/homebrew/bin/HandBrakeCLI",
     "tmdb_api_key": "",
 }
 
