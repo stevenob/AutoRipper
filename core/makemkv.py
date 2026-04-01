@@ -172,7 +172,7 @@ def rip_title(
     mkv_path = get_makemkv_path()
     os.makedirs(output_dir, exist_ok=True)
 
-    cmd = [mkv_path, "mkv", f"disc:0", str(title_id), output_dir]
+    cmd = [mkv_path, "-r", "mkv", f"disc:0", str(title_id), output_dir]
 
     try:
         proc = subprocess.Popen(
