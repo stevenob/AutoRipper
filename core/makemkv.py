@@ -124,6 +124,17 @@ def scan_disc(log_callback: Optional[Callable[[str], None]] = None) -> DiscInfo:
             titles_data[title_id][attr_id] = value
             continue
 
+        # Stream-level info: SINFO:title_id,stream_id,attr_id,attr_code,"value"
+        sinfo_match = re.match(r'SINFO:(\d+),(\d+),(\d+),\d+,"(.+)"', line)
+        if sinfo_match:
+            title_id = int(sinfo_match.group(1))
+            attr_id = int(sinfo_match.group(3))
+            value = sinfo_match.group(4)
+            # attr 19 = video resolution (e.g. "1920x1080"), only first stream
+            if attr_id == 19 and title_id in titles_data and "resolution" not in titles_data[title_id]:
+                titles_data[title_id]["resolution"] = value
+            continue
+
     # Detect disc type from name or structure heuristics
     if disc_name:
         name_upper = disc_name.upper()
@@ -148,6 +159,7 @@ def scan_disc(log_callback: Optional[Callable[[str], None]] = None) -> DiscInfo:
                 size_bytes=_parse_size_to_bytes(attrs.get(10, "0 MB")),
                 chapters=int(attrs.get(8, "0")),
                 file_output=attrs.get(27, ""),
+                resolution=attrs.get("resolution", ""),
             )
         )
 

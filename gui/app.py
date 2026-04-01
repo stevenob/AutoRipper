@@ -9,10 +9,12 @@ from tkinter import ttk, filedialog, messagebox
 from config import load_config, save_config
 from core.organizer import build_movie_path, organize_file, clean_filename
 from core.metadata import search_media
+from core.job_queue import JobQueue
 from gui.rip_tab import RipTab
 from gui.encode_tab import EncodeTab
 from gui.metadata_tab import MetadataTab
 from gui.tmm_tab import TmmTab
+from gui.queue_tab import QueueTab
 
 
 class AutoRipperApp(tk.Tk):
@@ -36,12 +38,15 @@ class AutoRipperApp(tk.Tk):
         self.encode_tab = EncodeTab(self.notebook, app=self)
         self.metadata_tab = MetadataTab(self.notebook, app=self)
         self.tmm_tab = TmmTab(self.notebook, app=self)
+        self.job_queue = JobQueue()
+        self.queue_tab = QueueTab(self.notebook, app=self, job_queue=self.job_queue)
         self.settings_frame = self._build_settings_tab()
 
         self.notebook.add(self.rip_tab, text="Rip")
         self.notebook.add(self.encode_tab, text="Encode")
         self.notebook.add(self.metadata_tab, text="Organize")
         self.notebook.add(self.tmm_tab, text="tinyMediaManager")
+        self.notebook.add(self.queue_tab, text="Queue")
         self.notebook.add(self.settings_frame, text="Settings")
 
         # Status bar
@@ -199,9 +204,16 @@ class AutoRipperApp(tk.Tk):
 
     # --------------------------------------------------------- inter-tab API
     def on_rip_complete(self, file_path: str, disc_name: str = "", auto_start: bool = False):
-        """Called by RipTab when a rip finishes — forwards file to the Encode tab."""
-        self.encode_tab.set_file(file_path, disc_name, auto_start=auto_start)
-        self.notebook.select(self.encode_tab)
+        """Called by RipTab when a rip finishes."""
+        if auto_start:
+            # Add to job queue instead of running inline
+            self.job_queue.add_job(disc_name, file_path)
+            self.notebook.select(self.queue_tab)
+            self.set_status(f"Queued: {disc_name}")
+        else:
+            # Manual mode — use encode tab as before
+            self.encode_tab.set_file(file_path, disc_name, auto_start=False)
+            self.notebook.select(self.encode_tab)
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):
         """Called by EncodeTab when encoding finishes — auto-organize and go to tMM."""

@@ -13,6 +13,7 @@ class TitleInfo:
     size_bytes: int
     chapters: int
     file_output: str
+    resolution: str = ""  # e.g. "1920x1080"
 
 
 @dataclass

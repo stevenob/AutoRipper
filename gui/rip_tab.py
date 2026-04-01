@@ -45,6 +45,28 @@ def _duration_to_secs(duration: str) -> int:
         return 0
 
 
+def _resolution_label(resolution: str) -> str:
+    """Convert resolution string like '1920x1080' to a friendly label."""
+    if not resolution:
+        return ""
+    try:
+        w, h = resolution.lower().split("x")
+        height = int(h)
+    except (ValueError, AttributeError):
+        return resolution
+    if height >= 2160:
+        return "4K UHD"
+    elif height >= 1080:
+        return "1080p"
+    elif height >= 720:
+        return "720p"
+    elif height >= 576:
+        return "576p"
+    elif height >= 480:
+        return "480p"
+    return f"{height}p"
+
+
 class RipTab(ttk.Frame):
     """Tab for scanning a disc and ripping selected titles."""
 
@@ -89,21 +111,23 @@ class RipTab(ttk.Frame):
         list_frame = ttk.LabelFrame(self, text="Titles")
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        columns = ("select", "title", "duration", "size", "chapters")
+        columns = ("select", "title", "resolution", "duration", "size", "chapters")
         self.tree = ttk.Treeview(
             list_frame, columns=columns, show="headings", selectmode="browse"
         )
         self.tree.heading("select", text="✓")
         self.tree.heading("title", text="Title")
+        self.tree.heading("resolution", text="Resolution")
         self.tree.heading("duration", text="Duration")
         self.tree.heading("size", text="Size")
         self.tree.heading("chapters", text="Chapters")
 
         self.tree.column("select", width=40, anchor=tk.CENTER, stretch=False)
-        self.tree.column("title", width=300)
-        self.tree.column("duration", width=100, anchor=tk.CENTER)
-        self.tree.column("size", width=100, anchor=tk.CENTER)
-        self.tree.column("chapters", width=80, anchor=tk.CENTER)
+        self.tree.column("title", width=250)
+        self.tree.column("resolution", width=90, anchor=tk.CENTER)
+        self.tree.column("duration", width=90, anchor=tk.CENTER)
+        self.tree.column("size", width=90, anchor=tk.CENTER)
+        self.tree.column("chapters", width=70, anchor=tk.CENTER)
 
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -217,11 +241,12 @@ class RipTab(ttk.Frame):
             selected = largest_id is not None and t.id == largest_id.id
             var = tk.BooleanVar(value=selected)
             self._check_vars[t.id] = var
+            res_label = _resolution_label(t.resolution)
             self.tree.insert(
                 "",
                 tk.END,
                 iid=str(t.id),
-                values=("☑" if selected else "☐", t.name, t.duration, _human_size(t.size_bytes), t.chapters),
+                values=("☑" if selected else "☐", t.name, res_label, t.duration, _human_size(t.size_bytes), t.chapters),
             )
         self.rip_btn.configure(state=tk.NORMAL)
         self.full_auto_btn.configure(state=tk.NORMAL)
@@ -495,7 +520,14 @@ class RipTab(ttk.Frame):
                     if ripped:
                         disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
                         self.app.on_rip_complete(ripped[-1], disc_name, auto_start=auto)
-                    if not auto:
+                    if auto:
+                        # Reset for next disc
+                        self.disc_info = None
+                        self._tmdb_title = ""
+                        self.disc_label.configure(text="Insert next disc and scan")
+                        self.tree.delete(*self.tree.get_children())
+                        self._check_vars.clear()
+                    else:
                         messagebox.showinfo(
                             "Rip Complete",
                             f"Successfully ripped {len(ripped)} title(s).",
