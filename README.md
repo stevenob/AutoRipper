@@ -1,11 +1,14 @@
 # AutoRipper 🎬
 
-A Python GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip → Encode → Organize → Scrape metadata** — all hands-free with one click.
+A modern macOS GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip → Encode → Organize → Scrape metadata** — all hands-free with one click.
+
+Built with [customtkinter](https://github.com/TomSchimansky/CustomTkinter) for a native macOS look with automatic dark/light mode support.
 
 ## Features
 
 - **⚡ Full Auto Mode** — One click to rip, encode, organize, and scrape metadata automatically
 - **Job Queue** — Rip multiple discs back-to-back; encoding and processing happen in the background
+- **Modern UI** — Native macOS appearance with dark/light mode, rounded buttons, and clean design
 - **Scan & Rip** — Detect discs, browse titles with resolution display (4K/1080p/720p/480p), min duration filter, file-size progress with ETA
 - **HandBrake Encoding** — H.265 quick presets auto-selected by resolution, Apple VideoToolbox hardware acceleration, audio/subtitle track chooser
 - **Auto-detect metadata** — [TMDb](https://www.themoviedb.org/) lookup for movie/TV show titles and years
@@ -13,10 +16,11 @@ A Python GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip �
   - Movies: `Title (Year)/Title (Year).mkv`
   - TV Shows: `Show/Season 01/Show - S01E01 - Episode Name.mkv`
 - **tinyMediaManager** — Optional post-organize scrape for artwork, NFO files, and subtitles
+- **Built-in Artwork & NFO** — Download poster/fanart and create Kodi/Jellyfin-compatible NFO files directly from TMDb (no Java needed)
 - **Auto-eject** — Eject disc after ripping (configurable)
 - **Abort** — Cancel any running operation at any time
 - **Persistent Preferences** — Settings auto-save between sessions
-- **Streaming Logs** — Real-time output from MakeMKV, HandBrake, and tMM
+- **Streaming Logs** — Real-time output from MakeMKV and HandBrake
 
 ## Pipeline Flow
 
@@ -43,7 +47,7 @@ Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
 - **[MakeMKV](https://www.makemkv.com/)** installed at `/Applications/MakeMKV.app`
 - **[HandBrake CLI](https://handbrake.fr/)** — install via `brew install handbrake`
 - **TMDb API key** (free) — [get one here](https://www.themoviedb.org/settings/api)
-- **[tinyMediaManager](https://www.tinymediamanager.org/)** (optional) — for artwork and NFO scraping
+- **[tinyMediaManager](https://www.tinymediamanager.org/)** (optional) — for advanced artwork and NFO scraping
 
 ## Installation
 
@@ -109,14 +113,15 @@ AutoRipper/
 │   ├── handbrake.py     # HandBrake CLI wrapper
 │   ├── metadata.py      # TMDb API integration
 │   ├── organizer.py     # File renaming & folder organization
-│   ├── tmm.py           # tinyMediaManager CLI wrapper
+│   ├── artwork.py       # Poster/fanart download & NFO creation
+│   ├── tmm.py           # tinyMediaManager CLI wrapper (optional)
 │   └── job_queue.py     # Background job queue for multi-disc pipeline
-├── gui/
+├── gui/                 # customtkinter UI (dark/light mode)
 │   ├── app.py           # Main application window & settings
 │   ├── rip_tab.py       # Disc scanning & ripping UI
 │   ├── encode_tab.py    # HandBrake encoding UI
 │   ├── metadata_tab.py  # Manual metadata & organize UI
-│   ├── tmm_tab.py       # tinyMediaManager UI
+│   ├── scrape_tab.py    # Artwork & NFO scraper UI
 │   └── queue_tab.py     # Job queue status UI
 └── tests/               # Unit tests (49 tests, all mocked)
 ```

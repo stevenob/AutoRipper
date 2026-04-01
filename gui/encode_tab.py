@@ -7,7 +7,9 @@ import queue
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox, filedialog
+
+import customtkinter as ctk
 
 from core.handbrake import (
     list_presets,
@@ -18,7 +20,7 @@ from core.handbrake import (
 )
 
 
-class EncodeTab(ttk.Frame):
+class EncodeTab(ctk.CTkFrame):
     """Tab for encoding ripped MKV files with HandBrake."""
 
     def __init__(self, parent, app):
@@ -38,39 +40,45 @@ class EncodeTab(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
         # -- Input file section --
-        file_frame = ttk.LabelFrame(self, text="Input File")
-        file_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ctk.CTkLabel(self, text="Input File", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        file_frame = ctk.CTkFrame(self)
+        file_frame.pack(fill="x", padx=10, pady=(5, 5))
 
-        file_row = ttk.Frame(file_frame)
-        file_row.pack(fill=tk.X, padx=10, pady=5)
+        file_row = ctk.CTkFrame(file_frame, fg_color="transparent")
+        file_row.pack(fill="x", padx=10, pady=5)
 
         self.file_var = tk.StringVar(value="No file selected")
-        ttk.Label(file_row, textvariable=self.file_var, anchor=tk.W).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkLabel(file_row, textvariable=self.file_var, anchor="w").pack(
+            side="left", fill="x", expand=True
         )
-        ttk.Button(file_row, text="Browse…", command=self._browse_file).pack(
-            side=tk.RIGHT
+        ctk.CTkButton(file_row, text="Browse…", command=self._browse_file, width=80).pack(
+            side="right"
         )
 
         # -- Preset section --
-        preset_frame = ttk.LabelFrame(self, text="Encoding Preset")
-        preset_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Encoding Preset", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        preset_frame = ctk.CTkFrame(self)
+        preset_frame.pack(fill="x", padx=10, pady=5)
 
-        preset_row = ttk.Frame(preset_frame)
-        preset_row.pack(fill=tk.X, padx=10, pady=5)
+        preset_row = ctk.CTkFrame(preset_frame, fg_color="transparent")
+        preset_row.pack(fill="x", padx=10, pady=5)
 
         from config import load_config as _load_cfg
         _cfg = _load_cfg()
         self.preset_var = tk.StringVar(value=_cfg.get("default_preset", "HQ 1080p30 Surround"))
-        self.preset_combo = ttk.Combobox(
-            preset_row, textvariable=self.preset_var, state="readonly", width=40
+        self.preset_combo = ctk.CTkComboBox(
+            preset_row, variable=self.preset_var, state="readonly", width=300, values=[]
         )
-        self.preset_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.preset_combo.pack(side="left", fill="x", expand=True)
 
         # Quick H.265 preset buttons
-        quick_frame = ttk.Frame(preset_frame)
-        quick_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
-        ttk.Label(quick_frame, text="H.265 Quick:").pack(side=tk.LEFT, padx=(0, 5))
+        quick_frame = ctk.CTkFrame(preset_frame, fg_color="transparent")
+        quick_frame.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(quick_frame, text="H.265 Quick:").pack(side="left", padx=(0, 5))
         for label, preset in [
             ("480p", "H.265 MKV 480p30"),
             ("720p", "H.265 MKV 720p30"),
@@ -79,78 +87,88 @@ class EncodeTab(ttk.Frame):
             ("1080p HW ⚡", "H.265 Apple VideoToolbox 1080p"),
             ("4K HW ⚡", "H.265 Apple VideoToolbox 2160p 4K"),
         ]:
-            ttk.Button(
-                quick_frame, text=label, width=10,
+            ctk.CTkButton(
+                quick_frame, text=label, width=90,
                 command=lambda p=preset: self.preset_var.set(p),
-            ).pack(side=tk.LEFT, padx=2)
+            ).pack(side="left", padx=2)
 
         # -- Audio tracks section --
-        self.audio_frame = ttk.LabelFrame(self, text="Audio Tracks")
-        self.audio_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Audio Tracks", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        self.audio_frame = ctk.CTkFrame(self)
+        self.audio_frame.pack(fill="x", padx=10, pady=5)
 
-        self.audio_inner = ttk.Frame(self.audio_frame)
-        self.audio_inner.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(self.audio_inner, text="Scan a file to see audio tracks").pack(
-            anchor=tk.W
+        self.audio_inner = ctk.CTkFrame(self.audio_frame, fg_color="transparent")
+        self.audio_inner.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(self.audio_inner, text="Scan a file to see audio tracks").pack(
+            anchor="w"
         )
 
         # -- Subtitle tracks section --
-        self.subtitle_frame = ttk.LabelFrame(self, text="Subtitle Tracks")
-        self.subtitle_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Subtitle Tracks", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        self.subtitle_frame = ctk.CTkFrame(self)
+        self.subtitle_frame.pack(fill="x", padx=10, pady=5)
 
-        self.subtitle_inner = ttk.Frame(self.subtitle_frame)
-        self.subtitle_inner.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(self.subtitle_inner, text="Scan a file to see subtitle tracks").pack(
-            anchor=tk.W
+        self.subtitle_inner = ctk.CTkFrame(self.subtitle_frame, fg_color="transparent")
+        self.subtitle_inner.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(self.subtitle_inner, text="Scan a file to see subtitle tracks").pack(
+            anchor="w"
         )
 
         # -- Output section --
-        output_frame = ttk.LabelFrame(self, text="Output File")
-        output_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Output File", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        output_frame = ctk.CTkFrame(self)
+        output_frame.pack(fill="x", padx=10, pady=5)
 
-        output_row = ttk.Frame(output_frame)
-        output_row.pack(fill=tk.X, padx=10, pady=5)
+        output_row = ctk.CTkFrame(output_frame, fg_color="transparent")
+        output_row.pack(fill="x", padx=10, pady=5)
 
         self.output_var = tk.StringVar(value="")
-        ttk.Label(output_row, textvariable=self.output_var, anchor=tk.W).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkLabel(output_row, textvariable=self.output_var, anchor="w").pack(
+            side="left", fill="x", expand=True
         )
 
         # -- Encode button + progress --
-        action_frame = ttk.LabelFrame(self, text="Progress")
-        action_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
-
-        btn_row = ttk.Frame(action_frame)
-        btn_row.pack(fill=tk.X, padx=10, pady=(5, 0))
-
-        self.encode_btn = ttk.Button(
-            btn_row, text="Encode", command=self._on_encode, state=tk.DISABLED
+        ctk.CTkLabel(self, text="Progress", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
         )
-        self.encode_btn.pack(side=tk.LEFT)
+        action_frame = ctk.CTkFrame(self)
+        action_frame.pack(fill="x", padx=10, pady=(5, 10))
 
-        self.abort_btn = ttk.Button(
-            btn_row, text="Abort", command=self._on_abort, state=tk.DISABLED
+        btn_row = ctk.CTkFrame(action_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=(5, 0))
+
+        self.encode_btn = ctk.CTkButton(
+            btn_row, text="Encode", command=self._on_encode, state="disabled"
         )
-        self.abort_btn.pack(side=tk.LEFT, padx=(5, 0))
+        self.encode_btn.pack(side="left")
 
-        self.progress_var = tk.IntVar(value=0)
-        self.progress_bar = ttk.Progressbar(
-            action_frame, variable=self.progress_var, maximum=100
+        self.abort_btn = ctk.CTkButton(
+            btn_row, text="Abort", command=self._on_abort, state="disabled"
         )
-        self.progress_bar.pack(fill=tk.X, padx=10, pady=(5, 0))
+        self.abort_btn.pack(side="left", padx=(5, 0))
 
-        self.progress_label = ttk.Label(action_frame, text="Idle")
+        self.progress_bar = ctk.CTkProgressBar(action_frame)
+        self.progress_bar.pack(fill="x", padx=10, pady=(5, 0))
+        self.progress_bar.set(0)
+
+        self.progress_label = ctk.CTkLabel(action_frame, text="Idle")
         self.progress_label.pack(padx=10, pady=(0, 5))
 
         # -- Log output --
-        log_frame = ttk.LabelFrame(self, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+        ctk.CTkLabel(self, text="Log", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(0, 0)
+        )
+        log_frame = ctk.CTkFrame(self)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
-        self.log_text = tk.Text(log_frame, height=6, wrap=tk.WORD, state=tk.DISABLED)
-        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        self.log_text = ctk.CTkTextbox(log_frame, height=100, wrap="word", state="disabled")
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=5)
 
     # --------------------------------------------------------- file handling
     def _browse_file(self):
@@ -169,7 +187,7 @@ class EncodeTab(ttk.Frame):
         self._update_output_path()
         if resolution:
             self._auto_select_preset(resolution)
-        self.encode_btn.configure(state=tk.NORMAL)
+        self.encode_btn.configure(state="normal")
         self._scan_file_tracks(file_path)
 
     def _auto_select_preset(self, resolution: str):
@@ -220,8 +238,8 @@ class EncodeTab(ttk.Frame):
         """Scan audio/subtitle tracks in a background thread."""
         self.progress_label.configure(text="Scanning tracks…")
         self.progress_bar.configure(mode="indeterminate")
-        self.progress_bar.start(15)
-        self.encode_btn.configure(state=tk.DISABLED)
+        self.progress_bar.start()
+        self.encode_btn.configure(state="disabled")
 
         threading.Thread(
             target=self._scan_worker, args=(file_path,), daemon=True
@@ -244,16 +262,15 @@ class EncodeTab(ttk.Frame):
         self._audio_vars.clear()
 
         if not tracks:
-            ttk.Label(self.audio_inner, text="No audio tracks found").pack(anchor=tk.W)
+            ctk.CTkLabel(self.audio_inner, text="No audio tracks found").pack(anchor="w")
             return
 
         for track in tracks:
             var = tk.BooleanVar(value=True)
             self._audio_vars.append((track["index"], var))
             text = f"Track {track['index']}: {track['description']}"
-            ttk.Checkbutton(self.audio_inner, text=text, variable=var).pack(
-                anchor=tk.W
-            )
+            ctk.CTkCheckBox(self.audio_inner, text=text, variable=var,
+                            onvalue=True, offvalue=False).pack(anchor="w")
 
     def _populate_subtitle_tracks(self, tracks: list[dict]):
         """Build checkboxes for subtitle tracks."""
@@ -262,8 +279,8 @@ class EncodeTab(ttk.Frame):
         self._subtitle_vars.clear()
 
         if not tracks:
-            ttk.Label(self.subtitle_inner, text="No subtitle tracks found").pack(
-                anchor=tk.W
+            ctk.CTkLabel(self.subtitle_inner, text="No subtitle tracks found").pack(
+                anchor="w"
             )
             return
 
@@ -271,9 +288,8 @@ class EncodeTab(ttk.Frame):
             var = tk.BooleanVar(value=True)
             self._subtitle_vars.append((track["index"], var))
             text = f"Track {track['index']}: {track['language']} ({track['type']})"
-            ttk.Checkbutton(self.subtitle_inner, text=text, variable=var).pack(
-                anchor=tk.W
-            )
+            ctk.CTkCheckBox(self.subtitle_inner, text=text, variable=var,
+                            onvalue=True, offvalue=False).pack(anchor="w")
 
     # --------------------------------------------------------- encode logic
     def _on_encode(self):
@@ -295,15 +311,15 @@ class EncodeTab(ttk.Frame):
         audio = [idx for idx, var in self._audio_vars if var.get()]
         subtitles = [idx for idx, var in self._subtitle_vars if var.get()]
 
-        self.encode_btn.configure(state=tk.DISABLED)
-        self.abort_btn.configure(state=tk.NORMAL)
+        self.encode_btn.configure(state="disabled")
+        self.abort_btn.configure(state="normal")
         self._aborted = False
         self.progress_bar.configure(mode="determinate")
-        self.progress_var.set(0)
+        self.progress_bar.set(0)
         self.progress_label.configure(text="Starting encode…")
-        self.log_text.configure(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
         threading.Thread(
             target=self._encode_worker,
@@ -317,7 +333,7 @@ class EncodeTab(ttk.Frame):
         self._aborted = True
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
-        self.abort_btn.configure(state=tk.DISABLED)
+        self.abort_btn.configure(state="disabled")
         self.progress_label.configure(text="Aborting…")
 
     def _encode_worker(
@@ -365,14 +381,14 @@ class EncodeTab(ttk.Frame):
 
                 if msg_type == "presets_ok":
                     presets = payload
-                    self.preset_combo["values"] = presets
+                    self.preset_combo.configure(values=presets)
                     # Keep current value if it's in the list, otherwise pick first
                     current = self.preset_var.get()
                     if presets and current not in presets:
                         self.preset_var.set(presets[0])
 
                 elif msg_type == "presets_err":
-                    self.preset_combo["values"] = ["HQ 1080p30 Surround"]
+                    self.preset_combo.configure(values=["HQ 1080p30 Surround"])
                     self.preset_var.set("HQ 1080p30 Surround")
 
                 elif msg_type == "scan_ok":
@@ -381,9 +397,9 @@ class EncodeTab(ttk.Frame):
                     self._populate_subtitle_tracks(tracks.get("subtitles", []))
                     self.progress_bar.stop()
                     self.progress_bar.configure(mode="determinate")
-                    self.progress_var.set(0)
+                    self.progress_bar.set(0)
                     self.progress_label.configure(text="Track scan complete")
-                    self.encode_btn.configure(state=tk.NORMAL)
+                    self.encode_btn.configure(state="normal")
                     if self._auto_start:
                         self._auto_start = False
                         self.after(500, self._on_encode)
@@ -391,34 +407,34 @@ class EncodeTab(ttk.Frame):
                 elif msg_type == "scan_err":
                     self.progress_bar.stop()
                     self.progress_bar.configure(mode="determinate")
-                    self.progress_var.set(0)
+                    self.progress_bar.set(0)
                     self.progress_label.configure(text="Track scan failed")
-                    self.encode_btn.configure(state=tk.NORMAL)
+                    self.encode_btn.configure(state="normal")
                     messagebox.showerror("Scan Error", str(payload))
 
                 elif msg_type == "encode_progress":
                     percent, label = payload
-                    self.progress_var.set(percent)
+                    self.progress_bar.set(percent / 100)
                     self.progress_label.configure(text=label)
 
                 elif msg_type == "encode_log":
-                    self.log_text.configure(state=tk.NORMAL)
-                    self.log_text.insert(tk.END, payload + "\n")
-                    self.log_text.see(tk.END)
-                    self.log_text.configure(state=tk.DISABLED)
+                    self.log_text.configure(state="normal")
+                    self.log_text.insert("end", payload + "\n")
+                    self.log_text.see("end")
+                    self.log_text.configure(state="disabled")
 
                 elif msg_type == "encode_err":
                     self.progress_label.configure(text="Encode failed")
-                    self.encode_btn.configure(state=tk.NORMAL)
-                    self.abort_btn.configure(state=tk.DISABLED)
+                    self.encode_btn.configure(state="normal")
+                    self.abort_btn.configure(state="disabled")
                     messagebox.showerror("Encode Error", str(payload))
 
                 elif msg_type == "encode_done":
                     result_path = payload
-                    self.progress_var.set(100)
+                    self.progress_bar.set(1.0)
                     self.progress_label.configure(text="Encode complete")
-                    self.encode_btn.configure(state=tk.NORMAL)
-                    self.abort_btn.configure(state=tk.DISABLED)
+                    self.encode_btn.configure(state="normal")
+                    self.abort_btn.configure(state="disabled")
                     self.app.set_status("Encoding complete")
                     self.app.on_encode_complete(result_path, self._disc_name)
                     messagebox.showinfo(

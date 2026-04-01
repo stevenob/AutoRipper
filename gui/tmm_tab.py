@@ -6,7 +6,9 @@ import queue
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+
+import customtkinter as ctk
 
 from core.tmm import (
     scrape_and_rename,
@@ -16,7 +18,7 @@ from core.tmm import (
 )
 
 
-class TmmTab(ttk.Frame):
+class TmmTab(ctk.CTkFrame):
     """Tab for running tinyMediaManager CLI actions."""
 
     def __init__(self, parent, app):
@@ -31,67 +33,74 @@ class TmmTab(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
         # -- Media type --
-        type_frame = ttk.LabelFrame(self, text="Media Type")
-        type_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ctk.CTkLabel(self, text="Media Type", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        type_frame = ctk.CTkFrame(self)
+        type_frame.pack(fill="x", padx=10, pady=(5, 5))
 
-        type_row = ttk.Frame(type_frame)
-        type_row.pack(fill=tk.X, padx=10, pady=5)
+        type_row = ctk.CTkFrame(type_frame, fg_color="transparent")
+        type_row.pack(fill="x", padx=10, pady=5)
 
         from config import load_config as _load_cfg
         _cfg = _load_cfg()
         self.media_type_var = tk.StringVar(value=_cfg.get("default_media_type", "movie"))
-        ttk.Radiobutton(
+        ctk.CTkRadioButton(
             type_row, text="Movie", variable=self.media_type_var, value="movie",
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(
             type_row, text="TV Show", variable=self.media_type_var, value="tvshow",
-        ).pack(side=tk.LEFT)
+        ).pack(side="left")
 
         # -- Actions --
-        action_frame = ttk.LabelFrame(self, text="Actions")
-        action_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Actions", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        action_frame = ctk.CTkFrame(self)
+        action_frame.pack(fill="x", padx=10, pady=5)
 
-        btn_row = ttk.Frame(action_frame)
-        btn_row.pack(fill=tk.X, padx=10, pady=5)
+        btn_row = ctk.CTkFrame(action_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=5)
 
-        self.scrape_btn = ttk.Button(
+        self.scrape_btn = ctk.CTkButton(
             btn_row, text="Scrape & Rename", command=self._on_scrape,
         )
-        self.scrape_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.scrape_btn.pack(side="left", padx=(0, 5))
 
-        self.subs_btn = ttk.Button(
+        self.subs_btn = ctk.CTkButton(
             btn_row, text="Download Subtitles", command=self._on_subs,
         )
-        self.subs_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.subs_btn.pack(side="left", padx=(0, 5))
 
-        self.abort_btn = ttk.Button(
-            btn_row, text="Abort", command=self._on_abort, state=tk.DISABLED,
+        self.abort_btn = ctk.CTkButton(
+            btn_row, text="Abort", command=self._on_abort, state="disabled",
         )
-        self.abort_btn.pack(side=tk.LEFT)
+        self.abort_btn.pack(side="left")
 
         # -- Progress --
-        progress_frame = ttk.LabelFrame(self, text="Progress")
-        progress_frame.pack(fill=tk.X, padx=10, pady=5)
-
-        self.progress_bar = ttk.Progressbar(
-            progress_frame, mode="indeterminate",
+        ctk.CTkLabel(self, text="Progress", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
         )
-        self.progress_bar.pack(fill=tk.X, padx=10, pady=(5, 0))
+        progress_frame = ctk.CTkFrame(self)
+        progress_frame.pack(fill="x", padx=10, pady=5)
 
-        self.status_label = ttk.Label(progress_frame, text="Idle")
+        self.progress_bar = ctk.CTkProgressBar(progress_frame)
+        self.progress_bar.pack(fill="x", padx=10, pady=(5, 0))
+        self.progress_bar.configure(mode="indeterminate")
+        self.progress_bar.set(0)
+
+        self.status_label = ctk.CTkLabel(progress_frame, text="Idle")
         self.status_label.pack(padx=10, pady=(0, 5))
 
         # -- Log --
-        log_frame = ttk.LabelFrame(self, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-        self.log_text = tk.Text(log_frame, height=12, wrap=tk.WORD, state=tk.DISABLED)
-        log_scroll = ttk.Scrollbar(
-            log_frame, orient=tk.VERTICAL, command=self.log_text.yview,
+        ctk.CTkLabel(self, text="Log", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
         )
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        log_frame = ctk.CTkFrame(self)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+
+        self.log_text = ctk.CTkTextbox(log_frame, height=200, wrap="word", state="disabled")
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=5)
 
     # --------------------------------------------------------- actions
     def _on_scrape(self):
@@ -108,17 +117,17 @@ class TmmTab(ttk.Frame):
         """Start a tMM action in a background thread."""
         media_type = self.media_type_var.get()
 
-        self.scrape_btn.configure(state=tk.DISABLED)
-        self.subs_btn.configure(state=tk.DISABLED)
-        self.abort_btn.configure(state=tk.NORMAL)
+        self.scrape_btn.configure(state="disabled")
+        self.subs_btn.configure(state="disabled")
+        self.abort_btn.configure(state="normal")
         self._aborted = False
 
         # Clear log
-        self.log_text.configure(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
-        self.progress_bar.start(15)
+        self.progress_bar.start()
         label = "Scraping & renaming…" if action == "scrape" else "Downloading subtitles…"
         self.status_label.configure(text=label)
         self.app.set_status(label)
@@ -133,7 +142,7 @@ class TmmTab(ttk.Frame):
         self._aborted = True
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
-        self.abort_btn.configure(state=tk.DISABLED)
+        self.abort_btn.configure(state="disabled")
         self.status_label.configure(text="Aborting…")
 
     # --------------------------------------------------------- worker
@@ -172,10 +181,10 @@ class TmmTab(ttk.Frame):
                 msg_type, payload = self._msg_queue.get_nowait()
 
                 if msg_type == "tmm_log":
-                    self.log_text.configure(state=tk.NORMAL)
-                    self.log_text.insert(tk.END, payload + "\n")
-                    self.log_text.see(tk.END)
-                    self.log_text.configure(state=tk.DISABLED)
+                    self.log_text.configure(state="normal")
+                    self.log_text.insert("end", payload + "\n")
+                    self.log_text.see("end")
+                    self.log_text.configure(state="disabled")
 
                 elif msg_type == "tmm_done":
                     self.progress_bar.stop()
@@ -186,18 +195,18 @@ class TmmTab(ttk.Frame):
                         else "Subtitle download complete"
                     )
                     self.status_label.configure(text=msg)
-                    self.scrape_btn.configure(state=tk.NORMAL)
-                    self.subs_btn.configure(state=tk.NORMAL)
-                    self.abort_btn.configure(state=tk.DISABLED)
+                    self.scrape_btn.configure(state="normal")
+                    self.subs_btn.configure(state="normal")
+                    self.abort_btn.configure(state="disabled")
                     self.app.set_status(msg)
                     messagebox.showinfo("tinyMediaManager", msg)
 
                 elif msg_type == "tmm_err":
                     self.progress_bar.stop()
                     self.status_label.configure(text="Failed")
-                    self.scrape_btn.configure(state=tk.NORMAL)
-                    self.subs_btn.configure(state=tk.NORMAL)
-                    self.abort_btn.configure(state=tk.DISABLED)
+                    self.scrape_btn.configure(state="normal")
+                    self.subs_btn.configure(state="normal")
+                    self.abort_btn.configure(state="disabled")
                     self.app.set_status("tMM operation failed")
                     messagebox.showerror("tinyMediaManager Error", str(payload))
 

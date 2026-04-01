@@ -5,15 +5,16 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk
+
+import customtkinter as ctk
 
 from core.artwork import scrape_and_save
 
 
-class ScrapeTab(ttk.Frame):
+class ScrapeTab(ctk.CTkFrame):
     """Tab for scraping metadata, artwork, and NFO files via TMDb."""
 
-    def __init__(self, parent: ttk.Notebook, app: object) -> None:
+    def __init__(self, parent, app) -> None:
         super().__init__(parent)
         self.app = app
         self._msg_queue: queue.Queue = queue.Queue()
@@ -26,51 +27,57 @@ class ScrapeTab(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
         # -- Status section --
-        status_frame = ttk.LabelFrame(self, text="Metadata Scraper")
-        status_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ctk.CTkLabel(self, text="Metadata Scraper", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        status_frame = ctk.CTkFrame(self)
+        status_frame.pack(fill="x", padx=10, pady=(5, 5))
 
-        info_row = ttk.Frame(status_frame)
-        info_row.pack(fill=tk.X, padx=10, pady=(5, 0))
-        ttk.Label(info_row, text="Title:").pack(side=tk.LEFT, padx=(0, 5))
+        info_row = ctk.CTkFrame(status_frame, fg_color="transparent")
+        info_row.pack(fill="x", padx=10, pady=(5, 0))
+        ctk.CTkLabel(info_row, text="Title:").pack(side="left", padx=(0, 5))
         self.title_var = tk.StringVar(value="(none)")
-        ttk.Label(info_row, textvariable=self.title_var).pack(side=tk.LEFT)
+        ctk.CTkLabel(info_row, textvariable=self.title_var).pack(side="left")
 
-        btn_row = ttk.Frame(status_frame)
-        btn_row.pack(fill=tk.X, padx=10, pady=5)
-        self.scrape_btn = ttk.Button(
+        btn_row = ctk.CTkFrame(status_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=5)
+        self.scrape_btn = ctk.CTkButton(
             btn_row, text="Scrape & Download", command=self._on_scrape,
         )
-        self.scrape_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.scrape_btn.pack(side="left", padx=(0, 5))
 
-        self.progress_bar = ttk.Progressbar(status_frame, mode="indeterminate")
-        self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5))
+        self.progress_bar = ctk.CTkProgressBar(status_frame)
+        self.progress_bar.pack(fill="x", padx=10, pady=(0, 5))
+        self.progress_bar.configure(mode="indeterminate")
+        self.progress_bar.set(0)
 
-        self.status_label = ttk.Label(status_frame, text="Idle")
+        self.status_label = ctk.CTkLabel(status_frame, text="Idle")
         self.status_label.pack(padx=10, pady=(0, 5))
 
         # -- Results section --
-        results_frame = ttk.LabelFrame(self, text="Results")
-        results_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Results", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        results_frame = ctk.CTkFrame(self)
+        results_frame.pack(fill="x", padx=10, pady=5)
 
         self.poster_var = tk.StringVar(value="Poster: —")
         self.fanart_var = tk.StringVar(value="Fanart: —")
         self.nfo_var = tk.StringVar(value="NFO: —")
         for var in (self.poster_var, self.fanart_var, self.nfo_var):
-            ttk.Label(results_frame, textvariable=var).pack(
-                anchor=tk.W, padx=10, pady=2,
+            ctk.CTkLabel(results_frame, textvariable=var).pack(
+                anchor="w", padx=10, pady=2,
             )
 
         # -- Log section --
-        log_frame = ttk.LabelFrame(self, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
-
-        self.log_text = tk.Text(log_frame, height=12, wrap=tk.WORD, state=tk.DISABLED)
-        log_scroll = ttk.Scrollbar(
-            log_frame, orient=tk.VERTICAL, command=self.log_text.yview,
+        ctk.CTkLabel(self, text="Log", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
         )
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        log_frame = ctk.CTkFrame(self)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+
+        self.log_text = ctk.CTkTextbox(log_frame, height=200, wrap="word", state="disabled")
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=5)
 
     # --------------------------------------------------------- public API
     def set_info(self, disc_name: str, dest_dir: str) -> None:
@@ -92,19 +99,19 @@ class ScrapeTab(ttk.Frame):
             return
 
         self._running = True
-        self.scrape_btn.configure(state=tk.DISABLED)
+        self.scrape_btn.configure(state="disabled")
 
         # Clear log
-        self.log_text.configure(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
         # Reset results
         self.poster_var.set("Poster: —")
         self.fanart_var.set("Fanart: —")
         self.nfo_var.set("NFO: —")
 
-        self.progress_bar.start(15)
+        self.progress_bar.start()
         self.status_label.configure(text="Scraping…")
         self.app.set_status("Scraping metadata…")
 
@@ -172,16 +179,16 @@ class ScrapeTab(ttk.Frame):
                 msg_type, payload = self._msg_queue.get_nowait()
 
                 if msg_type == "log":
-                    self.log_text.configure(state=tk.NORMAL)
-                    self.log_text.insert(tk.END, payload + "\n")
-                    self.log_text.see(tk.END)
-                    self.log_text.configure(state=tk.DISABLED)
+                    self.log_text.configure(state="normal")
+                    self.log_text.insert("end", payload + "\n")
+                    self.log_text.see("end")
+                    self.log_text.configure(state="disabled")
 
                 elif msg_type == "done":
                     poster_ok, fanart_ok, nfo_ok = payload
                     self.progress_bar.stop()
                     self.status_label.configure(text="Complete")
-                    self.scrape_btn.configure(state=tk.NORMAL)
+                    self.scrape_btn.configure(state="normal")
                     self._running = False
 
                     self.poster_var.set(f"Poster: {'✅' if poster_ok else '❌'}")

@@ -8,6 +8,8 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
+import customtkinter as ctk
+
 from core.metadata import (
     search_media,
     get_movie_details,
@@ -20,7 +22,7 @@ from core.organizer import build_movie_path, build_tv_path, organize_file, previ
 from config import load_config
 
 
-class MetadataTab(ttk.Frame):
+class MetadataTab(ctk.CTkFrame):
     """Tab for searching TMDb and organizing ripped files into a media library."""
 
     def __init__(self, parent, app):
@@ -35,33 +37,39 @@ class MetadataTab(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
         # -- File section --
-        file_frame = ttk.LabelFrame(self, text="Ripped File")
-        file_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ctk.CTkLabel(self, text="Ripped File", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        file_frame = ctk.CTkFrame(self)
+        file_frame.pack(fill="x", padx=10, pady=(5, 5))
 
         self.file_var = tk.StringVar()
-        ttk.Label(file_frame, text="File:").pack(side=tk.LEFT, padx=(10, 5), pady=5)
-        ttk.Entry(file_frame, textvariable=self.file_var, state="readonly").pack(
-            side=tk.LEFT, fill=tk.X, expand=True, pady=5
+        ctk.CTkLabel(file_frame, text="File:").pack(side="left", padx=(10, 5), pady=5)
+        ctk.CTkEntry(file_frame, textvariable=self.file_var, state="disabled").pack(
+            side="left", fill="x", expand=True, pady=5
         )
-        ttk.Button(file_frame, text="Browse…", command=self._browse_file).pack(
-            side=tk.LEFT, padx=(5, 10), pady=5
+        ctk.CTkButton(file_frame, text="Browse…", command=self._browse_file, width=80).pack(
+            side="left", padx=(5, 10), pady=5
         )
 
         # -- Search section --
-        search_frame = ttk.LabelFrame(self, text="TMDb Search")
-        search_frame.pack(fill=tk.X, padx=10, pady=5)
+        ctk.CTkLabel(self, text="TMDb Search", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        search_frame = ctk.CTkFrame(self)
+        search_frame.pack(fill="x", padx=10, pady=5)
 
-        row = ttk.Frame(search_frame)
-        row.pack(fill=tk.X, padx=10, pady=5)
+        row = ctk.CTkFrame(search_frame, fg_color="transparent")
+        row.pack(fill="x", padx=10, pady=5)
 
         self.search_var = tk.StringVar()
-        ttk.Label(row, text="Query:").pack(side=tk.LEFT, padx=(0, 5))
-        self.search_entry = ttk.Entry(row, textvariable=self.search_var)
-        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        self.search_btn = ttk.Button(row, text="Search TMDb", command=self._on_search)
-        self.search_btn.pack(side=tk.LEFT)
+        ctk.CTkLabel(row, text="Query:").pack(side="left", padx=(0, 5))
+        self.search_entry = ctk.CTkEntry(row, textvariable=self.search_var)
+        self.search_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.search_btn = ctk.CTkButton(row, text="Search TMDb", command=self._on_search)
+        self.search_btn.pack(side="left")
 
-        # Results list
+        # Results list (KEEP ttk.Treeview)
         self.results_tree = ttk.Treeview(
             search_frame,
             columns=("title", "year", "type"),
@@ -73,114 +81,117 @@ class MetadataTab(ttk.Frame):
         self.results_tree.heading("year", text="Year")
         self.results_tree.heading("type", text="Type")
         self.results_tree.column("title", width=350)
-        self.results_tree.column("year", width=80, anchor=tk.CENTER)
-        self.results_tree.column("type", width=80, anchor=tk.CENTER)
-        self.results_tree.pack(fill=tk.X, padx=10, pady=(0, 5))
+        self.results_tree.column("year", width=80, anchor="center")
+        self.results_tree.column("type", width=80, anchor="center")
+        self.results_tree.pack(fill="x", padx=10, pady=(0, 5))
         self.results_tree.bind("<<TreeviewSelect>>", self._on_result_select)
 
         # -- Detail / Organize section --
-        detail_frame = ttk.LabelFrame(self, text="Metadata && Organization")
-        detail_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        ctk.CTkLabel(self, text="Metadata & Organization", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        detail_frame = ctk.CTkFrame(self)
+        detail_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         # Media type selection
-        type_row = ttk.Frame(detail_frame)
-        type_row.pack(fill=tk.X, padx=10, pady=(5, 0))
-        ttk.Label(type_row, text="Media type:").pack(side=tk.LEFT, padx=(0, 10))
+        type_row = ctk.CTkFrame(detail_frame, fg_color="transparent")
+        type_row.pack(fill="x", padx=10, pady=(5, 0))
+        ctk.CTkLabel(type_row, text="Media type:").pack(side="left", padx=(0, 10))
         self.media_type_var = tk.StringVar(value="movie")
-        ttk.Radiobutton(
+        ctk.CTkRadioButton(
             type_row, text="Movie", variable=self.media_type_var, value="movie",
             command=self._toggle_fields,
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Radiobutton(
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkRadioButton(
             type_row, text="TV Show", variable=self.media_type_var, value="tv",
             command=self._toggle_fields,
-        ).pack(side=tk.LEFT)
+        ).pack(side="left")
 
         # Movie fields
-        self.movie_frame = ttk.Frame(detail_frame)
+        self.movie_frame = ctk.CTkFrame(detail_frame, fg_color="transparent")
 
-        r = ttk.Frame(self.movie_frame)
-        r.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(r, text="Title:").pack(side=tk.LEFT, padx=(0, 5))
+        r = ctk.CTkFrame(self.movie_frame, fg_color="transparent")
+        r.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(r, text="Title:").pack(side="left", padx=(0, 5))
         self.movie_title_var = tk.StringVar()
-        ttk.Entry(r, textvariable=self.movie_title_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(r, textvariable=self.movie_title_var).pack(
+            side="left", fill="x", expand=True
         )
 
-        r2 = ttk.Frame(self.movie_frame)
-        r2.pack(fill=tk.X, padx=10, pady=(0, 5))
-        ttk.Label(r2, text="Year:").pack(side=tk.LEFT, padx=(0, 5))
+        r2 = ctk.CTkFrame(self.movie_frame, fg_color="transparent")
+        r2.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(r2, text="Year:").pack(side="left", padx=(0, 5))
         self.movie_year_var = tk.StringVar()
-        ttk.Entry(r2, textvariable=self.movie_year_var, width=8).pack(side=tk.LEFT)
+        ctk.CTkEntry(r2, textvariable=self.movie_year_var, width=80).pack(side="left")
 
         # TV fields
-        self.tv_frame = ttk.Frame(detail_frame)
+        self.tv_frame = ctk.CTkFrame(detail_frame, fg_color="transparent")
 
-        r3 = ttk.Frame(self.tv_frame)
-        r3.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(r3, text="Show:").pack(side=tk.LEFT, padx=(0, 5))
+        r3 = ctk.CTkFrame(self.tv_frame, fg_color="transparent")
+        r3.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(r3, text="Show:").pack(side="left", padx=(0, 5))
         self.tv_show_var = tk.StringVar()
-        ttk.Entry(r3, textvariable=self.tv_show_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(r3, textvariable=self.tv_show_var).pack(
+            side="left", fill="x", expand=True
         )
 
-        r4 = ttk.Frame(self.tv_frame)
-        r4.pack(fill=tk.X, padx=10, pady=(0, 5))
-        ttk.Label(r4, text="Season:").pack(side=tk.LEFT, padx=(0, 5))
+        r4 = ctk.CTkFrame(self.tv_frame, fg_color="transparent")
+        r4.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(r4, text="Season:").pack(side="left", padx=(0, 5))
         self.tv_season_var = tk.IntVar(value=1)
-        ttk.Spinbox(r4, from_=0, to=99, textvariable=self.tv_season_var, width=5).pack(
-            side=tk.LEFT, padx=(0, 15)
+        ctk.CTkEntry(r4, textvariable=self.tv_season_var, width=60).pack(
+            side="left", padx=(0, 15)
         )
-        ttk.Label(r4, text="Episode:").pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(r4, text="Episode:").pack(side="left", padx=(0, 5))
         self.tv_episode_var = tk.IntVar(value=1)
-        ttk.Spinbox(r4, from_=0, to=999, textvariable=self.tv_episode_var, width=5).pack(
-            side=tk.LEFT
+        ctk.CTkEntry(r4, textvariable=self.tv_episode_var, width=60).pack(
+            side="left"
         )
 
-        r5 = ttk.Frame(self.tv_frame)
-        r5.pack(fill=tk.X, padx=10, pady=(0, 5))
-        ttk.Label(r5, text="Episode name:").pack(side=tk.LEFT, padx=(0, 5))
+        r5 = ctk.CTkFrame(self.tv_frame, fg_color="transparent")
+        r5.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(r5, text="Episode name:").pack(side="left", padx=(0, 5))
         self.tv_ep_name_var = tk.StringVar()
-        ttk.Entry(r5, textvariable=self.tv_ep_name_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(r5, textvariable=self.tv_ep_name_var).pack(
+            side="left", fill="x", expand=True
         )
 
         # Show movie fields by default
-        self.movie_frame.pack(fill=tk.X)
+        self.movie_frame.pack(fill="x")
 
         # -- Output override --
-        out_row = ttk.Frame(detail_frame)
-        out_row.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(out_row, text="Output dir:").pack(side=tk.LEFT, padx=(0, 5))
+        out_row = ctk.CTkFrame(detail_frame, fg_color="transparent")
+        out_row.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(out_row, text="Output dir:").pack(side="left", padx=(0, 5))
         self.output_dir_var = tk.StringVar(value=load_config().get("output_dir", ""))
-        ttk.Entry(out_row, textvariable=self.output_dir_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5)
+        ctk.CTkEntry(out_row, textvariable=self.output_dir_var).pack(
+            side="left", fill="x", expand=True, padx=(0, 5)
         )
-        ttk.Button(out_row, text="Browse…", command=self._browse_output).pack(side=tk.LEFT)
+        ctk.CTkButton(out_row, text="Browse…", command=self._browse_output, width=80).pack(side="left")
 
         # -- Preview / Organize --
-        action_frame = ttk.Frame(detail_frame)
-        action_frame.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Button(action_frame, text="Preview", command=self._on_preview).pack(
-            side=tk.LEFT, padx=(0, 5)
+        action_frame = ctk.CTkFrame(detail_frame, fg_color="transparent")
+        action_frame.pack(fill="x", padx=10, pady=5)
+        ctk.CTkButton(action_frame, text="Preview", command=self._on_preview).pack(
+            side="left", padx=(0, 5)
         )
-        ttk.Button(action_frame, text="Organize", command=self._on_organize).pack(
-            side=tk.LEFT
+        ctk.CTkButton(action_frame, text="Organize", command=self._on_organize).pack(
+            side="left"
         )
 
         self.preview_var = tk.StringVar(value="")
-        ttk.Label(
-            detail_frame, textvariable=self.preview_var, wraplength=700, foreground="gray"
-        ).pack(fill=tk.X, padx=10, pady=(0, 10))
+        ctk.CTkLabel(
+            detail_frame, textvariable=self.preview_var, wraplength=700, text_color="gray"
+        ).pack(fill="x", padx=10, pady=(0, 10))
 
     # --------------------------------------------------------- field toggle
     def _toggle_fields(self):
         self.movie_frame.pack_forget()
         self.tv_frame.pack_forget()
         if self.media_type_var.get() == "movie":
-            self.movie_frame.pack(fill=tk.X)
+            self.movie_frame.pack(fill="x")
         else:
-            self.tv_frame.pack(fill=tk.X)
+            self.tv_frame.pack(fill="x")
 
     # --------------------------------------------------------- file browse
     def _browse_file(self):
@@ -210,7 +221,7 @@ class MetadataTab(ttk.Frame):
         if not query:
             messagebox.showwarning("Empty query", "Enter a search query first.")
             return
-        self.search_btn.configure(state=tk.DISABLED)
+        self.search_btn.configure(state="disabled")
         self.app.set_status("Searching TMDb…")
         threading.Thread(target=self._search_worker, args=(query,), daemon=True).start()
         self.after(100, self._poll_queue)
@@ -315,10 +326,10 @@ class MetadataTab(ttk.Frame):
                     for i, r in enumerate(payload):
                         year_str = str(r.year) if r.year else ""
                         self.results_tree.insert(
-                            "", tk.END, iid=str(i),
+                            "", "end", iid=str(i),
                             values=(r.title, year_str, r.media_type.title()),
                         )
-                    self.search_btn.configure(state=tk.NORMAL)
+                    self.search_btn.configure(state="normal")
                     count = len(payload)
                     self.app.set_status(
                         f"Found {count} result{'s' if count != 1 else ''}"
@@ -327,7 +338,7 @@ class MetadataTab(ttk.Frame):
                         messagebox.showinfo("No results", "No matches found on TMDb.")
 
                 elif msg_type == "search_err":
-                    self.search_btn.configure(state=tk.NORMAL)
+                    self.search_btn.configure(state="normal")
                     self.app.set_status("Search failed")
                     messagebox.showerror("Search Error", str(payload))
 

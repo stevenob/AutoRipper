@@ -6,6 +6,8 @@ import queue
 import tkinter as tk
 from tkinter import ttk
 
+import customtkinter as ctk
+
 from core.job_queue import JobQueue
 
 _STATUS_ICONS = {
@@ -18,7 +20,7 @@ _STATUS_ICONS = {
 }
 
 
-class QueueTab(ttk.Frame):
+class QueueTab(ctk.CTkFrame):
     """Tab displaying the background job queue."""
 
     def __init__(self, parent: tk.Widget, *, app: object, job_queue: JobQueue) -> None:
@@ -38,7 +40,7 @@ class QueueTab(ttk.Frame):
     # ------------------------------------------------------------------ UI
 
     def _build_ui(self) -> None:
-        # Treeview for jobs
+        # Treeview for jobs (KEEP ttk.Treeview)
         columns = ("status", "title", "step", "progress")
         self.tree = ttk.Treeview(self, columns=columns, show="headings", selectmode="browse")
         self.tree.heading("status", text="Status")
@@ -46,26 +48,26 @@ class QueueTab(ttk.Frame):
         self.tree.heading("step", text="Step")
         self.tree.heading("progress", text="Progress")
 
-        self.tree.column("status", width=120, anchor=tk.W)
-        self.tree.column("title", width=300, anchor=tk.W)
-        self.tree.column("step", width=200, anchor=tk.W)
-        self.tree.column("progress", width=80, anchor=tk.CENTER)
+        self.tree.column("status", width=120, anchor="w")
+        self.tree.column("title", width=300, anchor="w")
+        self.tree.column("step", width=200, anchor="w")
+        self.tree.column("progress", width=80, anchor="center")
 
-        scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
 
-        self.tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(10, 0))
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 0))
+        scrollbar.pack(side="right", fill="y")
 
         # Bottom bar
-        bottom = ttk.Frame(self)
-        bottom.pack(fill=tk.X, padx=10, pady=10)
+        bottom = ctk.CTkFrame(self, fg_color="transparent")
+        bottom.pack(fill="x", padx=10, pady=10)
 
-        self.abort_btn = ttk.Button(bottom, text="Abort Current", command=self._on_abort)
-        self.abort_btn.pack(side=tk.LEFT)
+        self.abort_btn = ctk.CTkButton(bottom, text="Abort Current", command=self._on_abort)
+        self.abort_btn.pack(side="left")
 
-        self.status_label = ttk.Label(bottom, text="Queue idle")
-        self.status_label.pack(side=tk.LEFT, padx=(15, 0))
+        self.status_label = ctk.CTkLabel(bottom, text="Queue idle")
+        self.status_label.pack(side="left", padx=(15, 0))
 
     # ------------------------------------------------------------------ callbacks
 
@@ -101,7 +103,7 @@ class QueueTab(ttk.Frame):
             progress_text = f"{job.progress}%" if job.status not in ("queued", "done", "failed") else ""
             self.tree.insert(
                 "",
-                tk.END,
+                "end",
                 iid=job.id,
                 values=(status_text, job.disc_name, job.progress_text, progress_text),
             )

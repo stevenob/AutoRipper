@@ -9,6 +9,8 @@ import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+import customtkinter as ctk
+
 from core.makemkv import (
     scan_disc,
     rip_title,
@@ -67,7 +69,7 @@ def _resolution_label(resolution: str) -> str:
     return f"{height}p"
 
 
-class RipTab(ttk.Frame):
+class RipTab(ctk.CTkFrame):
     """Tab for scanning a disc and ripping selected titles."""
 
     def __init__(self, parent, app):
@@ -86,30 +88,34 @@ class RipTab(ttk.Frame):
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
         # -- Scan section --
-        scan_frame = ttk.LabelFrame(self, text="Disc Scanner")
-        scan_frame.pack(fill=tk.X, padx=10, pady=(10, 5))
+        ctk.CTkLabel(self, text="Disc Scanner", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        scan_frame = ctk.CTkFrame(self)
+        scan_frame.pack(fill="x", padx=10, pady=(5, 5))
 
-        btn_row = ttk.Frame(scan_frame)
-        btn_row.pack(fill=tk.X, padx=10, pady=5)
+        btn_row = ctk.CTkFrame(scan_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=5)
 
-        self.scan_btn = ttk.Button(btn_row, text="Scan Disc", command=self._on_scan)
-        self.scan_btn.pack(side=tk.LEFT)
+        self.scan_btn = ctk.CTkButton(btn_row, text="Scan Disc", command=self._on_scan)
+        self.scan_btn.pack(side="left")
 
-        ttk.Label(btn_row, text="Min duration (s):").pack(side=tk.LEFT, padx=(15, 0))
+        ctk.CTkLabel(btn_row, text="Min duration (s):").pack(side="left", padx=(15, 0))
         config = load_config()
         self.min_duration_var = tk.IntVar(value=config.get("min_duration", 120))
-        self.min_duration_spin = ttk.Spinbox(
-            btn_row, from_=0, to=9999, width=6,
-            textvariable=self.min_duration_var
+        ctk.CTkEntry(btn_row, textvariable=self.min_duration_var, width=80).pack(
+            side="left", padx=(5, 0)
         )
-        self.min_duration_spin.pack(side=tk.LEFT, padx=(5, 0))
 
-        self.disc_label = ttk.Label(btn_row, text="No disc scanned")
-        self.disc_label.pack(side=tk.LEFT, padx=(15, 0))
+        self.disc_label = ctk.CTkLabel(btn_row, text="No disc scanned")
+        self.disc_label.pack(side="left", padx=(15, 0))
 
-        # -- Title list --
-        list_frame = ttk.LabelFrame(self, text="Titles")
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # -- Title list (KEEP ttk.Treeview) --
+        ctk.CTkLabel(self, text="Titles", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        list_frame = ctk.CTkFrame(self)
+        list_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
         columns = ("select", "title", "resolution", "duration", "size", "chapters")
         self.tree = ttk.Treeview(
@@ -122,73 +128,75 @@ class RipTab(ttk.Frame):
         self.tree.heading("size", text="Size")
         self.tree.heading("chapters", text="Chapters")
 
-        self.tree.column("select", width=40, anchor=tk.CENTER, stretch=False)
+        self.tree.column("select", width=40, anchor="center", stretch=False)
         self.tree.column("title", width=250)
-        self.tree.column("resolution", width=90, anchor=tk.CENTER)
-        self.tree.column("duration", width=90, anchor=tk.CENTER)
-        self.tree.column("size", width=90, anchor=tk.CENTER)
-        self.tree.column("chapters", width=70, anchor=tk.CENTER)
+        self.tree.column("resolution", width=90, anchor="center")
+        self.tree.column("duration", width=90, anchor="center")
+        self.tree.column("size", width=90, anchor="center")
+        self.tree.column("chapters", width=70, anchor="center")
 
-        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        self.tree.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=5)
+        scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=5)
 
         self.tree.bind("<ButtonRelease-1>", self._on_tree_click)
 
         # -- Select / Deselect buttons --
-        sel_frame = ttk.Frame(self)
-        sel_frame.pack(fill=tk.X, padx=10)
+        sel_frame = ctk.CTkFrame(self, fg_color="transparent")
+        sel_frame.pack(fill="x", padx=10)
 
-        ttk.Button(sel_frame, text="Select All", command=self._select_all).pack(
-            side=tk.LEFT, padx=(0, 5)
+        ctk.CTkButton(sel_frame, text="Select All", command=self._select_all, width=100).pack(
+            side="left", padx=(0, 5)
         )
-        ttk.Button(sel_frame, text="Deselect All", command=self._deselect_all).pack(
-            side=tk.LEFT
+        ctk.CTkButton(sel_frame, text="Deselect All", command=self._deselect_all, width=100).pack(
+            side="left"
         )
 
-        self.rip_btn = ttk.Button(
-            sel_frame, text="Rip Selected", command=self._on_rip, state=tk.DISABLED
+        self.rip_btn = ctk.CTkButton(
+            sel_frame, text="Rip Selected", command=self._on_rip, state="disabled"
         )
-        self.rip_btn.pack(side=tk.RIGHT)
+        self.rip_btn.pack(side="right")
 
-        self.full_auto_btn = ttk.Button(
-            sel_frame, text="⚡ Full Auto", command=self._on_full_auto, state=tk.DISABLED
+        self.full_auto_btn = ctk.CTkButton(
+            sel_frame, text="⚡ Full Auto", command=self._on_full_auto, state="disabled"
         )
-        self.full_auto_btn.pack(side=tk.RIGHT, padx=(0, 5))
+        self.full_auto_btn.pack(side="right", padx=(0, 5))
 
-        self.abort_btn = ttk.Button(
-            sel_frame, text="Abort", command=self._on_abort, state=tk.DISABLED
+        self.abort_btn = ctk.CTkButton(
+            sel_frame, text="Abort", command=self._on_abort, state="disabled"
         )
-        self.abort_btn.pack(side=tk.RIGHT, padx=(0, 5))
+        self.abort_btn.pack(side="right", padx=(0, 5))
 
         self.auto_eject_var = tk.BooleanVar(value=config.get("auto_eject", True))
-        ttk.Checkbutton(
-            sel_frame, text="Eject disc after rip", variable=self.auto_eject_var
-        ).pack(side=tk.RIGHT, padx=(0, 15))
+        ctk.CTkCheckBox(
+            sel_frame, text="Eject disc after rip", variable=self.auto_eject_var,
+            onvalue=True, offvalue=False,
+        ).pack(side="right", padx=(0, 15))
 
         # -- Progress section --
-        prog_frame = ttk.LabelFrame(self, text="Progress")
-        prog_frame.pack(fill=tk.X, padx=10, pady=(5, 0))
-
-        self.progress_var = tk.IntVar(value=0)
-        self.progress_bar = ttk.Progressbar(
-            prog_frame, variable=self.progress_var, maximum=100
+        ctk.CTkLabel(self, text="Progress", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
         )
-        self.progress_bar.pack(fill=tk.X, padx=10, pady=(5, 0))
+        prog_frame = ctk.CTkFrame(self)
+        prog_frame.pack(fill="x", padx=10, pady=(5, 0))
 
-        self.progress_label = ttk.Label(prog_frame, text="Idle")
+        self.progress_bar = ctk.CTkProgressBar(prog_frame)
+        self.progress_bar.pack(fill="x", padx=10, pady=(5, 0))
+        self.progress_bar.set(0)
+
+        self.progress_label = ctk.CTkLabel(prog_frame, text="Idle")
         self.progress_label.pack(padx=10, pady=(0, 5))
 
         # -- Log output --
-        log_frame = ttk.LabelFrame(self, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
+        ctk.CTkLabel(self, text="Log", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(5, 0)
+        )
+        log_frame = ctk.CTkFrame(self)
+        log_frame.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
-        self.log_text = tk.Text(log_frame, height=6, wrap=tk.WORD, state=tk.DISABLED)
-        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
-        self.log_text.configure(yscrollcommand=log_scroll.set)
-        self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(10, 0), pady=5)
-        log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 10), pady=5)
+        self.log_text = ctk.CTkTextbox(log_frame, height=100, wrap="word", state="disabled")
+        self.log_text.pack(fill="both", expand=True, padx=10, pady=5)
 
     # --------------------------------------------------------- tree helpers
     def _on_tree_click(self, event):
@@ -244,26 +252,26 @@ class RipTab(ttk.Frame):
             res_label = _resolution_label(t.resolution)
             self.tree.insert(
                 "",
-                tk.END,
+                "end",
                 iid=str(t.id),
                 values=("☑" if selected else "☐", t.name, res_label, t.duration, _human_size(t.size_bytes), t.chapters),
             )
-        self.rip_btn.configure(state=tk.NORMAL)
-        self.full_auto_btn.configure(state=tk.NORMAL)
+        self.rip_btn.configure(state="normal")
+        self.full_auto_btn.configure(state="normal")
 
     # ---------------------------------------------------------- scan logic
     def _on_scan(self):
-        self.scan_btn.configure(state=tk.DISABLED)
-        self.rip_btn.configure(state=tk.DISABLED)
+        self.scan_btn.configure(state="disabled")
+        self.rip_btn.configure(state="disabled")
         self.disc_label.configure(text="Scanning…")
         self.progress_label.configure(text="Scanning disc…")
-        self.progress_var.set(0)
+        self.progress_bar.set(0)
         self.progress_bar.configure(mode="indeterminate")
-        self.progress_bar.start(15)
+        self.progress_bar.start()
 
-        self.log_text.configure(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
         threading.Thread(target=self._scan_worker, daemon=True).start()
         self.after(100, self._poll_queue)
@@ -318,17 +326,17 @@ class RipTab(ttk.Frame):
         if folder_name:
             output_dir = os.path.join(output_dir, clean_filename(folder_name))
 
-        self.scan_btn.configure(state=tk.DISABLED)
-        self.rip_btn.configure(state=tk.DISABLED)
-        self.full_auto_btn.configure(state=tk.DISABLED)
-        self.abort_btn.configure(state=tk.NORMAL)
+        self.scan_btn.configure(state="disabled")
+        self.rip_btn.configure(state="disabled")
+        self.full_auto_btn.configure(state="disabled")
+        self.abort_btn.configure(state="normal")
         self._aborted = False
         self.progress_bar.configure(mode="determinate")
-        self.progress_var.set(0)
+        self.progress_bar.set(0)
         self.progress_label.configure(text="Starting rip…")
-        self.log_text.configure(state=tk.NORMAL)
-        self.log_text.delete("1.0", tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
 
         threading.Thread(
             target=self._rip_worker, args=(selected, output_dir), daemon=True
@@ -340,7 +348,7 @@ class RipTab(ttk.Frame):
         self._aborted = True
         if self._proc and self._proc.poll() is None:
             self._proc.kill()
-        self.abort_btn.configure(state=tk.DISABLED)
+        self.abort_btn.configure(state="disabled")
         self.progress_label.configure(text="Aborting…")
 
     def _rip_worker(self, title_ids: list[int], output_dir: str):
@@ -452,10 +460,10 @@ class RipTab(ttk.Frame):
                 msg_type, payload = self._msg_queue.get_nowait()
 
                 if msg_type == "scan_log":
-                    self.log_text.configure(state=tk.NORMAL)
-                    self.log_text.insert(tk.END, payload + "\n")
-                    self.log_text.see(tk.END)
-                    self.log_text.configure(state=tk.DISABLED)
+                    self.log_text.configure(state="normal")
+                    self.log_text.insert("end", payload + "\n")
+                    self.log_text.see("end")
+                    self.log_text.configure(state="disabled")
 
                 elif msg_type == "scan_ok":
                     disc, tmdb_title = payload
@@ -468,48 +476,48 @@ class RipTab(ttk.Frame):
                     self._populate_titles()
                     self.progress_bar.stop()
                     self.progress_bar.configure(mode="determinate")
-                    self.progress_var.set(0)
+                    self.progress_bar.set(0)
                     self.progress_label.configure(text="Scan complete")
-                    self.scan_btn.configure(state=tk.NORMAL)
+                    self.scan_btn.configure(state="normal")
                     self.app.set_status(f"Scanned: {display_name}")
 
                 elif msg_type == "scan_err":
                     self.progress_bar.stop()
                     self.progress_bar.configure(mode="determinate")
-                    self.progress_var.set(0)
+                    self.progress_bar.set(0)
                     self.progress_label.configure(text="Scan failed")
                     self.disc_label.configure(text="No disc scanned")
-                    self.scan_btn.configure(state=tk.NORMAL)
+                    self.scan_btn.configure(state="normal")
                     messagebox.showerror("Scan Error", str(payload))
 
                 elif msg_type == "rip_progress":
                     percent, label = payload
-                    self.progress_var.set(percent)
+                    self.progress_bar.set(percent / 100)
                     self.progress_label.configure(text=label)
 
                 elif msg_type == "rip_log":
-                    self.log_text.configure(state=tk.NORMAL)
-                    self.log_text.insert(tk.END, payload + "\n")
-                    self.log_text.see(tk.END)
-                    self.log_text.configure(state=tk.DISABLED)
+                    self.log_text.configure(state="normal")
+                    self.log_text.insert("end", payload + "\n")
+                    self.log_text.see("end")
+                    self.log_text.configure(state="disabled")
 
                 elif msg_type == "rip_err":
                     self.progress_label.configure(text="Rip failed")
-                    self.scan_btn.configure(state=tk.NORMAL)
-                    self.rip_btn.configure(state=tk.NORMAL)
-                    self.full_auto_btn.configure(state=tk.NORMAL)
-                    self.abort_btn.configure(state=tk.DISABLED)
+                    self.scan_btn.configure(state="normal")
+                    self.rip_btn.configure(state="normal")
+                    self.full_auto_btn.configure(state="normal")
+                    self.abort_btn.configure(state="disabled")
                     self._full_auto = False
                     messagebox.showerror("Rip Error", str(payload))
 
                 elif msg_type == "rip_done":
                     ripped = payload
-                    self.progress_var.set(100)
+                    self.progress_bar.set(1.0)
                     self.progress_label.configure(text="Rip complete")
-                    self.scan_btn.configure(state=tk.NORMAL)
-                    self.rip_btn.configure(state=tk.NORMAL)
-                    self.full_auto_btn.configure(state=tk.NORMAL)
-                    self.abort_btn.configure(state=tk.DISABLED)
+                    self.scan_btn.configure(state="normal")
+                    self.rip_btn.configure(state="normal")
+                    self.full_auto_btn.configure(state="normal")
+                    self.abort_btn.configure(state="disabled")
                     self.app.set_status(f"Ripped {len(ripped)} title(s)")
                     # Auto-eject disc
                     if self.auto_eject_var.get():

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 from config import load_config, save_config
 from core.organizer import build_movie_path, organize_file, clean_filename
@@ -16,8 +18,11 @@ from gui.metadata_tab import MetadataTab
 from gui.scrape_tab import ScrapeTab
 from gui.queue_tab import QueueTab
 
+ctk.set_appearance_mode("system")
+ctk.set_default_color_theme("blue")
 
-class AutoRipperApp(tk.Tk):
+
+class AutoRipperApp(ctk.CTk):
     """Root window containing tabbed interface for rip, organize, and settings."""
 
     def __init__(self):
@@ -30,126 +35,139 @@ class AutoRipperApp(tk.Tk):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True)
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=5, pady=(5, 0))
 
-        # Tabs
-        self.rip_tab = RipTab(self.notebook, app=self)
-        self.encode_tab = EncodeTab(self.notebook, app=self)
-        self.metadata_tab = MetadataTab(self.notebook, app=self)
-        self.scrape_tab = ScrapeTab(self.notebook, app=self)
+        # Add tabs
+        rip_frame = self.tabview.add("Rip")
+        encode_frame = self.tabview.add("Encode")
+        organize_frame = self.tabview.add("Organize")
+        scrape_frame = self.tabview.add("Scrape")
+        queue_frame = self.tabview.add("Queue")
+        settings_frame = self.tabview.add("Settings")
+
+        # Create tab contents
+        self.rip_tab = RipTab(rip_frame, app=self)
+        self.rip_tab.pack(fill="both", expand=True)
+
+        self.encode_tab = EncodeTab(encode_frame, app=self)
+        self.encode_tab.pack(fill="both", expand=True)
+
+        self.metadata_tab = MetadataTab(organize_frame, app=self)
+        self.metadata_tab.pack(fill="both", expand=True)
+
+        self.scrape_tab = ScrapeTab(scrape_frame, app=self)
+        self.scrape_tab.pack(fill="both", expand=True)
+
         self.job_queue = JobQueue()
-        self.queue_tab = QueueTab(self.notebook, app=self, job_queue=self.job_queue)
-        self.settings_frame = self._build_settings_tab()
+        self.queue_tab = QueueTab(queue_frame, app=self, job_queue=self.job_queue)
+        self.queue_tab.pack(fill="both", expand=True)
 
-        self.notebook.add(self.rip_tab, text="Rip")
-        self.notebook.add(self.encode_tab, text="Encode")
-        self.notebook.add(self.metadata_tab, text="Organize")
-        self.notebook.add(self.scrape_tab, text="Scrape")
-        self.notebook.add(self.queue_tab, text="Queue")
-        self.notebook.add(self.settings_frame, text="Settings")
+        self._build_settings_tab(settings_frame)
 
         # Status bar
         self.status_var = tk.StringVar(value="Ready")
-        status_bar = ttk.Label(
-            self, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W, padding=(10, 2)
-        )
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        status_bar = ctk.CTkLabel(self, textvariable=self.status_var, anchor="w")
+        status_bar.pack(side="bottom", fill="x", padx=10, pady=(0, 5))
 
-    def _build_settings_tab(self) -> ttk.Frame:
-        frame = ttk.Frame(self.notebook)
+    def _build_settings_tab(self, frame: ctk.CTkFrame) -> None:
         config = load_config()
 
-        settings_group = ttk.LabelFrame(frame, text="Application Settings")
-        settings_group.pack(fill=tk.X, padx=10, pady=10)
+        ctk.CTkLabel(frame, text="Application Settings", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        settings_group = ctk.CTkFrame(frame)
+        settings_group.pack(fill="x", padx=10, pady=(5, 10))
 
         # Output directory
-        row1 = ttk.Frame(settings_group)
-        row1.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(row1, text="Output directory:").pack(side=tk.LEFT, padx=(0, 5))
+        row1 = ctk.CTkFrame(settings_group, fg_color="transparent")
+        row1.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(row1, text="Output directory:").pack(side="left", padx=(0, 5))
         self.settings_output_var = tk.StringVar(value=config.get("output_dir", ""))
-        ttk.Entry(row1, textvariable=self.settings_output_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5)
+        ctk.CTkEntry(row1, textvariable=self.settings_output_var).pack(
+            side="left", fill="x", expand=True, padx=(0, 5)
         )
-        ttk.Button(row1, text="Browse…", command=self._browse_output_dir).pack(side=tk.LEFT)
+        ctk.CTkButton(row1, text="Browse…", command=self._browse_output_dir, width=80).pack(side="left")
 
         # TMDb API key
-        row2 = ttk.Frame(settings_group)
-        row2.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(row2, text="TMDb API key:").pack(side=tk.LEFT, padx=(0, 5))
+        row2 = ctk.CTkFrame(settings_group, fg_color="transparent")
+        row2.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(row2, text="TMDb API key:").pack(side="left", padx=(0, 5))
         self.settings_tmdb_var = tk.StringVar(value=config.get("tmdb_api_key", ""))
-        ttk.Entry(row2, textvariable=self.settings_tmdb_var, show="•").pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(row2, textvariable=self.settings_tmdb_var, show="•").pack(
+            side="left", fill="x", expand=True
         )
 
         # MakeMKV binary path
-        row3 = ttk.Frame(settings_group)
-        row3.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(row3, text="MakeMKV path:").pack(side=tk.LEFT, padx=(0, 5))
+        row3 = ctk.CTkFrame(settings_group, fg_color="transparent")
+        row3.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(row3, text="MakeMKV path:").pack(side="left", padx=(0, 5))
         self.settings_mkv_var = tk.StringVar(value=config.get("makemkv_path", ""))
-        ttk.Entry(row3, textvariable=self.settings_mkv_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(row3, textvariable=self.settings_mkv_var).pack(
+            side="left", fill="x", expand=True
         )
 
         # HandBrake binary path
-        row4 = ttk.Frame(settings_group)
-        row4.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(row4, text="HandBrake path:").pack(side=tk.LEFT, padx=(0, 5))
+        row4 = ctk.CTkFrame(settings_group, fg_color="transparent")
+        row4.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(row4, text="HandBrake path:").pack(side="left", padx=(0, 5))
         self.settings_hb_var = tk.StringVar(
             value=config.get("handbrake_path", "/opt/homebrew/bin/HandBrakeCLI")
         )
-        ttk.Entry(row4, textvariable=self.settings_hb_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(row4, textvariable=self.settings_hb_var).pack(
+            side="left", fill="x", expand=True
         )
 
         # -- Preferences (auto-saved) --
-        prefs_group = ttk.LabelFrame(frame, text="Preferences (auto-saved)")
-        prefs_group.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ctk.CTkLabel(frame, text="Preferences (auto-saved)", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        prefs_group = ctk.CTkFrame(frame)
+        prefs_group.pack(fill="x", padx=10, pady=(5, 10))
 
         # Min duration
-        prow1 = ttk.Frame(prefs_group)
-        prow1.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(prow1, text="Min title duration (seconds):").pack(side=tk.LEFT, padx=(0, 5))
+        prow1 = ctk.CTkFrame(prefs_group, fg_color="transparent")
+        prow1.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(prow1, text="Min title duration (seconds):").pack(side="left", padx=(0, 5))
         self.settings_min_dur_var = tk.IntVar(value=config.get("min_duration", 120))
-        ttk.Spinbox(prow1, from_=0, to=9999, width=6, textvariable=self.settings_min_dur_var,
-                    command=self._auto_save_prefs).pack(side=tk.LEFT)
+        ctk.CTkEntry(prow1, textvariable=self.settings_min_dur_var, width=80).pack(side="left")
 
         # Auto-eject
-        prow2 = ttk.Frame(prefs_group)
-        prow2.pack(fill=tk.X, padx=10, pady=5)
+        prow2 = ctk.CTkFrame(prefs_group, fg_color="transparent")
+        prow2.pack(fill="x", padx=10, pady=5)
         self.settings_auto_eject_var = tk.BooleanVar(value=config.get("auto_eject", True))
-        ttk.Checkbutton(prow2, text="Auto-eject disc after rip", variable=self.settings_auto_eject_var,
-                        command=self._auto_save_prefs).pack(side=tk.LEFT)
+        ctk.CTkCheckBox(
+            prow2, text="Auto-eject disc after rip", variable=self.settings_auto_eject_var,
+            command=self._auto_save_prefs, onvalue=True, offvalue=False,
+        ).pack(side="left")
 
         # Default preset
-        prow3 = ttk.Frame(prefs_group)
-        prow3.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(prow3, text="Default HandBrake preset:").pack(side=tk.LEFT, padx=(0, 5))
+        prow3 = ctk.CTkFrame(prefs_group, fg_color="transparent")
+        prow3.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(prow3, text="Default HandBrake preset:").pack(side="left", padx=(0, 5))
         self.settings_preset_var = tk.StringVar(value=config.get("default_preset", "HQ 1080p30 Surround"))
         self.settings_preset_var.trace_add("write", lambda *_: self._auto_save_prefs())
-        ttk.Entry(prow3, textvariable=self.settings_preset_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
+        ctk.CTkEntry(prow3, textvariable=self.settings_preset_var).pack(
+            side="left", fill="x", expand=True
         )
 
         # Default media type
-        prow4 = ttk.Frame(prefs_group)
-        prow4.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(prow4, text="Default media type:").pack(side=tk.LEFT, padx=(0, 5))
+        prow4 = ctk.CTkFrame(prefs_group, fg_color="transparent")
+        prow4.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(prow4, text="Default media type:").pack(side="left", padx=(0, 5))
         self.settings_media_type_var = tk.StringVar(value=config.get("default_media_type", "movie"))
         self.settings_media_type_var.trace_add("write", lambda *_: self._auto_save_prefs())
-        ttk.Radiobutton(prow4, text="Movie", variable=self.settings_media_type_var, value="movie").pack(
-            side=tk.LEFT, padx=(0, 10)
+        ctk.CTkRadioButton(prow4, text="Movie", variable=self.settings_media_type_var, value="movie").pack(
+            side="left", padx=(0, 10)
         )
-        ttk.Radiobutton(prow4, text="TV Show", variable=self.settings_media_type_var, value="tvshow").pack(
-            side=tk.LEFT
+        ctk.CTkRadioButton(prow4, text="TV Show", variable=self.settings_media_type_var, value="tvshow").pack(
+            side="left"
         )
 
         # Save button
-        btn_row = ttk.Frame(settings_group)
-        btn_row.pack(fill=tk.X, padx=10, pady=(5, 10))
-        ttk.Button(btn_row, text="Save Settings", command=self._save_settings).pack(side=tk.LEFT)
-
-        return frame
+        btn_row = ctk.CTkFrame(settings_group, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=(5, 10))
+        ctk.CTkButton(btn_row, text="Save Settings", command=self._save_settings).pack(side="left")
 
     # --------------------------------------------------------- settings helpers
     def _browse_output_dir(self):
@@ -192,11 +210,11 @@ class AutoRipperApp(tk.Tk):
         """Called by RipTab when a rip finishes."""
         if auto_start:
             self.job_queue.add_job(disc_name, file_path)
-            self.notebook.select(self.queue_tab)
+            self.tabview.set("Queue")
             self.set_status(f"Queued: {disc_name}")
         else:
             self.encode_tab.set_file(file_path, disc_name, auto_start=False, resolution=resolution)
-            self.notebook.select(self.encode_tab)
+            self.tabview.set("Encode")
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):
         """Called by EncodeTab when encoding finishes — auto-organize and scrape."""
@@ -204,7 +222,6 @@ class AutoRipperApp(tk.Tk):
         output_dir = config.get("output_dir", "")
 
         if disc_name and output_dir:
-            # Look up TMDb for proper title and year
             try:
                 results = search_media(disc_name)
                 if results:
@@ -221,24 +238,22 @@ class AutoRipperApp(tk.Tk):
                 self.set_status(f"Organized: {os.path.basename(final_path)}")
             except Exception as exc:
                 self.set_status(f"Auto-organize failed: {exc}")
-                # Fall back to manual organize
                 self.metadata_tab.set_file(file_path, disc_name)
-                self.notebook.select(self.metadata_tab)
+                self.tabview.set("Organize")
                 return
         else:
-            # No disc name or output dir — fall back to manual organize
             self.metadata_tab.set_file(file_path, disc_name)
-            self.notebook.select(self.metadata_tab)
+            self.tabview.set("Organize")
             return
 
         self.scrape_tab.set_info(disc_name, os.path.dirname(final_path))
-        self.notebook.select(self.scrape_tab)
+        self.tabview.set("Scrape")
         self.scrape_tab.auto_scrape()
 
     def on_organize_complete(self, disc_name: str = "", dest_dir: str = ""):
         """Called after organizing finishes — switches to the Scrape tab."""
         self.scrape_tab.set_info(disc_name, dest_dir)
-        self.notebook.select(self.scrape_tab)
+        self.tabview.set("Scrape")
         self.scrape_tab.auto_scrape()
 
     def set_status(self, text: str):
