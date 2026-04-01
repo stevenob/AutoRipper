@@ -111,8 +111,8 @@ class AutoRipperApp(tk.Tk):
             side=tk.LEFT, fill=tk.X, expand=True
         )
 
-        # -- Preferences --
-        prefs_group = ttk.LabelFrame(frame, text="Preferences")
+        # -- Preferences (auto-saved) --
+        prefs_group = ttk.LabelFrame(frame, text="Preferences (auto-saved)")
         prefs_group.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # Min duration
@@ -120,23 +120,22 @@ class AutoRipperApp(tk.Tk):
         prow1.pack(fill=tk.X, padx=10, pady=5)
         ttk.Label(prow1, text="Min title duration (seconds):").pack(side=tk.LEFT, padx=(0, 5))
         self.settings_min_dur_var = tk.IntVar(value=config.get("min_duration", 120))
-        ttk.Spinbox(prow1, from_=0, to=9999, width=6, textvariable=self.settings_min_dur_var).pack(
-            side=tk.LEFT
-        )
+        ttk.Spinbox(prow1, from_=0, to=9999, width=6, textvariable=self.settings_min_dur_var,
+                    command=self._auto_save_prefs).pack(side=tk.LEFT)
 
         # Auto-eject
         prow2 = ttk.Frame(prefs_group)
         prow2.pack(fill=tk.X, padx=10, pady=5)
         self.settings_auto_eject_var = tk.BooleanVar(value=config.get("auto_eject", True))
-        ttk.Checkbutton(prow2, text="Auto-eject disc after rip", variable=self.settings_auto_eject_var).pack(
-            side=tk.LEFT
-        )
+        ttk.Checkbutton(prow2, text="Auto-eject disc after rip", variable=self.settings_auto_eject_var,
+                        command=self._auto_save_prefs).pack(side=tk.LEFT)
 
         # Default preset
         prow3 = ttk.Frame(prefs_group)
         prow3.pack(fill=tk.X, padx=10, pady=5)
         ttk.Label(prow3, text="Default HandBrake preset:").pack(side=tk.LEFT, padx=(0, 5))
         self.settings_preset_var = tk.StringVar(value=config.get("default_preset", "HQ 1080p30 Surround"))
+        self.settings_preset_var.trace_add("write", lambda *_: self._auto_save_prefs())
         ttk.Entry(prow3, textvariable=self.settings_preset_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True
         )
@@ -146,6 +145,7 @@ class AutoRipperApp(tk.Tk):
         prow4.pack(fill=tk.X, padx=10, pady=5)
         ttk.Label(prow4, text="Default media type:").pack(side=tk.LEFT, padx=(0, 5))
         self.settings_media_type_var = tk.StringVar(value=config.get("default_media_type", "movie"))
+        self.settings_media_type_var.trace_add("write", lambda *_: self._auto_save_prefs())
         ttk.Radiobutton(prow4, text="Movie", variable=self.settings_media_type_var, value="movie").pack(
             side=tk.LEFT, padx=(0, 10)
         )
@@ -184,6 +184,18 @@ class AutoRipperApp(tk.Tk):
             messagebox.showinfo("Settings", "Settings saved successfully.")
         except Exception as exc:
             messagebox.showerror("Error", f"Failed to save settings:\n{exc}")
+
+    def _auto_save_prefs(self):
+        """Silently save preferences when they change."""
+        try:
+            config = load_config()
+            config["min_duration"] = self.settings_min_dur_var.get()
+            config["auto_eject"] = self.settings_auto_eject_var.get()
+            config["default_preset"] = self.settings_preset_var.get().strip()
+            config["default_media_type"] = self.settings_media_type_var.get()
+            save_config(config)
+        except Exception:
+            pass
 
     # --------------------------------------------------------- inter-tab API
     def on_rip_complete(self, file_path: str, disc_name: str = ""):
