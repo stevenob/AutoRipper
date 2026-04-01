@@ -1,4 +1,4 @@
-"""Background job queue for the encode → organize → tMM pipeline."""
+"""Background job queue for the encode → organize → scrape pipeline."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class Job:
 
 
 class JobQueue:
-    """Background job processor for encode → organize → tMM pipeline."""
+    """Background job processor for encode → organize → scrape pipeline."""
 
     def __init__(self) -> None:
         self._jobs: list[Job] = []
@@ -95,12 +95,12 @@ class JobQueue:
         return None
 
     def _process_job(self, job: Job) -> None:
-        """Run encode → organize → tMM for a single job."""
+        """Run encode → organize → scrape for a single job."""
         from config import load_config
         from core.handbrake import encode
         from core.organizer import build_movie_path, organize_file, clean_filename
         from core.metadata import search_media
-        from core.tmm import scrape_and_rename
+        from core.artwork import scrape_and_save
 
         config = load_config()
 
@@ -169,21 +169,16 @@ class JobQueue:
             self._notify()
             return
 
-        # Step 3: tMM scrape (non-critical)
+        # Step 3: Scrape metadata & artwork (non-critical)
         job.status = "scraping"
         job.progress = 0
-        job.progress_text = "Scraping metadata..."
+        job.progress_text = "Downloading artwork & NFO..."
         self._notify()
 
         try:
-            media_type = config.get("default_media_type", "movie")
-
-            def _proc_cb2(proc: object) -> None:
-                self._current_proc = proc
-
-            scrape_and_rename(media_type, proc_callback=_proc_cb2)
+            scrape_and_save(job.disc_name, os.path.dirname(job.organized_file))
         except Exception:
-            pass  # tMM failure is non-critical
+            pass  # scrape failure is non-critical
 
         # Done
         job.status = "done"

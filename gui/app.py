@@ -13,7 +13,7 @@ from core.job_queue import JobQueue
 from gui.rip_tab import RipTab
 from gui.encode_tab import EncodeTab
 from gui.metadata_tab import MetadataTab
-from gui.tmm_tab import TmmTab
+from gui.scrape_tab import ScrapeTab
 from gui.queue_tab import QueueTab
 
 
@@ -37,7 +37,7 @@ class AutoRipperApp(tk.Tk):
         self.rip_tab = RipTab(self.notebook, app=self)
         self.encode_tab = EncodeTab(self.notebook, app=self)
         self.metadata_tab = MetadataTab(self.notebook, app=self)
-        self.tmm_tab = TmmTab(self.notebook, app=self)
+        self.scrape_tab = ScrapeTab(self.notebook, app=self)
         self.job_queue = JobQueue()
         self.queue_tab = QueueTab(self.notebook, app=self, job_queue=self.job_queue)
         self.settings_frame = self._build_settings_tab()
@@ -45,7 +45,7 @@ class AutoRipperApp(tk.Tk):
         self.notebook.add(self.rip_tab, text="Rip")
         self.notebook.add(self.encode_tab, text="Encode")
         self.notebook.add(self.metadata_tab, text="Organize")
-        self.notebook.add(self.tmm_tab, text="tinyMediaManager")
+        self.notebook.add(self.scrape_tab, text="Scrape")
         self.notebook.add(self.queue_tab, text="Queue")
         self.notebook.add(self.settings_frame, text="Settings")
 
@@ -99,20 +99,6 @@ class AutoRipperApp(tk.Tk):
             value=config.get("handbrake_path", "/opt/homebrew/bin/HandBrakeCLI")
         )
         ttk.Entry(row4, textvariable=self.settings_hb_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True
-        )
-
-        # tinyMediaManager path
-        row5 = ttk.Frame(settings_group)
-        row5.pack(fill=tk.X, padx=10, pady=5)
-        ttk.Label(row5, text="tMM path:").pack(side=tk.LEFT, padx=(0, 5))
-        self.settings_tmm_var = tk.StringVar(
-            value=config.get(
-                "tmm_path",
-                "/Applications/tinyMediaManager.app/Contents/Resources/Java",
-            )
-        )
-        ttk.Entry(row5, textvariable=self.settings_tmm_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True
         )
 
@@ -177,7 +163,6 @@ class AutoRipperApp(tk.Tk):
             "tmdb_api_key": self.settings_tmdb_var.get().strip(),
             "makemkv_path": self.settings_mkv_var.get().strip(),
             "handbrake_path": self.settings_hb_var.get().strip(),
-            "tmm_path": self.settings_tmm_var.get().strip(),
             "min_duration": self.settings_min_dur_var.get(),
             "auto_eject": self.settings_auto_eject_var.get(),
             "default_preset": self.settings_preset_var.get().strip(),
@@ -214,7 +199,7 @@ class AutoRipperApp(tk.Tk):
             self.notebook.select(self.encode_tab)
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):
-        """Called by EncodeTab when encoding finishes — auto-organize and go to tMM."""
+        """Called by EncodeTab when encoding finishes — auto-organize and scrape."""
         config = load_config()
         output_dir = config.get("output_dir", "")
 
@@ -246,13 +231,15 @@ class AutoRipperApp(tk.Tk):
             self.notebook.select(self.metadata_tab)
             return
 
-        self.notebook.select(self.tmm_tab)
-        self.tmm_tab.auto_scrape()
+        self.scrape_tab.set_info(disc_name, os.path.dirname(final_path))
+        self.notebook.select(self.scrape_tab)
+        self.scrape_tab.auto_scrape()
 
-    def on_organize_complete(self):
-        """Called after organizing finishes — switches to the tMM tab."""
-        self.notebook.select(self.tmm_tab)
-        self.tmm_tab.auto_scrape()
+    def on_organize_complete(self, disc_name: str = "", dest_dir: str = ""):
+        """Called after organizing finishes — switches to the Scrape tab."""
+        self.scrape_tab.set_info(disc_name, dest_dir)
+        self.notebook.select(self.scrape_tab)
+        self.scrape_tab.auto_scrape()
 
     def set_status(self, text: str):
         """Update the status bar text."""

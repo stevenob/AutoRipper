@@ -11,7 +11,6 @@ DEFAULTS = {
     "makemkv_path": "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon",
     "handbrake_path": "/opt/homebrew/bin/HandBrakeCLI",
     "tmdb_api_key": "",
-    "tmm_path": "/Applications/tinyMediaManager.app/Contents/Resources/Java",
     "min_duration": 120,
     "auto_eject": True,
     "default_preset": "HQ 1080p30 Surround",
