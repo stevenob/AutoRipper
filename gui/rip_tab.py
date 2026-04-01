@@ -288,7 +288,15 @@ class RipTab(ttk.Frame):
                 label = f"[{_idx}/{_total}] {msg}"
                 self._msg_queue.put(("rip_progress", (overall, label)))
 
+            # Skip scan/structural lines, only show rip progress and messages
+            _SCAN_PREFIXES = ("DRV:", "TINFO:", "CINFO:", "SINFO:", "PRGV:", "PRGC:")
+
             def _log_cb(line):
+                if line.startswith(_SCAN_PREFIXES):
+                    return
+                # Skip title skip/add messages from re-scan
+                if line.startswith("MSG:3025") or line.startswith("MSG:3307"):
+                    return
                 self._msg_queue.put(("rip_log", line))
 
             def _proc_cb(proc):
