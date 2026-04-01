@@ -1,5 +1,7 @@
 """Organize tab — search TMDb metadata and organize ripped files."""
 
+from __future__ import annotations
+
 import os
 import queue
 import threading

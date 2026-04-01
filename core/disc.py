@@ -1,5 +1,7 @@
 """Data models for disc information parsed from MakeMKV output."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 

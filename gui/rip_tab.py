@@ -1,5 +1,7 @@
 """Rip tab — scan disc and rip selected titles using MakeMKV."""
 
+from __future__ import annotations
+
 import queue
 import threading
 import tkinter as tk
