@@ -146,14 +146,21 @@ class RipTab(ttk.Frame):
         self._check_vars.clear()
         if not self.disc_info:
             return
+        # Find the largest title to auto-select it
+        largest_id = max(
+            (t for t in self.disc_info.titles),
+            key=lambda t: t.size_bytes,
+            default=None,
+        )
         for t in self.disc_info.titles:
-            var = tk.BooleanVar(value=True)
+            selected = largest_id is not None and t.id == largest_id.id
+            var = tk.BooleanVar(value=selected)
             self._check_vars[t.id] = var
             self.tree.insert(
                 "",
                 tk.END,
                 iid=str(t.id),
-                values=("☑", t.name, t.duration, _human_size(t.size_bytes), t.chapters),
+                values=("☑" if selected else "☐", t.name, t.duration, _human_size(t.size_bytes), t.chapters),
             )
         self.rip_btn.configure(state=tk.NORMAL)
 
