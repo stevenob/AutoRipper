@@ -18,6 +18,8 @@ from core.makemkv import (
     RipError,
 )
 from core.disc import DiscInfo
+from core.metadata import search_media, clean_disc_name
+from core.organizer import clean_filename
 from config import load_config
 
 
@@ -41,6 +43,7 @@ class RipTab(ttk.Frame):
         self._msg_queue: queue.Queue = queue.Queue()
         self._proc: subprocess.Popen | None = None
         self._aborted = False
+        self._tmdb_title: str = ""  # cleaned title from TMDb lookup
 
         self._build_ui()
 
@@ -204,7 +207,16 @@ class RipTab(ttk.Frame):
     def _scan_worker(self):
         try:
             disc = scan_disc()
-            self._msg_queue.put(("scan_ok", disc))
+            # Auto-lookup TMDb to get the proper title
+            tmdb_title = ""
+            if disc.name:
+                try:
+                    results = search_media(disc.name)
+                    if results:
+                        tmdb_title = results[0].title
+                except Exception:
+                    pass
+            self._msg_queue.put(("scan_ok", (disc, tmdb_title)))
         except DiscNotFoundError as exc:
             self._msg_queue.put(("scan_err", f"No disc found:\n{exc}"))
         except MakeMKVNotFoundError as exc:
@@ -227,9 +239,10 @@ class RipTab(ttk.Frame):
             messagebox.showerror("Error", "Output directory not configured. Check Settings tab.")
             return
 
-        # Create a subfolder named after the disc
-        if self.disc_info and self.disc_info.name:
-            output_dir = os.path.join(output_dir, self.disc_info.name)
+        # Create a subfolder named after the TMDb title (or disc name as fallback)
+        folder_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
+        if folder_name:
+            output_dir = os.path.join(output_dir, clean_filename(folder_name))
 
         self.scan_btn.configure(state=tk.DISABLED)
         self.rip_btn.configure(state=tk.DISABLED)
@@ -304,10 +317,12 @@ class RipTab(ttk.Frame):
                 msg_type, payload = self._msg_queue.get_nowait()
 
                 if msg_type == "scan_ok":
-                    self.disc_info = payload
-                    disc = self.disc_info
+                    disc, tmdb_title = payload
+                    self.disc_info = disc
+                    self._tmdb_title = tmdb_title
+                    display_name = tmdb_title or disc.name
                     self.disc_label.configure(
-                        text=f"{disc.name}  ({disc.type.upper()}, {len(disc.titles)} titles)"
+                        text=f"{display_name}  ({disc.type.upper()}, {len(disc.titles)} titles)"
                     )
                     self._populate_titles()
                     self.progress_bar.stop()
@@ -315,7 +330,7 @@ class RipTab(ttk.Frame):
                     self.progress_var.set(0)
                     self.progress_label.configure(text="Scan complete")
                     self.scan_btn.configure(state=tk.NORMAL)
-                    self.app.set_status(f"Scanned: {disc.name}")
+                    self.app.set_status(f"Scanned: {display_name}")
 
                 elif msg_type == "scan_err":
                     self.progress_bar.stop()
@@ -357,7 +372,7 @@ class RipTab(ttk.Frame):
                         self._eject_disc()
                     # Pass the last ripped file to the encode tab
                     if ripped:
-                        disc_name = self.disc_info.name if self.disc_info else ""
+                        disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
                         self.app.on_rip_complete(ripped[-1], disc_name)
                     messagebox.showinfo(
                         "Rip Complete",
