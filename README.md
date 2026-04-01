@@ -5,8 +5,9 @@ A Python GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip �
 ## Features
 
 - **⚡ Full Auto Mode** — One click to rip, encode, organize, and scrape metadata automatically
-- **Scan & Rip** — Detect discs, browse titles with min duration filter, file-size progress with ETA
-- **HandBrake Encoding** — Compress with preset selection, audio/subtitle track chooser, real-time progress
+- **Job Queue** — Rip multiple discs back-to-back; encoding and processing happen in the background
+- **Scan & Rip** — Detect discs, browse titles with resolution display (4K/1080p/720p/480p), min duration filter, file-size progress with ETA
+- **HandBrake Encoding** — H.265 quick presets auto-selected by resolution, Apple VideoToolbox hardware acceleration, audio/subtitle track chooser
 - **Auto-detect metadata** — [TMDb](https://www.themoviedb.org/) lookup for movie/TV show titles and years
 - **Clean & Organize** — Rename and sort files into structured folders:
   - Movies: `Title (Year)/Title (Year).mkv`
@@ -22,7 +23,18 @@ A Python GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip �
 ```
 Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
                       └── ⚡ Full Auto runs all steps hands-free
+                      └── Job Queue: rip next disc while previous encodes
 ```
+
+### Encoding Presets by Resolution
+
+| Source | Resolution | Auto-selected Preset |
+|--------|-----------|---------------------|
+| DVD | 480p | H.265 MKV 480p30 |
+| Blu-ray | 1080p | H.265 Apple VideoToolbox 1080p ⚡ |
+| 4K UHD | 2160p | H.265 Apple VideoToolbox 2160p 4K ⚡ |
+
+⚡ = Hardware-accelerated via Apple Silicon
 
 ## Requirements
 
@@ -97,14 +109,16 @@ AutoRipper/
 │   ├── handbrake.py     # HandBrake CLI wrapper
 │   ├── metadata.py      # TMDb API integration
 │   ├── organizer.py     # File renaming & folder organization
-│   └── tmm.py           # tinyMediaManager CLI wrapper
+│   ├── tmm.py           # tinyMediaManager CLI wrapper
+│   └── job_queue.py     # Background job queue for multi-disc pipeline
 ├── gui/
 │   ├── app.py           # Main application window & settings
 │   ├── rip_tab.py       # Disc scanning & ripping UI
 │   ├── encode_tab.py    # HandBrake encoding UI
 │   ├── metadata_tab.py  # Manual metadata & organize UI
-│   └── tmm_tab.py       # tinyMediaManager UI
-└── tests/               # Unit tests (41 tests, all mocked)
+│   ├── tmm_tab.py       # tinyMediaManager UI
+│   └── queue_tab.py     # Job queue status UI
+└── tests/               # Unit tests (49 tests, all mocked)
 ```
 
 ## License

@@ -161,14 +161,35 @@ class EncodeTab(ttk.Frame):
         if path:
             self.set_file(path)
 
-    def set_file(self, file_path: str, disc_name: str = "", auto_start: bool = False):
+    def set_file(self, file_path: str, disc_name: str = "", auto_start: bool = False, resolution: str = ""):
         """Set the input file path (called by app after ripping)."""
         self.file_var.set(file_path)
         self._disc_name = disc_name
         self._auto_start = auto_start
         self._update_output_path()
+        if resolution:
+            self._auto_select_preset(resolution)
         self.encode_btn.configure(state=tk.NORMAL)
         self._scan_file_tracks(file_path)
+
+    def _auto_select_preset(self, resolution: str):
+        """Pick the best H.265 preset based on video resolution."""
+        try:
+            _, h = resolution.lower().split("x")
+            height = int(h)
+        except (ValueError, AttributeError):
+            return
+        if height >= 2160:
+            preset = "H.265 Apple VideoToolbox 2160p 4K"
+        elif height >= 1080:
+            preset = "H.265 Apple VideoToolbox 1080p"
+        elif height >= 720:
+            preset = "H.265 MKV 720p30"
+        elif height >= 576:
+            preset = "H.265 MKV 576p25"
+        else:
+            preset = "H.265 MKV 480p30"
+        self.preset_var.set(preset)
 
     def _update_output_path(self):
         """Compute the output path based on the input file."""

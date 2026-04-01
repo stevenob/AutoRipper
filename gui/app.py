@@ -203,16 +203,14 @@ class AutoRipperApp(tk.Tk):
             pass
 
     # --------------------------------------------------------- inter-tab API
-    def on_rip_complete(self, file_path: str, disc_name: str = "", auto_start: bool = False):
+    def on_rip_complete(self, file_path: str, disc_name: str = "", auto_start: bool = False, resolution: str = ""):
         """Called by RipTab when a rip finishes."""
         if auto_start:
-            # Add to job queue instead of running inline
             self.job_queue.add_job(disc_name, file_path)
             self.notebook.select(self.queue_tab)
             self.set_status(f"Queued: {disc_name}")
         else:
-            # Manual mode — use encode tab as before
-            self.encode_tab.set_file(file_path, disc_name, auto_start=False)
+            self.encode_tab.set_file(file_path, disc_name, auto_start=False, resolution=resolution)
             self.notebook.select(self.encode_tab)
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):

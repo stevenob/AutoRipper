@@ -47,6 +47,29 @@ TINFO:0,8,0,"20"
 TINFO:0,9,0,"2:08:17"
 TINFO:0,10,0,"31.1 GB"
 TINFO:0,27,0,"test_t00.mkv"
+SINFO:0,0,19,0,"1920x1080"
+"""
+
+SCAN_OUTPUT_DVD = """\
+CINFO:1,6209,"DVD disc"
+CINFO:2,0,"DVD Movie"
+TINFO:0,2,0,"DVD Movie"
+TINFO:0,8,0,"12"
+TINFO:0,9,0,"1:30:00"
+TINFO:0,10,0,"4.7 GB"
+TINFO:0,27,0,"dvd_t00.mkv"
+SINFO:0,0,19,0,"720x480"
+"""
+
+SCAN_OUTPUT_4K = """\
+CINFO:1,6209,"Blu-ray disc"
+CINFO:2,0,"4K Movie"
+TINFO:0,2,0,"4K Movie"
+TINFO:0,8,0,"24"
+TINFO:0,9,0,"2:30:00"
+TINFO:0,10,0,"60.0 GB"
+TINFO:0,27,0,"4k_t00.mkv"
+SINFO:0,0,19,0,"3840x2160"
 """
 
 
@@ -78,6 +101,45 @@ class TestScanDisc(unittest.TestCase):
         self.assertEqual(title.chapters, 20)
         self.assertEqual(title.file_output, "test_t00.mkv")
         self.assertGreater(title.size_bytes, 0)
+        self.assertEqual(title.resolution, "1920x1080")
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_dvd_480p_resolution(self, mock_popen, _mock_path):
+        lines = [line + "\n" for line in SCAN_OUTPUT_DVD.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        disc = scan_disc()
+
+        self.assertEqual(disc.name, "DVD Movie")
+        self.assertEqual(disc.type, "dvd")
+        self.assertEqual(disc.titles[0].resolution, "720x480")
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_4k_uhd_resolution(self, mock_popen, _mock_path):
+        lines = [line + "\n" for line in SCAN_OUTPUT_4K.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        disc = scan_disc()
+
+        self.assertEqual(disc.name, "4K Movie")
+        self.assertEqual(disc.type, "bluray")
+        self.assertEqual(disc.titles[0].resolution, "3840x2160")
 
     @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
     @patch("core.makemkv.subprocess.Popen")

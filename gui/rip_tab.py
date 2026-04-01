@@ -519,7 +519,15 @@ class RipTab(ttk.Frame):
                     self._full_auto = False
                     if ripped:
                         disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
-                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=auto)
+                        # Get resolution from the largest selected title
+                        resolution = ""
+                        if self.disc_info:
+                            selected_ids = [tid for tid, var in self._check_vars.items() if var.get()]
+                            for t in self.disc_info.titles:
+                                if t.id in selected_ids and t.resolution:
+                                    resolution = t.resolution
+                                    break
+                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=auto, resolution=resolution)
                     if auto:
                         # Reset for next disc
                         self.disc_info = None
