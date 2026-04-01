@@ -14,7 +14,6 @@ from core.metadata import search_media
 from core.job_queue import JobQueue
 from gui.rip_tab import RipTab
 from gui.encode_tab import EncodeTab
-from gui.metadata_tab import MetadataTab
 from gui.scrape_tab import ScrapeTab
 from gui.queue_tab import QueueTab
 
@@ -41,7 +40,6 @@ class AutoRipperApp(ctk.CTk):
         # Add tabs
         rip_frame = self.tabview.add("Rip")
         encode_frame = self.tabview.add("Encode")
-        organize_frame = self.tabview.add("Organize")
         scrape_frame = self.tabview.add("Scrape")
         queue_frame = self.tabview.add("Queue")
         settings_frame = self.tabview.add("Settings")
@@ -52,9 +50,6 @@ class AutoRipperApp(ctk.CTk):
 
         self.encode_tab = EncodeTab(encode_frame, app=self)
         self.encode_tab.pack(fill="both", expand=True)
-
-        self.metadata_tab = MetadataTab(organize_frame, app=self)
-        self.metadata_tab.pack(fill="both", expand=True)
 
         self.scrape_tab = ScrapeTab(scrape_frame, app=self)
         self.scrape_tab.pack(fill="both", expand=True)
@@ -248,12 +243,9 @@ class AutoRipperApp(ctk.CTk):
                 self.set_status(f"Organized: {os.path.basename(final_path)}")
             except Exception as exc:
                 self.set_status(f"Auto-organize failed: {exc}")
-                self.metadata_tab.set_file(file_path, disc_name)
-                self.tabview.set("Organize")
                 return
         else:
-            self.metadata_tab.set_file(file_path, disc_name)
-            self.tabview.set("Organize")
+            self.set_status("Skipped organize — no disc name or output dir")
             return
 
         self.scrape_tab.set_info(disc_name, os.path.dirname(final_path))

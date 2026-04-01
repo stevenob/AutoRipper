@@ -12,7 +12,6 @@ from tkinter import messagebox, filedialog
 import customtkinter as ctk
 
 from core.handbrake import (
-    list_presets,
     scan_tracks,
     encode,
     HandBrakeError,
@@ -35,7 +34,6 @@ class EncodeTab(ctk.CTkFrame):
         self._auto_start = False
 
         self._build_ui()
-        self._load_presets()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -64,21 +62,20 @@ class EncodeTab(ctk.CTkFrame):
         preset_frame = ctk.CTkFrame(self)
         preset_frame.pack(fill="x", padx=10, pady=5)
 
-        preset_row = ctk.CTkFrame(preset_frame, fg_color="transparent")
-        preset_row.pack(fill="x", padx=10, pady=5)
-
         from config import load_config as _load_cfg
         _cfg = _load_cfg()
         self.preset_var = tk.StringVar(value=_cfg.get("default_preset", "HQ 1080p30 Surround"))
-        self.preset_combo = ctk.CTkComboBox(
-            preset_row, variable=self.preset_var, state="readonly", width=300, values=[]
-        )
-        self.preset_combo.pack(side="left", fill="x", expand=True)
 
-        # Quick H.265 preset buttons
+        # Selected preset display
+        preset_row = ctk.CTkFrame(preset_frame, fg_color="transparent")
+        preset_row.pack(fill="x", padx=10, pady=(5, 0))
+        ctk.CTkLabel(preset_row, text="Selected:").pack(side="left", padx=(0, 5))
+        self.preset_label = ctk.CTkLabel(preset_row, textvariable=self.preset_var, font=ctk.CTkFont(weight="bold"))
+        self.preset_label.pack(side="left")
+
+        # H.265 preset buttons
         quick_frame = ctk.CTkFrame(preset_frame, fg_color="transparent")
-        quick_frame.pack(fill="x", padx=10, pady=(0, 5))
-        ctk.CTkLabel(quick_frame, text="H.265 Quick:").pack(side="left", padx=(0, 5))
+        quick_frame.pack(fill="x", padx=10, pady=(5, 5))
         for label, preset in [
             ("480p", "H.265 MKV 480p30"),
             ("720p", "H.265 MKV 720p30"),
@@ -217,21 +214,6 @@ class EncodeTab(ctk.CTkFrame):
             return
         base, ext = os.path.splitext(input_path)
         self.output_var.set(f"{base}_encoded.mkv")
-
-    # --------------------------------------------------------- preset loading
-    def _load_presets(self):
-        """Load HandBrake presets in a background thread."""
-        threading.Thread(target=self._preset_worker, daemon=True).start()
-        self.after(100, self._poll_queue)
-
-    def _preset_worker(self):
-        try:
-            presets = list_presets()
-            self._msg_queue.put(("presets_ok", presets))
-        except (HandBrakeNotFoundError, HandBrakeError) as exc:
-            self._msg_queue.put(("presets_err", str(exc)))
-        except Exception as exc:
-            self._msg_queue.put(("presets_err", f"Unexpected error: {exc}"))
 
     # --------------------------------------------------------- track scanning
     def _scan_file_tracks(self, file_path: str):
@@ -379,19 +361,7 @@ class EncodeTab(ctk.CTkFrame):
             while True:
                 msg_type, payload = self._msg_queue.get_nowait()
 
-                if msg_type == "presets_ok":
-                    presets = payload
-                    self.preset_combo.configure(values=presets)
-                    # Keep current value if it's in the list, otherwise pick first
-                    current = self.preset_var.get()
-                    if presets and current not in presets:
-                        self.preset_var.set(presets[0])
-
-                elif msg_type == "presets_err":
-                    self.preset_combo.configure(values=["HQ 1080p30 Surround"])
-                    self.preset_var.set("HQ 1080p30 Surround")
-
-                elif msg_type == "scan_ok":
+                if msg_type == "scan_ok":
                     tracks = payload
                     self._populate_audio_tracks(tracks.get("audio", []))
                     self._populate_subtitle_tracks(tracks.get("subtitles", []))

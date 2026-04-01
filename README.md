@@ -48,6 +48,7 @@ Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
 - **[HandBrake CLI](https://handbrake.fr/)** — install via `brew install handbrake`
 - **TMDb API key** (free) — [get one here](https://www.themoviedb.org/settings/api)
 - **[tinyMediaManager](https://www.tinymediamanager.org/)** (optional) — for advanced artwork and NFO scraping
+- **Discord webhook** (optional) — for pipeline notifications
 
 ## Installation
 
@@ -73,10 +74,11 @@ python3.13 main.py
 
 1. Open the **Settings** tab
 2. Set your **TMDb API key**
-3. Verify tool paths: MakeMKV, HandBrake, tinyMediaManager
+3. Verify tool paths: MakeMKV, HandBrake
 4. Set your **Output directory** (default: `~/Desktop/Ripped`)
-5. Click **Save Settings**
-6. Adjust **Preferences** (auto-saved): min duration, auto-eject, HandBrake preset, media type
+5. Optionally add a **Discord webhook URL** for notifications
+6. Click **Save Settings**
+7. Adjust **Preferences** (auto-saved): min duration, auto-eject, HandBrake preset, media type
 
 ### Full Auto (recommended)
 
@@ -85,14 +87,17 @@ python3.13 main.py
 3. Click **⚡ Full Auto**
 4. Walk away — AutoRipper handles everything:
    - Rips the largest title
-   - Encodes with your default HandBrake preset
+   - Auto-selects H.265 preset by resolution (HW-accelerated for 1080p/4K)
+   - Encodes with HandBrake
    - Organizes into `Title (Year)/Title (Year).mkv`
-   - Runs tinyMediaManager to scrape metadata
+   - Downloads poster, fanart, and creates NFO file
    - Ejects the disc when done
+   - Sends Discord notifications at each step
+5. Insert next disc and repeat — previous jobs encode in the background
 
 ### Manual Mode
 
-Use **Rip Selected** instead to control each step individually. Each tab (Rip, Encode, Organize, tMM) can be used independently.
+Use **Rip Selected** instead to control each step individually. Tabs: Rip, Encode, Scrape, Queue, Settings.
 
 ## Running Tests
 
@@ -114,15 +119,14 @@ AutoRipper/
 │   ├── metadata.py      # TMDb API integration
 │   ├── organizer.py     # File renaming & folder organization
 │   ├── artwork.py       # Poster/fanart download & NFO creation
-│   ├── tmm.py           # tinyMediaManager CLI wrapper (optional)
+│   ├── discord_notify.py # Discord webhook notifications
 │   └── job_queue.py     # Background job queue for multi-disc pipeline
 ├── gui/                 # customtkinter UI (dark/light mode)
-│   ├── app.py           # Main application window & settings
-│   ├── rip_tab.py       # Disc scanning & ripping UI
-│   ├── encode_tab.py    # HandBrake encoding UI
-│   ├── metadata_tab.py  # Manual metadata & organize UI
-│   ├── scrape_tab.py    # Artwork & NFO scraper UI
-│   └── queue_tab.py     # Job queue status UI
+│   ├── app.py           # Main window, settings, pipeline orchestration
+│   ├── rip_tab.py       # Disc scanning & ripping
+│   ├── encode_tab.py    # HandBrake encoding with H.265 presets
+│   ├── scrape_tab.py    # Artwork & NFO scraper
+│   └── queue_tab.py     # Job queue status
 └── tests/               # Unit tests (49 tests, all mocked)
 ```
 
