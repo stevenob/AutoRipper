@@ -30,6 +30,7 @@ class EncodeTab(ttk.Frame):
         self._subtitle_vars: list[tuple[int, tk.BooleanVar]] = []
         self._proc: subprocess.Popen | None = None
         self._aborted = False
+        self._auto_start = False
 
         self._build_ui()
         self._load_presets()
@@ -143,10 +144,11 @@ class EncodeTab(ttk.Frame):
         if path:
             self.set_file(path)
 
-    def set_file(self, file_path: str, disc_name: str = ""):
+    def set_file(self, file_path: str, disc_name: str = "", auto_start: bool = False):
         """Set the input file path (called by app after ripping)."""
         self.file_var.set(file_path)
         self._disc_name = disc_name
+        self._auto_start = auto_start
         self._update_output_path()
         self.encode_btn.configure(state=tk.NORMAL)
         self._scan_file_tracks(file_path)
@@ -344,6 +346,9 @@ class EncodeTab(ttk.Frame):
                     self.progress_var.set(0)
                     self.progress_label.configure(text="Track scan complete")
                     self.encode_btn.configure(state=tk.NORMAL)
+                    if self._auto_start:
+                        self._auto_start = False
+                        self.after(500, self._on_encode)
 
                 elif msg_type == "scan_err":
                     self.progress_bar.stop()

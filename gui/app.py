@@ -200,7 +200,7 @@ class AutoRipperApp(tk.Tk):
     # --------------------------------------------------------- inter-tab API
     def on_rip_complete(self, file_path: str, disc_name: str = ""):
         """Called by RipTab when a rip finishes — forwards file to the Encode tab."""
-        self.encode_tab.set_file(file_path, disc_name)
+        self.encode_tab.set_file(file_path, disc_name, auto_start=True)
         self.notebook.select(self.encode_tab)
 
     def on_encode_complete(self, file_path: str, disc_name: str = ""):
@@ -237,10 +237,12 @@ class AutoRipperApp(tk.Tk):
             return
 
         self.notebook.select(self.tmm_tab)
+        self.tmm_tab.auto_scrape()
 
     def on_organize_complete(self):
         """Called after organizing finishes — switches to the tMM tab."""
         self.notebook.select(self.tmm_tab)
+        self.tmm_tab.auto_scrape()
 
     def set_status(self, text: str):
         """Update the status bar text."""

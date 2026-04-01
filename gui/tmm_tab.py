@@ -100,6 +100,10 @@ class TmmTab(ttk.Frame):
     def _on_subs(self):
         self._run_action("subs")
 
+    def auto_scrape(self):
+        """Auto-start scrape & rename (called by app after organize)."""
+        self.after(500, self._on_scrape)
+
     def _run_action(self, action: str):
         """Start a tMM action in a background thread."""
         media_type = self.media_type_var.get()
