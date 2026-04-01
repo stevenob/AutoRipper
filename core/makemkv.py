@@ -57,21 +57,21 @@ def _parse_size_to_bytes(size_str: str) -> int:
 def scan_disc() -> DiscInfo:
     """Scan the disc in the default drive and return parsed disc info.
 
-    Runs ``makemkvcon -r --cache=1 info disc:0`` and parses the
+    Runs ``makemkvcon -r info disc:0`` and parses the
     structured output into a DiscInfo object.
     """
     mkv_path = get_makemkv_path()
-    cmd = [mkv_path, "-r", "--cache=1", "info", "disc:0"]
+    cmd = [mkv_path, "-r", "info", "disc:0"]
 
     try:
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=600,
         )
     except subprocess.TimeoutExpired as exc:
-        raise MakeMKVError("Disc scan timed out after 120 seconds") from exc
+        raise MakeMKVError("Disc scan timed out after 10 minutes") from exc
     except FileNotFoundError as exc:
         raise MakeMKVNotFoundError(f"Could not execute makemkvcon: {exc}") from exc
     except OSError as exc:
@@ -95,6 +95,11 @@ def scan_disc() -> DiscInfo:
             value = cinfo_match.group(2)
             if attr_id == 2:
                 disc_name = value
+            elif attr_id == 1:
+                if "blu-ray" in value.lower():
+                    disc_type = "bluray"
+                elif "dvd" in value.lower():
+                    disc_type = "dvd"
             continue
 
         # Title-level info: TINFO:title_id,attr_id,attr_code,"value"
