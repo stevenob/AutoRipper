@@ -81,8 +81,8 @@ class EncodeTab(ctk.CTkFrame):
             ("720p", "H.265 MKV 720p30"),
             ("1080p", "H.265 MKV 1080p30"),
             ("4K", "H.265 MKV 2160p60 4K"),
-            ("1080p HW ⚡", "H.265 Apple VideoToolbox 1080p"),
-            ("4K HW ⚡", "H.265 Apple VideoToolbox 2160p 4K"),
+            ("1080p \uf8ff", "H.265 Apple VideoToolbox 1080p"),
+            ("4K \uf8ff", "H.265 Apple VideoToolbox 2160p 4K"),
         ]:
             ctk.CTkButton(
                 quick_frame, text=label, width=90,
