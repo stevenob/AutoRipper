@@ -72,6 +72,35 @@ TINFO:0,27,0,"4k_t00.mkv"
 SINFO:0,0,19,0,"3840x2160"
 """
 
+SCAN_OUTPUT_MULTI_TITLE = """\
+CINFO:1,6209,"Blu-ray disc"
+CINFO:2,0,"Multi Title Disc"
+TINFO:0,2,0,"Main Feature"
+TINFO:0,8,0,"28"
+TINFO:0,9,0,"2:15:30"
+TINFO:0,10,0,"35.0 GB"
+TINFO:0,27,0,"main_t00.mkv"
+SINFO:0,0,19,0,"1920x1080"
+TINFO:1,2,0,"Behind the Scenes"
+TINFO:1,8,0,"5"
+TINFO:1,9,0,"0:25:00"
+TINFO:1,10,0,"2.1 GB"
+TINFO:1,27,0,"bonus_t01.mkv"
+SINFO:1,0,19,0,"1920x1080"
+TINFO:2,2,0,"Trailer"
+TINFO:2,8,0,"1"
+TINFO:2,9,0,"0:02:30"
+TINFO:2,10,0,"200.0 MB"
+TINFO:2,27,0,"trailer_t02.mkv"
+SINFO:2,0,19,0,"1920x1080"
+TINFO:3,2,0,"Deleted Scenes"
+TINFO:3,8,0,"3"
+TINFO:3,9,0,"0:08:45"
+TINFO:3,10,0,"800.0 MB"
+TINFO:3,27,0,"deleted_t03.mkv"
+SINFO:3,0,19,0,"1920x1080"
+"""
+
 
 class TestScanDisc(unittest.TestCase):
     @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
@@ -155,6 +184,119 @@ class TestScanDisc(unittest.TestCase):
 
         with self.assertRaises(DiscNotFoundError):
             scan_disc()
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_multi_title_disc(self, mock_popen, _mock_path):
+        """Multi-title disc parses all titles with correct attributes."""
+        lines = [line + "\n" for line in SCAN_OUTPUT_MULTI_TITLE.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        disc = scan_disc()
+
+        self.assertEqual(disc.name, "Multi Title Disc")
+        self.assertEqual(len(disc.titles), 4)
+        self.assertEqual(disc.titles[0].name, "Main Feature")
+        self.assertEqual(disc.titles[1].name, "Behind the Scenes")
+        self.assertEqual(disc.titles[2].name, "Trailer")
+        self.assertEqual(disc.titles[3].name, "Deleted Scenes")
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_largest_title_is_main_feature(self, mock_popen, _mock_path):
+        """The largest title by size should be the main feature."""
+        lines = [line + "\n" for line in SCAN_OUTPUT_MULTI_TITLE.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        disc = scan_disc()
+
+        largest = max(disc.titles, key=lambda t: t.size_bytes)
+        self.assertEqual(largest.name, "Main Feature")
+        self.assertEqual(largest.id, 0)
+        self.assertGreater(largest.size_bytes, 30 * 1024**3)
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_all_titles_have_resolution(self, mock_popen, _mock_path):
+        """All titles in a multi-title scan should have resolution set."""
+        lines = [line + "\n" for line in SCAN_OUTPUT_MULTI_TITLE.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        disc = scan_disc()
+
+        for t in disc.titles:
+            self.assertEqual(t.resolution, "1920x1080", f"Title {t.id} missing resolution")
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_min_duration_filter(self, mock_popen, _mock_path):
+        """Titles can be filtered by minimum duration in the GUI."""
+        lines = [line + "\n" for line in SCAN_OUTPUT_MULTI_TITLE.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        disc = scan_disc()
+
+        # Import helper from rip_tab
+        from gui.rip_tab import _duration_to_secs
+
+        # Filter at 10 minutes (600s) — should keep Main Feature and Behind the Scenes
+        filtered = [t for t in disc.titles if _duration_to_secs(t.duration) >= 600]
+        self.assertEqual(len(filtered), 2)
+        self.assertEqual(filtered[0].name, "Main Feature")
+        self.assertEqual(filtered[1].name, "Behind the Scenes")
+
+        # Filter at 1 hour (3600s) — should keep only Main Feature
+        filtered_1h = [t for t in disc.titles if _duration_to_secs(t.duration) >= 3600]
+        self.assertEqual(len(filtered_1h), 1)
+        self.assertEqual(filtered_1h[0].name, "Main Feature")
+
+    @patch("core.makemkv.get_makemkv_path", return_value="/usr/bin/makemkvcon")
+    @patch("core.makemkv.subprocess.Popen")
+    def test_log_callback_receives_lines(self, mock_popen, _mock_path):
+        """Log callback should receive all output lines during scan."""
+        lines = [line + "\n" for line in SCAN_OUTPUT.strip().splitlines()]
+        lines.append("")
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.readline = MagicMock(side_effect=lines)
+        mock_proc.poll = MagicMock(return_value=0)
+        mock_proc.wait.return_value = 0
+        mock_proc.returncode = 0
+        mock_popen.return_value = mock_proc
+
+        logged = []
+        scan_disc(log_callback=logged.append)
+
+        self.assertGreater(len(logged), 0)
+        self.assertTrue(any("Test Movie" in line for line in logged))
 
 
 class TestRipTitle(unittest.TestCase):

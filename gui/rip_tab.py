@@ -100,6 +100,11 @@ class RipTab(ctk.CTkFrame):
         self.scan_btn = ctk.CTkButton(btn_row, text="Scan Disc", command=self._on_scan)
         self.scan_btn.pack(side="left")
 
+        self.full_auto_btn = ctk.CTkButton(
+            btn_row, text="⚡ Full Auto", command=self._on_full_auto_scan
+        )
+        self.full_auto_btn.pack(side="left", padx=(5, 0))
+
         ctk.CTkLabel(btn_row, text="Min duration (s):").pack(side="left", padx=(15, 0))
         config = load_config()
         self.min_duration_var = tk.IntVar(value=config.get("min_duration", 120))
@@ -157,11 +162,6 @@ class RipTab(ctk.CTkFrame):
             sel_frame, text="Rip Selected", command=self._on_rip, state="disabled"
         )
         self.rip_btn.pack(side="right")
-
-        self.full_auto_btn = ctk.CTkButton(
-            sel_frame, text="⚡ Full Auto", command=self._on_full_auto, state="disabled"
-        )
-        self.full_auto_btn.pack(side="right", padx=(0, 5))
 
         self.abort_btn = ctk.CTkButton(
             sel_frame, text="Abort", command=self._on_abort, state="disabled"
@@ -302,10 +302,22 @@ class RipTab(ctk.CTkFrame):
             self._msg_queue.put(("scan_err", f"Unexpected error:\n{exc}"))
 
     # ----------------------------------------------------------- rip logic
-    def _on_full_auto(self):
-        """Rip selected titles then auto-run encode → organize → tMM."""
+    def _on_full_auto_scan(self):
+        """Full Auto: scan disc → auto-select largest → rip → queue."""
         self._full_auto = True
-        self._on_rip()
+        self.scan_btn.configure(state="disabled")
+        self.full_auto_btn.configure(state="disabled")
+        self.rip_btn.configure(state="disabled")
+        self.disc_label.configure(text="Full Auto: Scanning…")
+        self.progress_label.configure(text="Scanning disc…")
+        self.progress_bar.configure(mode="indeterminate")
+        self.progress_bar.start()
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
+
+        threading.Thread(target=self._scan_worker, daemon=True).start()
+        self.after(100, self._poll_queue)
 
     def _on_rip(self):
         selected = [tid for tid, var in self._check_vars.items() if var.get()]
@@ -481,9 +493,13 @@ class RipTab(ctk.CTkFrame):
                     self.progress_bar.set(0)
                     self.progress_label.configure(text="Scan complete")
                     self.scan_btn.configure(state="normal")
+                    self.full_auto_btn.configure(state="normal")
                     self.app.set_status(f"Scanned: {display_name}")
                     from core.discord_notify import notify_info
                     notify_info(f"🔍 Scanned: {display_name} ({disc.type.upper()}, {len(disc.titles)} titles)")
+                    # Full Auto: immediately start ripping the largest title
+                    if self._full_auto:
+                        self.after(500, self._on_rip)
 
                 elif msg_type == "scan_err":
                     self.progress_bar.stop()
