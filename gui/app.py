@@ -122,6 +122,41 @@ class AutoRipperApp(ctk.CTk):
             side="left", fill="x", expand=True
         )
 
+        # -- NAS Upload --
+        ctk.CTkLabel(frame, text="NAS Upload (optional)", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(10, 0)
+        )
+        nas_group = ctk.CTkFrame(frame)
+        nas_group.pack(fill="x", padx=10, pady=(5, 5))
+
+        nas_row0 = ctk.CTkFrame(nas_group, fg_color="transparent")
+        nas_row0.pack(fill="x", padx=10, pady=5)
+        self.settings_nas_enabled_var = tk.BooleanVar(value=config.get("nas_upload_enabled", False))
+        ctk.CTkCheckBox(
+            nas_row0, text="Copy to NAS after processing", variable=self.settings_nas_enabled_var,
+            onvalue=True, offvalue=False,
+        ).pack(side="left")
+
+        nas_row1 = ctk.CTkFrame(nas_group, fg_color="transparent")
+        nas_row1.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(nas_row1, text="Movies folder:").pack(side="left", padx=(0, 5))
+        self.settings_nas_movies_var = tk.StringVar(value=config.get("nas_movies_path", ""))
+        ctk.CTkEntry(nas_row1, textvariable=self.settings_nas_movies_var).pack(
+            side="left", fill="x", expand=True, padx=(0, 5)
+        )
+        ctk.CTkButton(nas_row1, text="Browse…", width=80,
+                       command=lambda: self._browse_nas("movies")).pack(side="left")
+
+        nas_row2 = ctk.CTkFrame(nas_group, fg_color="transparent")
+        nas_row2.pack(fill="x", padx=10, pady=(0, 5))
+        ctk.CTkLabel(nas_row2, text="TV Shows folder:").pack(side="left", padx=(0, 5))
+        self.settings_nas_tv_var = tk.StringVar(value=config.get("nas_tv_path", ""))
+        ctk.CTkEntry(nas_row2, textvariable=self.settings_nas_tv_var).pack(
+            side="left", fill="x", expand=True, padx=(0, 5)
+        )
+        ctk.CTkButton(nas_row2, text="Browse…", width=80,
+                       command=lambda: self._browse_nas("tv")).pack(side="left")
+
         # -- Preferences (auto-saved) --
         ctk.CTkLabel(frame, text="Preferences (auto-saved)", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=10, pady=(10, 0)
@@ -179,6 +214,14 @@ class AutoRipperApp(ctk.CTk):
         if d:
             self.settings_output_var.set(d)
 
+    def _browse_nas(self, kind: str):
+        d = filedialog.askdirectory(title=f"Select NAS {kind} folder")
+        if d:
+            if kind == "movies":
+                self.settings_nas_movies_var.set(d)
+            else:
+                self.settings_nas_tv_var.set(d)
+
     def _save_settings(self):
         config = {
             "output_dir": self.settings_output_var.get().strip(),
@@ -186,6 +229,9 @@ class AutoRipperApp(ctk.CTk):
             "makemkv_path": self.settings_mkv_var.get().strip(),
             "handbrake_path": self.settings_hb_var.get().strip(),
             "discord_webhook": self.settings_discord_var.get().strip(),
+            "nas_movies_path": self.settings_nas_movies_var.get().strip(),
+            "nas_tv_path": self.settings_nas_tv_var.get().strip(),
+            "nas_upload_enabled": self.settings_nas_enabled_var.get(),
             "min_duration": self.settings_min_dur_var.get(),
             "auto_eject": self.settings_auto_eject_var.get(),
             "default_preset": self.settings_preset_var.get().strip(),

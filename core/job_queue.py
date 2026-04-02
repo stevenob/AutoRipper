@@ -216,6 +216,37 @@ class JobQueue:
         except Exception:
             pass  # scrape failure is non-critical
 
+        # Step 4: Copy to NAS (optional)
+        nas_path = ""
+        if config.get("nas_upload_enabled", False):
+            import shutil
+            media_type = config.get("default_media_type", "movie")
+            if media_type == "movie":
+                nas_dir = config.get("nas_movies_path", "")
+            else:
+                nas_dir = config.get("nas_tv_path", "")
+
+            if nas_dir and os.path.isdir(nas_dir):
+                job.status = "uploading"
+                job.progress = 0
+                job.progress_text = "Copying to NAS..."
+                self._notify()
+                notify_progress(f"📤 Copying to NAS: {job.disc_name}")
+
+                try:
+                    # Copy the entire organized folder to NAS
+                    src_dir = os.path.dirname(job.organized_file)
+                    folder_name = os.path.basename(src_dir)
+                    nas_dest = os.path.join(nas_dir, folder_name)
+                    if os.path.exists(nas_dest):
+                        shutil.rmtree(nas_dest)
+                    shutil.copytree(src_dir, nas_dest)
+                    nas_path = os.path.join(nas_dest, os.path.basename(job.organized_file))
+                    job.progress_text = f"Copied to NAS: {nas_dest}"
+                except Exception as exc:
+                    job.progress_text = f"NAS copy failed: {exc}"
+                    # non-critical — don't fail the job
+
         # Done
         job.status = "done"
         job.progress = 100
@@ -227,9 +258,10 @@ class JobQueue:
             final_size = os.path.getsize(job.organized_file)
         except OSError:
             final_size = encoded_size
+        nas_line = f"\n📤 NAS: {nas_path}" if nas_path else ""
         notify_success(
             f"🎬 {job.disc_name}\n"
             f"📁 {_human_size(rip_size)} → {_human_size(final_size)}\n"
             f"⏱️ {_human_time(total_elapsed)}\n"
-            f"📂 {job.organized_file}"
+            f"📂 {job.organized_file}{nas_line}"
         )

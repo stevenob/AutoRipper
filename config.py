@@ -16,6 +16,9 @@ DEFAULTS = {
     "default_preset": "HQ 1080p30 Surround",
     "default_media_type": "movie",
     "discord_webhook": "",
+    "nas_movies_path": "",
+    "nas_tv_path": "",
+    "nas_upload_enabled": False,
 }
 
 
