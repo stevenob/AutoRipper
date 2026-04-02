@@ -355,6 +355,7 @@ class RipTab(ctk.CTkFrame):
         import time
         total = len(title_ids)
         ripped_files: list[str] = []
+        rip_start = time.monotonic()
         for idx, tid in enumerate(title_ids, 1):
             if self._aborted:
                 self._msg_queue.put(("rip_err", "Rip aborted by user"))
@@ -451,7 +452,8 @@ class RipTab(ctk.CTkFrame):
                     self._msg_queue.put(("rip_err", f"Unexpected error ripping title {tid}:\n{exc}"))
                 return
 
-        self._msg_queue.put(("rip_done", ripped_files))
+        rip_elapsed = time.monotonic() - rip_start
+        self._msg_queue.put(("rip_done", (ripped_files, rip_elapsed)))
 
     # --------------------------------------------------- queue poller
     def _poll_queue(self):
@@ -513,7 +515,7 @@ class RipTab(ctk.CTkFrame):
                     messagebox.showerror("Rip Error", str(payload))
 
                 elif msg_type == "rip_done":
-                    ripped = payload
+                    ripped, rip_elapsed = payload
                     self.progress_bar.set(1.0)
                     self.progress_label.configure(text="Rip complete")
                     self.scan_btn.configure(state="normal")
@@ -522,8 +524,24 @@ class RipTab(ctk.CTkFrame):
                     self.abort_btn.configure(state="disabled")
                     self.app.set_status(f"Ripped {len(ripped)} title(s)")
                     disc_name = self._tmdb_title or (self.disc_info.name if self.disc_info else "")
+                    # Discord notification with file size and duration
                     from core.discord_notify import notify_progress
-                    notify_progress(f"🎬 Ripped: {disc_name}")
+                    stats = ""
+                    if ripped:
+                        try:
+                            size = os.path.getsize(ripped[-1])
+                            for unit in ("B", "KB", "MB", "GB", "TB"):
+                                if abs(size) < 1024:
+                                    stats += f"\n📁 {size:.1f} {unit}"
+                                    break
+                                size /= 1024
+                        except OSError:
+                            pass
+                    m, s = divmod(int(rip_elapsed), 60)
+                    h, m = divmod(m, 60)
+                    time_str = f"{h}h{m:02d}m{s:02d}s" if h else f"{m}m{s:02d}s"
+                    stats += f"\n⏱️ {time_str}"
+                    notify_progress(f"🎬 Ripped: {disc_name}{stats}")
                     # Auto-eject disc
                     if self.auto_eject_var.get():
                         self._eject_disc()

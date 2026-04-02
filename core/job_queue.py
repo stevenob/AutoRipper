@@ -105,13 +105,34 @@ class JobQueue:
 
         config = load_config()
 
+        def _human_size(size_bytes):
+            for unit in ("B", "KB", "MB", "GB", "TB"):
+                if abs(size_bytes) < 1024:
+                    return f"{size_bytes:.1f} {unit}"
+                size_bytes /= 1024
+            return f"{size_bytes:.1f} PB"
+
+        def _human_time(seconds):
+            m, s = divmod(int(seconds), 60)
+            h, m = divmod(m, 60)
+            if h > 0:
+                return f"{h}h{m:02d}m{s:02d}s"
+            return f"{m}m{s:02d}s"
+
         # Step 1: Encode
         job.status = "encoding"
         job.progress = 0
         job.progress_text = "Encoding..."
         self._notify()
-        notify_info(f"🎬 Encoding: {job.disc_name}")
 
+        rip_size = 0
+        try:
+            rip_size = os.path.getsize(job.ripped_file)
+        except OSError:
+            pass
+        notify_info(f"🎬 Encoding: {job.disc_name}\n📁 Source: {_human_size(rip_size)}")
+
+        encode_start = time.monotonic()
         try:
             base, _ext = os.path.splitext(job.ripped_file)
             output_path = base + "_encoded.mkv"
@@ -140,12 +161,22 @@ class JobQueue:
             notify_error(f"🎬 {job.disc_name}\n❌ {job.error}")
             return
 
+        encode_elapsed = time.monotonic() - encode_start
+        encoded_size = 0
+        try:
+            encoded_size = os.path.getsize(job.encoded_file)
+        except OSError:
+            pass
+
         # Step 2: Organize
         job.status = "organizing"
         job.progress = 0
         job.progress_text = "Organizing..."
         self._notify()
-        notify_progress(f"📂 Organizing: {job.disc_name}")
+        notify_progress(
+            f"📂 Organizing: {job.disc_name}\n"
+            f"🔄 Encoded: {_human_size(rip_size)} → {_human_size(encoded_size)} in {_human_time(encode_elapsed)}"
+        )
 
         try:
             output_dir = config.get("output_dir", "")
@@ -190,4 +221,15 @@ class JobQueue:
         job.progress = 100
         job.progress_text = "Complete"
         self._notify()
-        notify_success(f"🎬 {job.disc_name}\n📂 {job.organized_file}")
+        total_elapsed = time.monotonic() - encode_start
+        final_size = 0
+        try:
+            final_size = os.path.getsize(job.organized_file)
+        except OSError:
+            final_size = encoded_size
+        notify_success(
+            f"🎬 {job.disc_name}\n"
+            f"📁 {_human_size(rip_size)} → {_human_size(final_size)}\n"
+            f"⏱️ {_human_time(total_elapsed)}\n"
+            f"📂 {job.organized_file}"
+        )
