@@ -168,6 +168,13 @@ class JobQueue:
         except OSError:
             pass
 
+        # Delete original rip to save space
+        try:
+            if os.path.isfile(job.ripped_file) and job.ripped_file != job.encoded_file:
+                os.remove(job.ripped_file)
+        except OSError:
+            pass
+
         # Step 2: Organize
         job.status = "organizing"
         job.progress = 0

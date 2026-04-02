@@ -406,6 +406,13 @@ class EncodeTab(ctk.CTkFrame):
                     self.encode_btn.configure(state="normal")
                     self.abort_btn.configure(state="disabled")
                     self.app.set_status("Encoding complete")
+                    # Delete original rip to save space
+                    input_file = self.file_var.get()
+                    if input_file and input_file != result_path and os.path.isfile(input_file):
+                        try:
+                            os.remove(input_file)
+                        except OSError:
+                            pass
                     self.app.on_encode_complete(result_path, self._disc_name)
                     messagebox.showinfo(
                         "Encode Complete",
