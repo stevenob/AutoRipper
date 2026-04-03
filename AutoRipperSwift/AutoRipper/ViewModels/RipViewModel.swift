@@ -103,7 +103,8 @@ final class RipViewModel: ObservableObject {
 
                 // Monitor file size for progress
                 let monitorDir = outputDir
-                let sizeMonitor = Task<Void, Never> {
+                let expectedSz = expectedSize
+                let sizeMonitor = Task.detached {
                     let fm = FileManager.default
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(2))
@@ -117,13 +118,13 @@ final class RipViewModel: ObservableObject {
                                 totalSize += size
                             }
                         }
-                        if expectedSize > 0 {
-                            let pct = min(Double(totalSize) / Double(expectedSize), 0.99)
+                        if expectedSz > 0 {
+                            let pct = min(Double(totalSize) / Double(expectedSz), 0.99)
                             let sizeMB = totalSize / (1024 * 1024)
-                            let totalMB = expectedSize / (1024 * 1024)
-                            await MainActor.run {
-                                self.ripProgress = pct
-                                self.statusText = "Ripping: \(Int(pct * 100))% — \(sizeMB) / \(totalMB) MB"
+                            let totalMB = expectedSz / (1024 * 1024)
+                            await MainActor.run { [weak self] in
+                                self?.ripProgress = pct
+                                self?.statusText = "Ripping: \(Int(pct * 100))% — \(sizeMB) / \(totalMB) MB"
                             }
                         }
                     }
