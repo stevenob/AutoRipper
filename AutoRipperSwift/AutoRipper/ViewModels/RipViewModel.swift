@@ -101,8 +101,8 @@ final class RipViewModel: ObservableObject {
                         }
                     )
                     let elapsed = Date().timeIntervalSince(start)
-                    // Queue for encode: all titles when Full Auto off, only largest when on
-                    if !fullAutoEnabled || tid == largestId {
+                    // Only queue for encode pipeline when Full Auto is on (largest title only)
+                    if fullAutoEnabled && tid == largestId {
                         onRipComplete?(info.name, file, elapsed)
                     }
                 } catch {
