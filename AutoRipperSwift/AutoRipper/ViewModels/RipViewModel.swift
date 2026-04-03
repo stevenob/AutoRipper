@@ -14,6 +14,7 @@ final class RipViewModel: ObservableObject {
     @Published var selectedTitles: Set<Int> = []
     @Published var statusText: String = "Idle"
     @Published var logLines: [String] = []
+    @Published var fullAutoEnabled: Bool = false
 
     private let config: AppConfig
     private let makemkv: MakeMKVService

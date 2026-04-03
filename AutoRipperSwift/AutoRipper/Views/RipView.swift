@@ -7,9 +7,13 @@ struct RipView: View {
         VStack(spacing: 0) {
             // Toolbar
             HStack(spacing: 12) {
-                Button { vm.fullAuto() } label: {
+                Toggle(isOn: Binding(
+                    get: { vm.fullAutoEnabled },
+                    set: { vm.fullAutoEnabled = $0 }
+                )) {
                     Label("Full Auto", systemImage: "bolt.fill")
                 }
+                .toggleStyle(.checkbox)
                 .disabled(vm.isScanning || vm.isRipping)
 
                 Spacer()
@@ -107,11 +111,17 @@ struct RipView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    Button { vm.scanDisc() } label: {
+                    Button {
+                        if vm.fullAutoEnabled {
+                            vm.fullAuto()
+                        } else {
+                            vm.scanDisc()
+                        }
+                    } label: {
                         VStack(spacing: 16) {
                             Image(systemName: "opticaldisc.fill")
                                 .font(.system(size: 64))
-                            Text("Scan Disc")
+                            Text(vm.fullAutoEnabled ? "Full Auto" : "Scan Disc")
                                 .font(.title2)
                                 .fontWeight(.semibold)
                         }
@@ -142,10 +152,6 @@ struct RipView: View {
             // Bottom bar
             HStack(spacing: 12) {
                 if let info = vm.discInfo {
-                    Button("Rip") { vm.ripSelected() }
-                        .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
-                        .buttonStyle(.borderedProminent)
-
                     Button("Select All") {
                         vm.selectedTitles = Set(info.titles.map(\.id))
                     }
@@ -168,6 +174,12 @@ struct RipView: View {
 
                 if vm.isScanning || vm.isRipping {
                     Button("Abort") { vm.abort() }
+                }
+
+                if vm.discInfo != nil {
+                    Button("Rip") { vm.ripSelected() }
+                        .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
+                        .buttonStyle(.borderedProminent)
                 }
             }
             .padding(.horizontal, 16)
