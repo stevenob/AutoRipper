@@ -141,10 +141,20 @@ struct RipView: View {
 
             // Bottom bar
             HStack(spacing: 12) {
-                if vm.discInfo != nil {
-                    Button("Rip Selected") { vm.ripSelected() }
+                if let info = vm.discInfo {
+                    Button("Rip") { vm.ripSelected() }
                         .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
                         .buttonStyle(.borderedProminent)
+
+                    Button("Select All") {
+                        vm.selectedTitles = Set(info.titles.map(\.id))
+                    }
+                    .disabled(vm.isRipping)
+
+                    Button("Deselect All") {
+                        vm.selectedTitles = []
+                    }
+                    .disabled(vm.isRipping)
                 }
 
                 if !vm.isRipping {
