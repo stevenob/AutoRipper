@@ -17,15 +17,6 @@ struct RipView: View {
                 .toggleStyle(.checkbox)
                 .disabled(vm.isScanning || vm.isRipping)
 
-                Divider()
-                    .frame(height: 16)
-
-                Toggle("Auto-Eject", isOn: $config.autoEject)
-                .toggleStyle(.checkbox)
-                .font(.caption)
-
-                Spacer()
-
                 Text("Min:")
                     .foregroundStyle(.secondary)
                     .font(.caption)
@@ -36,6 +27,12 @@ struct RipView: View {
                         .frame(width: 40)
                 }
                 .controlSize(.small)
+
+                Spacer()
+
+                Toggle("Auto-Eject", isOn: $config.autoEject)
+                .toggleStyle(.checkbox)
+                .font(.caption)
 
                 Button { vm.ejectDisc() } label: {
                     Label("Eject", systemImage: "eject.fill")
