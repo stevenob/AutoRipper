@@ -204,9 +204,11 @@ struct RipView: View {
                 }
 
                 if vm.discInfo != nil {
-                    Button("Rip") { vm.ripSelected() }
-                        .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
-                        .buttonStyle(.borderedProminent)
+                    Button(vm.fullAutoEnabled ? "Rip & Encode" : "Rip") {
+                        vm.ripSelected()
+                    }
+                    .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
+                    .buttonStyle(.borderedProminent)
                 }
             }
             .padding(.horizontal, 16)
