@@ -1,36 +1,42 @@
 # AutoRipper 🎬
 
-A modern macOS GUI app that automates the entire DVD/Blu-ray ripping pipeline: **Rip → Encode → Organize → Scrape metadata** — all hands-free with one click.
+A native macOS app that automates the entire DVD/Blu-ray ripping pipeline: **Rip → Encode → Organize → Scrape metadata** — all hands-free with one click.
 
-Built with [customtkinter](https://github.com/TomSchimansky/CustomTkinter) for a native macOS look with automatic dark/light mode support.
+Built with **SwiftUI** for a true native macOS experience with sidebar navigation, system colors, and full dark/light mode support. A Python (customtkinter) version is also included.
 
 ## Features
 
-- **⚡ Full Auto Mode** — One click to rip, encode, organize, and scrape metadata automatically
-- **Job Queue** — Rip multiple discs back-to-back; encoding and processing happen in the background (auto-prunes completed jobs)
-- **Modern UI** — Native macOS appearance with dark/light mode, rounded buttons, and clean design
-- **Scan & Rip** — Detect discs, browse titles with resolution display (4K/1080p/720p/480p), min duration filter, file-size progress with ETA
-- **HandBrake Encoding** — H.265 quick presets auto-selected by resolution, Apple VideoToolbox hardware acceleration, audio/subtitle track chooser
-- **Auto-detect metadata** — [TMDb](https://www.themoviedb.org/) lookup for movie/TV show titles and years
+- **⚡ Full Auto Mode** — One click to scan, rip, encode, organize, and scrape metadata automatically
+- **Smart Title Detection** — Auto-labels scanned titles: 🎬 Main Feature, 🎥 Feature, 📀 Extra, 🎞️ Short Extra, ⏭️ Trailer
+- **TMDb Integration** — Automatic movie/TV show identification from disc name, with poster, fanart, and NFO downloads
+- **Job Queue** — Rip multiple discs back-to-back; encoding and processing happen in the background
+- **Native macOS UI** — Sidebar navigation, grouped sections, system controls, auto-saves settings
+- **Scan & Rip** — Detect discs, browse titles with resolution badges (4K/1080p/720p/480p), min duration filter, real-time streaming log
+- **HandBrake Encoding** — H.265 presets auto-selected by resolution, Apple VideoToolbox hardware acceleration, audio/subtitle track selection
 - **Clean & Organize** — Rename and sort files into structured folders:
   - Movies: `Title (Year)/Title (Year).mkv`
   - TV Shows: `Show/Season 01/Show - S01E01 - Episode Name.mkv`
-- **tinyMediaManager** — Optional post-organize scrape for artwork, NFO files, and subtitles
-- **Built-in Artwork & NFO** — Download poster/fanart and create Kodi/Jellyfin-compatible NFO files directly from TMDb (no Java needed)
-- **Auto-eject** — Eject disc after ripping (configurable), plus manual eject button
-- **Abort** — Cancel any running operation at any time
-- **Persistent Preferences** — Settings auto-save between sessions
-- **Streaming Logs** — Real-time output from MakeMKV and HandBrake
-- **File Logging** — Debug logs saved to `~/Library/Logs/AutoRipper/` with daily rotation
-- **macOS Notifications** — Notification Center alerts for job completion and failures
-- **Native Menu Bar** — About dialog, ⌘, for Settings, ⌘Q to quit
+- **Built-in Artwork & NFO** — Download poster/fanart and create Kodi/Jellyfin-compatible NFO files (movie, TV show, and episode)
+- **Discord Notifications** — Single updating job card per title, plus one-shot info/progress/success/error messages
+- **NAS Upload** — Auto-copy organized media to NAS with separate movie/TV paths and local cleanup
+- **macOS Notifications** — Notification Center alerts (with osascript fallback for debug builds)
+- **Auto-eject** — Eject disc after ripping (configurable)
+- **Process Management** — All child processes (makemkvcon, HandBrakeCLI) terminate when the app quits
+- **File Logging** — Debug logs saved to `~/Library/Logs/AutoRipper/` with daily rotation and 7-day retention
+- **99 Unit Tests** — Comprehensive test coverage across services, models, view models, and config
 
 ## Pipeline Flow
 
 ```
-Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
-                      └── ⚡ Full Auto runs all steps hands-free
-                      └── Job Queue: rip next disc while previous encodes
+Insert Disc → Scan → Auto-label titles → TMDb lookup
+                       ↓
+              Select titles (or Full Auto picks the largest)
+                       ↓
+              Rip → Encode (H.265 by resolution) → Organize → Scrape artwork/NFO
+                       ↓                                            ↓
+              Discord job card updates at each step         Copy to NAS (optional)
+                       ↓
+              Eject disc → Ready for next disc
 ```
 
 ### Encoding Presets by Resolution
@@ -38,6 +44,8 @@ Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
 | Source | Resolution | Auto-selected Preset |
 |--------|-----------|---------------------|
 | DVD | 480p | H.265 MKV 480p30 |
+| DVD PAL | 576p | H.265 MKV 576p25 |
+| Blu-ray | 720p | H.265 MKV 720p30 |
 | Blu-ray | 1080p | H.265 Apple VideoToolbox 1080p ⚡ |
 | 4K UHD | 2160p | H.265 Apple VideoToolbox 2160p 4K ⚡ |
 
@@ -45,121 +53,144 @@ Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
 
 ## Requirements
 
-- **macOS** (tested on Apple Silicon)
-- **Python 3.9+** (Python 3.13 via Homebrew recommended)
+- **macOS 14+** (Sonoma or later, Apple Silicon recommended)
+- **Xcode 15.3+** (for building the Swift version)
 - **[MakeMKV](https://www.makemkv.com/)** installed at `/Applications/MakeMKV.app`
 - **[HandBrake CLI](https://handbrake.fr/)** — install via `brew install handbrake`
 - **TMDb API key** (free) — [get one here](https://www.themoviedb.org/settings/api)
-- **[tinyMediaManager](https://www.tinymediamanager.org/)** (optional) — for advanced artwork and NFO scraping
-- **Discord webhook** (optional) — for pipeline notifications (single updating card per title)
-- **NAS Upload** (optional) — auto-copy organized media to NAS with local cleanup
+- **Discord webhook** (optional) — for pipeline notifications
+- **NAS path** (optional) — for auto-copy to network storage
 
-## Installation
+## Installation & Running (Swift)
 
 ```bash
 # Clone the repo
 git clone https://github.com/stevenob/AutoRipper.git
+cd AutoRipper/AutoRipperSwift
+
+# Build
+swift build
+
+# Run
+.build/debug/AutoRipper
+
+# Run tests
+swift test
+```
+
+## Installation & Running (Python)
+
+```bash
 cd AutoRipper
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Install HandBrake CLI (if not already installed)
-brew install handbrake
+# Run
+python3.13 main.py
+
+# Run tests
+python3.13 -m unittest discover -s tests -v
 ```
 
-## Building the App
-
-To build a standalone macOS `.app` bundle (double-click to launch, shows in Dock):
+### Building a macOS .app bundle (Python)
 
 ```bash
 pip install pyinstaller
 bash build.sh
-```
+# → dist/AutoRipper.app
 
-The app bundle will be at `dist/AutoRipper.app`. To install:
-
-```bash
-cp -r dist/AutoRipper.app /Applications/
-```
-
-To create a drag-and-drop DMG installer:
-
-```bash
+# Create DMG installer
 bash create-dmg.sh
 # → dist/AutoRipper-Installer.dmg
 ```
 
-## Usage
+## First-time Setup
 
-```bash
-python3.13 main.py
-```
-
-### First-time setup
-
-1. Open the **Settings** tab
+1. Launch the app and go to **Settings** in the sidebar
 2. Set your **TMDb API key**
-3. Verify tool paths: MakeMKV, HandBrake
+3. Verify tool paths: MakeMKV, HandBrake CLI
 4. Set your **Output directory** (default: `~/Desktop/Ripped`)
-5. Optionally add a **Discord webhook URL** for notifications
-6. Click **Save Settings**
-7. Adjust **Preferences** (auto-saved): min duration, auto-eject, HandBrake preset, media type
+5. Optionally add a **Discord webhook URL** and **NAS paths**
+6. Settings auto-save as you type
+
+## Usage
 
 ### Full Auto (recommended)
 
 1. Insert a DVD or Blu-ray
-2. Click **Scan Disc**
-3. Click **⚡ Full Auto**
+2. Check **Full Auto** in the toolbar
+3. Click the **Scan Disc** button (becomes **Full Auto**)
 4. Walk away — AutoRipper handles everything:
+   - Scans and identifies the main feature
    - Rips the largest title
-   - Auto-selects H.265 preset by resolution (HW-accelerated for 1080p/4K)
+   - Auto-selects H.265 preset by resolution
    - Encodes with HandBrake
    - Organizes into `Title (Year)/Title (Year).mkv`
    - Downloads poster, fanart, and creates NFO file
-   - Ejects the disc when done
-   - Sends a single Discord notification card that updates at each step
-5. Insert next disc and repeat — previous jobs encode in the background
+   - Copies to NAS (if enabled)
+   - Ejects the disc
+   - Sends Discord notification card
+5. Insert next disc — previous jobs encode in the background
 
 ### Manual Mode
 
-Use **Rip Selected** instead to control each step individually. Tabs: Rip, Encode, Scrape, Queue, Settings.
-
-## Running Tests
-
-```bash
-python3.13 -m unittest discover -s tests -v
-```
+1. Click **Scan Disc**
+2. Review titles — each is auto-labeled (Main Feature, Extra, Trailer, etc.)
+3. Use **Select All** / **Deselect All** to choose titles
+4. Click **Rip**
+5. Switch to **Encode** to pick preset and audio/subtitle tracks
+6. Use **Queue** to monitor the pipeline
 
 ## Project Structure
 
 ```
 AutoRipper/
-├── main.py              # Entry point
-├── config.py            # Settings & preferences (JSON persistence)
-├── requirements.txt     # Python dependencies
-├── build.sh             # PyInstaller → .app bundle
-├── create-dmg.sh        # DMG installer builder
-├── AutoRipper.spec      # PyInstaller spec
-├── assets/              # App icon (.icns, .png)
-├── core/
-│   ├── disc.py          # Disc/title data models
-│   ├── makemkv.py       # MakeMKV CLI wrapper
-│   ├── handbrake.py     # HandBrake CLI wrapper
-│   ├── metadata.py      # TMDb API integration
-│   ├── organizer.py     # File renaming & folder organization
-│   ├── artwork.py       # Poster/fanart download & NFO creation
-│   ├── discord_notify.py # Discord webhook (single updating card per job)
-│   ├── macos_notify.py  # macOS Notification Center alerts
-│   ├── logger.py        # File logging to ~/Library/Logs/AutoRipper
-│   └── job_queue.py     # Background job queue for multi-disc pipeline
-├── gui/                 # customtkinter UI (dark/light mode)
-│   ├── app.py           # Main window, menu bar, settings, pipeline orchestration
-│   ├── rip_tab.py       # Disc scanning & ripping
-│   ├── encode_tab.py    # HandBrake encoding with H.265 presets
-│   ├── scrape_tab.py    # Artwork & NFO scraper
-│   └── queue_tab.py     # Job queue status
-└── tests/               # Unit tests (49 tests, all mocked)
+├── AutoRipperSwift/           # Native Swift/SwiftUI app
+│   ├── Package.swift
+│   ├── AutoRipper/
+│   │   ├── AutoRipperApp.swift
+│   │   ├── Models/
+│   │   │   ├── AppConfig.swift        # Settings (JSON, auto-save)
+│   │   │   ├── DiscInfo.swift         # Disc/title models with auto-labeling
+│   │   │   ├── Job.swift              # Queue job model
+│   │   │   └── MediaResult.swift      # TMDb result models
+│   │   ├── Services/
+│   │   │   ├── MakeMKVService.swift   # MakeMKV CLI (real-time streaming)
+│   │   │   ├── HandBrakeService.swift # HandBrake CLI + auto-preset
+│   │   │   ├── TMDbService.swift      # TMDb API (search, details, episodes)
+│   │   │   ├── ArtworkService.swift   # Poster/fanart/NFO (movie + episode)
+│   │   │   ├── DiscordService.swift   # Webhooks (job cards + one-shots)
+│   │   │   ├── OrganizerService.swift # File rename/move (movie + TV)
+│   │   │   ├── NotificationService.swift
+│   │   │   ├── LogService.swift       # File logging with rotation
+│   │   │   └── ProcessTracker.swift   # Child process cleanup on quit
+│   │   ├── ViewModels/
+│   │   │   ├── RipViewModel.swift
+│   │   │   ├── EncodeViewModel.swift
+│   │   │   ├── ScrapeViewModel.swift
+│   │   │   ├── QueueViewModel.swift
+│   │   │   └── SettingsViewModel.swift
+│   │   └── Views/
+│   │       ├── ContentView.swift      # Sidebar navigation
+│   │       ├── RipView.swift
+│   │       ├── EncodeView.swift
+│   │       ├── ScrapeView.swift
+│   │       ├── QueueView.swift
+│   │       └── SettingsView.swift
+│   └── AutoRipperTests/              # 99 tests
+│       ├── Phase1Tests.swift
+│       ├── ServiceTests.swift
+│       ├── ViewModelTests.swift
+│       └── ConfigTests.swift
+├── main.py                    # Python entry point
+├── config.py                  # Python settings
+├── core/                      # Python services
+├── gui/                       # Python UI (customtkinter)
+├── tests/                     # Python tests
+├── build.sh                   # PyInstaller build
+├── create-dmg.sh              # DMG builder
+└── assets/                    # App icon
 ```
 
 ## License

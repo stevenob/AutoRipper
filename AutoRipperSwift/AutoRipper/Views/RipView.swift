@@ -62,11 +62,20 @@ struct RipView: View {
                     .padding(.vertical, 8)
 
                     // Titles table
-                    Table(info.titles, selection: $vm.selectedTitles) {
+                    Table(info.titles) {
                         TableColumn("") { title in
-                            Image(systemName: vm.selectedTitles.contains(title.id) ? "checkmark.circle.fill" : "circle")
-                                .foregroundColor(vm.selectedTitles.contains(title.id) ? .accentColor : .gray)
-                                .font(.body)
+                            Button {
+                                if vm.selectedTitles.contains(title.id) {
+                                    vm.selectedTitles.remove(title.id)
+                                } else {
+                                    vm.selectedTitles.insert(title.id)
+                                }
+                            } label: {
+                                Image(systemName: vm.selectedTitles.contains(title.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundColor(vm.selectedTitles.contains(title.id) ? .accentColor : .gray)
+                                    .font(.body)
+                            }
+                            .buttonStyle(.plain)
                         }
                         .width(28)
 
