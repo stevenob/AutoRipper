@@ -76,7 +76,13 @@ final class RipViewModel: ObservableObject {
         statusText = "Ripping…"
 
         let titlesToRip = selectedTitles.sorted()
-        let outputDir = config.outputDir
+        let baseDir = config.outputDir
+        // Use TMDb title if available, otherwise clean disc name
+        let folderName = OrganizerService.cleanFilename(
+            info.mediaTitle.isEmpty ? info.name : info.mediaTitle
+        )
+        let outputDir = URL(fileURLWithPath: baseDir)
+            .appendingPathComponent(folderName).path
         // In Full Auto, only queue the largest title for encode
         let largestId = info.titles
             .filter { selectedTitles.contains($0.id) }
