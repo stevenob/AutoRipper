@@ -81,9 +81,11 @@ struct SettingsView: View {
                             HStack {
                                 Text("Min Duration (sec):")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", value: $vm.minDuration, format: .number)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 80)
+                                Stepper(value: $vm.minDuration, in: 0...7200, step: 30) {
+                                    TextField("", value: $vm.minDuration, formatter: NumberFormatter())
+                                        .textFieldStyle(.roundedBorder)
+                                        .frame(width: 80)
+                                }
                                 Spacer()
                             }
 
