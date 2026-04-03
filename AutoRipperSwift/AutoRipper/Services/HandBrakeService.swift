@@ -130,32 +130,41 @@ actor HandBrakeService {
         try proc.run()
         ProcessTracker.shared.register(proc)
 
-        // Read chunks (4KB) and parse \r-delimited progress lines
+        // Stream and parse progress lines in real time
         let handle = pipe.fileHandleForReading
-        let data = handle.readDataToEndOfFile()
-        let text = String(data: data, encoding: .utf8) ?? ""
 
-        for segment in text.components(separatedBy: CharacterSet(charactersIn: "\r\n")) {
-            let line = segment.trimmingCharacters(in: .whitespaces)
-            guard !line.isEmpty else { continue }
+        handle.readabilityHandler = { fileHandle in
+            let data = fileHandle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+            for segment in chunk.components(separatedBy: CharacterSet(charactersIn: "\r\n")) {
+                let line = segment.trimmingCharacters(in: .whitespaces)
+                guard !line.isEmpty else { continue }
 
-            if !line.hasPrefix("Encoding: task") {
-                logCallback?(line)
-            }
+                if !line.hasPrefix("Encoding: task") {
+                    logCallback?(line)
+                }
 
-            if let groups = Self.match(line, pattern: #"(\d+\.\d+)\s*%"#) {
-                let percent = min(Int(Double(groups[1]) ?? 0), 100)
-                let eta = Self.match(line, pattern: #"ETA\s+(\S+)"#).map { " — ETA \($0[1])" } ?? ""
-                let fps = Self.match(line, pattern: #"(\d+\.\d+)\s*fps"#).map { " (\($0[1]) fps)" } ?? ""
-                progressCallback?(percent, "Encoding: \(percent)%\(eta)\(fps)")
+                if let groups = HandBrakeService.match(line, pattern: #"(\d+\.\d+)\s*%"#) {
+                    let percent = min(Int(Double(groups[1]) ?? 0), 100)
+                    let eta = HandBrakeService.match(line, pattern: #"ETA\s+(\S+)"#).map { " — ETA \($0[1])" } ?? ""
+                    let fps = HandBrakeService.match(line, pattern: #"(\d+\.\d+)\s*fps"#).map { " (\($0[1]) fps)" } ?? ""
+                    progressCallback?(percent, "Encoding: \(percent)%\(eta)\(fps)")
+                }
             }
         }
 
-        proc.waitUntilExit()
+        // Wait without blocking the cooperative thread pool
+        let status: Int32 = await withCheckedContinuation { continuation in
+            proc.terminationHandler = { process in
+                continuation.resume(returning: process.terminationStatus)
+            }
+        }
+
+        handle.readabilityHandler = nil
         ProcessTracker.shared.unregister(proc)
 
-        guard proc.terminationStatus == 0 else {
-            throw HandBrakeError.encodeFailed("HandBrakeCLI exited with code \(proc.terminationStatus)")
+        guard status == 0 else {
+            throw HandBrakeError.encodeFailed("HandBrakeCLI exited with code \(status)")
         }
         guard FileManager.default.fileExists(atPath: outURL.path) else {
             throw HandBrakeError.encodeFailed("Encoding completed but output file not found: \(outURL.path)")

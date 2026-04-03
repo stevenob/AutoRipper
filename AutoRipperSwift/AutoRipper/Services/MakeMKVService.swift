@@ -236,7 +236,7 @@ actor MakeMKVService {
         handle.readabilityHandler = { fileHandle in
             let data = fileHandle.availableData
             guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
-            for line in chunk.components(separatedBy: .newlines) {
+            for line in chunk.components(separatedBy: CharacterSet(charactersIn: "\r\n")) {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
                 lines.append(trimmed)
@@ -245,12 +245,18 @@ actor MakeMKVService {
             }
         }
 
-        proc.waitUntilExit()
+        // Wait without blocking the cooperative thread pool
+        let status: Int32 = await withCheckedContinuation { continuation in
+            proc.terminationHandler = { process in
+                continuation.resume(returning: process.terminationStatus)
+            }
+        }
+
         handle.readabilityHandler = nil
         // Read any remaining data
         let remaining = handle.readDataToEndOfFile()
         if !remaining.isEmpty, let chunk = String(data: remaining, encoding: .utf8) {
-            for line in chunk.components(separatedBy: .newlines) {
+            for line in chunk.components(separatedBy: CharacterSet(charactersIn: "\r\n")) {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
                 lines.append(trimmed)
@@ -260,7 +266,7 @@ actor MakeMKVService {
         }
 
         ProcessTracker.shared.unregister(proc)
-        return (lines.result, proc.terminationStatus)
+        return (lines.result, status)
     }
 }
 
