@@ -53,7 +53,8 @@ struct RipView: View {
                         }
                         Text("·")
                             .foregroundStyle(.tertiary)
-                        Text("\(info.titles.count) titles")
+                        let filtered = info.titles.filter { $0.durationSeconds >= vm.minDuration }
+                        Text("\(filtered.count) of \(info.titles.count) titles")
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                         Spacer()
@@ -61,8 +62,9 @@ struct RipView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
 
-                    // Titles table
-                    Table(info.titles) {
+                    // Titles table — only show titles meeting min duration
+                    let filteredTitles = info.titles.filter { $0.durationSeconds >= vm.minDuration }
+                    Table(filteredTitles) {
                         TableColumn("") { title in
                             Button {
                                 if vm.selectedTitles.contains(title.id) {
@@ -179,8 +181,9 @@ struct RipView: View {
             // Bottom bar
             HStack(spacing: 12) {
                 if let info = vm.discInfo {
+                    let filtered = info.titles.filter { $0.durationSeconds >= vm.minDuration }
                     Button("Select All") {
-                        vm.selectedTitles = Set(info.titles.map(\.id))
+                        vm.selectedTitles = Set(filtered.map(\.id))
                     }
                     .disabled(vm.isRipping)
 
