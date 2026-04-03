@@ -112,12 +112,15 @@ struct RipView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 12) {
                         Image(systemName: "opticaldisc")
                             .font(.system(size: 48))
                             .foregroundStyle(.quaternary)
-                        Text("Insert a disc and click Scan")
-                            .foregroundStyle(.secondary)
+                        Button { vm.scanDisc() } label: {
+                            Label("Scan Disc", systemImage: "magnifyingglass")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
                     }
                 }
                 Spacer()
