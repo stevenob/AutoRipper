@@ -116,6 +116,23 @@ final class RipViewModel: ObservableObject {
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
                 }
             }
+
+            // Scrape artwork/NFO into the title folder right after rip
+            statusText = "Scraping artwork & NFO…"
+            logLines.append("Scraping artwork for \(folderName)…")
+            let destDir = URL(fileURLWithPath: outputDir)
+            let artwork = ArtworkService()
+            let scraped = await artwork.scrapeAndSave(
+                discName: info.name,
+                destDir: destDir,
+                logCallback: { [weak self] line in
+                    Task { @MainActor in self?.logLines.append(line) }
+                }
+            )
+            if scraped {
+                logLines.append("✓ Artwork & NFO saved")
+            }
+
             ripProgress = 1.0
             statusText = "Rip complete"
             isRipping = false
