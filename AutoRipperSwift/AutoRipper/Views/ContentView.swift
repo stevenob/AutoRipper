@@ -29,7 +29,6 @@ struct ContentView: View {
     @StateObject private var encodeVM = EncodeViewModel()
     @StateObject private var scrapeVM = ScrapeViewModel()
     @StateObject private var queueVM = QueueViewModel()
-    @StateObject private var settingsVM = SettingsViewModel()
 
     var body: some View {
         NavigationSplitView {
@@ -83,7 +82,7 @@ struct ContentView: View {
                     case .queue:
                         QueueView(vm: queueVM)
                     case .settings:
-                        SettingsView(vm: settingsVM)
+                        SettingsView(config: AppConfig.shared)
                     case nil:
                         Text("Select an item")
                             .foregroundStyle(.secondary)

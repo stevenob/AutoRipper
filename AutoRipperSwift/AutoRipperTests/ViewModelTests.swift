@@ -210,30 +210,6 @@ final class ScrapeViewModelTests: XCTestCase {
     }
 }
 
-// MARK: - SettingsViewModel Tests
-
-@MainActor
-final class SettingsViewModelTests: XCTestCase {
-
-    func testInitLoadsFromConfig() {
-        let vm = SettingsViewModel()
-        XCTAssertEqual(vm.outputDir, AppConfig.shared.outputDir)
-        XCTAssertEqual(vm.minDuration, AppConfig.shared.minDuration)
-        XCTAssertEqual(vm.autoEject, AppConfig.shared.autoEject)
-    }
-
-    func testSaveUpdatesConfig() {
-        let vm = SettingsViewModel()
-        let newDuration = 999
-        vm.minDuration = newDuration
-        vm.save(quiet: true)
-        XCTAssertEqual(AppConfig.shared.minDuration, newDuration)
-        // Restore
-        vm.minDuration = 120
-        vm.save(quiet: true)
-    }
-}
-
 // MARK: - Job Model Tests
 
 final class JobExtendedTests: XCTestCase {

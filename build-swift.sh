@@ -3,14 +3,26 @@ set -euo pipefail
 
 APP_NAME="AutoRipper"
 BUNDLE_ID="com.autoripper.app"
-VERSION="2.0.0"
 BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 SWIFT_DIR="$BUILD_DIR/AutoRipperSwift"
 DIST_DIR="$BUILD_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 ICON_SRC="$BUILD_DIR/assets/AutoRipper.icns"
+VERSION_FILE="$BUILD_DIR/VERSION"
 
-echo "🔨 Building $APP_NAME $VERSION..."
+# Read version from VERSION file
+VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
+echo "🔨 Building $APP_NAME v$VERSION..."
+
+# Update version in UpdateService.swift
+sed -i '' "s/static let currentVersion = \".*\"/static let currentVersion = \"$VERSION\"/" \
+    "$SWIFT_DIR/AutoRipper/Services/UpdateService.swift"
+
+# Update version in AutoRipperApp.swift
+sed -i '' "s/\.applicationVersion: \".*\"/\.applicationVersion: \"$VERSION\"/" \
+    "$SWIFT_DIR/AutoRipper/AutoRipperApp.swift"
+sed -i '' "s/AutoRipper .* starting/AutoRipper $VERSION starting/" \
+    "$SWIFT_DIR/AutoRipper/AutoRipperApp.swift"
 
 # 1. Run tests
 echo "🧪 Running tests..."
@@ -97,15 +109,41 @@ echo "🔍 Verifying..."
 codesign --verify --deep --strict "$APP_BUNDLE" 2>&1
 echo "   ✅ Verified"
 
-# 9. Summary
+# 9. Create DMG
+echo "💿 Creating DMG..."
+bash "$BUILD_DIR/create-dmg.sh"
+
+# 10. Git tag + GitHub release
+echo "🚀 Creating GitHub release v$VERSION..."
+cd "$BUILD_DIR"
+git add -A
+git commit -m "Release v$VERSION
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" || true
+git tag -f "v$VERSION"
+git push origin main --tags --force 2>&1
+
+gh release create "v$VERSION" \
+    --title "$APP_NAME v$VERSION" \
+    --generate-notes \
+    "$DIST_DIR/AutoRipper-Installer.dmg" 2>&1 || \
+gh release upload "v$VERSION" "$DIST_DIR/AutoRipper-Installer.dmg" --clobber 2>&1
+
+# 11. Bump patch version for next build
+IFS='.' read -r major minor patch <<< "$VERSION"
+NEXT="$major.$minor.$((patch + 1))"
+echo "$NEXT" > "$VERSION_FILE"
+git add "$VERSION_FILE"
+git commit -m "Bump version to $NEXT for next build
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" || true
+git push origin main 2>&1
+
+# 12. Summary
 APP_SIZE=$(du -sh "$APP_BUNDLE" | cut -f1)
 echo ""
-echo "✅ $APP_NAME.app built successfully!"
-echo "   📍 $APP_BUNDLE"
-echo "   📏 Size: $APP_SIZE"
-echo ""
-echo "To install:"
-echo "   cp -r $APP_BUNDLE /Applications/"
-echo ""
-echo "To create a DMG:"
-echo "   bash create-dmg.sh"
+echo "✅ $APP_NAME v$VERSION released!"
+echo "   📍 $APP_BUNDLE ($APP_SIZE)"
+echo "   💿 $DIST_DIR/AutoRipper-Installer.dmg"
+echo "   🏷️  Tagged: v$VERSION"
+echo "   📦 Next version: $NEXT"

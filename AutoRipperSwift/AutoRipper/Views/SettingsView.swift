@@ -1,7 +1,11 @@
 import SwiftUI
+import os
+
+private let log = Logger(subsystem: "com.autoripper.app", category: "settings")
 
 struct SettingsView: View {
-    @ObservedObject var vm: SettingsViewModel
+    @ObservedObject var config: AppConfig
+    @State private var statusText: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -12,35 +16,35 @@ struct SettingsView: View {
                             HStack {
                                 Text("Output Directory:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.outputDir)
+                                TextField("", text: $config.outputDir)
                                     .textFieldStyle(.roundedBorder)
-                                Button("Browse…") { browseFolder(binding: $vm.outputDir) }
+                                Button("Browse…") { browseFolder(binding: $config.outputDir) }
                             }
                             HStack {
                                 Text("TMDb API Key:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.tmdbApiKey)
+                                TextField("", text: $config.tmdbApiKey)
                                     .textFieldStyle(.roundedBorder)
                             }
                             HStack {
                                 Text("MakeMKV Path:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.makemkvPath)
+                                TextField("", text: $config.makemkvPath)
                                     .textFieldStyle(.roundedBorder)
                             }
                             HStack {
                                 Text("HandBrake CLI Path:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.handbrakePath)
+                                TextField("", text: $config.handbrakePath)
                                     .textFieldStyle(.roundedBorder)
                             }
                             HStack {
                                 Text("Discord Webhook:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.discordWebhook)
+                                TextField("", text: $config.discordWebhook)
                                     .textFieldStyle(.roundedBorder)
-                                Button("Test") { vm.testDiscord() }
-                                    .disabled(vm.discordWebhook.isEmpty)
+                                Button("Test") { testDiscord() }
+                                    .disabled(config.discordWebhook.isEmpty)
                             }
                         }
                         .padding(4)
@@ -50,25 +54,25 @@ struct SettingsView: View {
 
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
-                            Toggle("Enable NAS Upload", isOn: $vm.nasUploadEnabled)
+                            Toggle("Enable NAS Upload", isOn: $config.nasUploadEnabled)
 
                             HStack {
                                 Text("Movies Path:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.nasMoviesPath)
+                                TextField("", text: $config.nasMoviesPath)
                                     .textFieldStyle(.roundedBorder)
-                                    .disabled(!vm.nasUploadEnabled)
-                                Button("Browse…") { browseFolder(binding: $vm.nasMoviesPath) }
-                                    .disabled(!vm.nasUploadEnabled)
+                                    .disabled(!config.nasUploadEnabled)
+                                Button("Browse…") { browseFolder(binding: $config.nasMoviesPath) }
+                                    .disabled(!config.nasUploadEnabled)
                             }
                             HStack {
                                 Text("TV Path:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.nasTvPath)
+                                TextField("", text: $config.nasTvPath)
                                     .textFieldStyle(.roundedBorder)
-                                    .disabled(!vm.nasUploadEnabled)
-                                Button("Browse…") { browseFolder(binding: $vm.nasTvPath) }
-                                    .disabled(!vm.nasUploadEnabled)
+                                    .disabled(!config.nasUploadEnabled)
+                                Button("Browse…") { browseFolder(binding: $config.nasTvPath) }
+                                    .disabled(!config.nasUploadEnabled)
                             }
                         }
                         .padding(4)
@@ -81,8 +85,8 @@ struct SettingsView: View {
                             HStack {
                                 Text("Min Duration (sec):")
                                     .frame(width: 140, alignment: .trailing)
-                                Stepper(value: $vm.minDuration, in: 0...7200, step: 30) {
-                                    TextField("", value: $vm.minDuration, formatter: NumberFormatter())
+                                Stepper(value: $config.minDuration, in: 0...7200, step: 30) {
+                                    TextField("", value: $config.minDuration, formatter: NumberFormatter())
                                         .textFieldStyle(.roundedBorder)
                                         .frame(width: 80)
                                 }
@@ -92,21 +96,21 @@ struct SettingsView: View {
                             HStack {
                                 Text("")
                                     .frame(width: 140)
-                                Toggle("Auto-Eject After Rip", isOn: $vm.autoEject)
+                                Toggle("Auto-Eject After Rip", isOn: $config.autoEject)
                                 Spacer()
                             }
 
                             HStack {
                                 Text("Default Preset:")
                                     .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $vm.defaultPreset)
+                                TextField("", text: $config.defaultPreset)
                                     .textFieldStyle(.roundedBorder)
                             }
 
                             HStack {
                                 Text("Media Type:")
                                     .frame(width: 140, alignment: .trailing)
-                                Picker("", selection: $vm.defaultMediaType) {
+                                Picker("", selection: $config.defaultMediaType) {
                                     Text("Movie").tag("movie")
                                     Text("TV Show").tag("tvshow")
                                 }
@@ -126,25 +130,32 @@ struct SettingsView: View {
 
             // Footer
             HStack {
-                Button("Save Settings") { vm.save(quiet: false) }
-                    .keyboardShortcut("s", modifiers: .command)
-
-                if !vm.statusText.isEmpty {
-                    Text(vm.statusText)
+                if !statusText.isEmpty {
+                    Text(statusText)
                         .foregroundStyle(.secondary)
                         .font(.caption)
-                        .transition(.opacity)
                 }
 
                 Spacer()
 
-                Text("Settings auto-save on change")
+                Text("All changes save instantly")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(.bar)
+        }
+    }
+
+    private func testDiscord() {
+        Task {
+            let discord = DiscordService(config: config)
+            let card = JobCard(discName: "Test Disc", nasEnabled: false, discord: discord)
+            await card.start("rip")
+            await card.finish("rip", detail: "0m 1s")
+            await card.complete(footer: "This is a test notification")
+            statusText = "Test notification sent ✓"
         }
     }
 

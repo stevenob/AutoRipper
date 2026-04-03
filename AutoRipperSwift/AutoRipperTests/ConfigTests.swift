@@ -19,72 +19,22 @@ final class AppConfigTests: XCTestCase {
         XCTAssertTrue(config.nasTvPath.isEmpty)
     }
 
-    func testEncodeDecodeRoundTrip() throws {
-        let original = AppConfig()
-        original.outputDir = "/custom/path"
-        original.tmdbApiKey = "abc123"
-        original.minDuration = 300
-        original.autoEject = false
-        original.defaultPreset = "Fast 1080p30"
-        original.defaultMediaType = "tvshow"
-        original.discordWebhook = "https://discord.com/webhook"
-        original.nasUploadEnabled = true
-        original.nasMoviesPath = "/nas/movies"
-        original.nasTvPath = "/nas/tv"
-
-        let data = try JSONEncoder().encode(original)
-        let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
-
-        XCTAssertEqual(decoded.outputDir, "/custom/path")
-        XCTAssertEqual(decoded.tmdbApiKey, "abc123")
-        XCTAssertEqual(decoded.minDuration, 300)
-        XCTAssertEqual(decoded.autoEject, false)
-        XCTAssertEqual(decoded.defaultPreset, "Fast 1080p30")
-        XCTAssertEqual(decoded.defaultMediaType, "tvshow")
-        XCTAssertEqual(decoded.discordWebhook, "https://discord.com/webhook")
-        XCTAssertEqual(decoded.nasUploadEnabled, true)
-        XCTAssertEqual(decoded.nasMoviesPath, "/nas/movies")
-        XCTAssertEqual(decoded.nasTvPath, "/nas/tv")
-    }
-
-    func testDecodeWithMissingKeysUsesDefaults() throws {
-        let json = "{\"output_dir\": \"/test\"}"
-        let data = json.data(using: .utf8)!
-        let config = try JSONDecoder().decode(AppConfig.self, from: data)
-
-        XCTAssertEqual(config.outputDir, "/test")
-        // All other fields should have defaults
-        XCTAssertEqual(config.minDuration, 120)
-        XCTAssertTrue(config.autoEject)
-        XCTAssertEqual(config.defaultPreset, "HQ 1080p30 Surround")
-    }
-
-    func testDecodeEmptyJSON() throws {
-        let json = "{}"
-        let data = json.data(using: .utf8)!
-        let config = try JSONDecoder().decode(AppConfig.self, from: data)
-        // All defaults
-        XCTAssertEqual(config.minDuration, 120)
-        XCTAssertTrue(config.autoEject)
-    }
-
-    func testCodingKeys() throws {
+    func testUserDefaultsPersistence() {
         let config = AppConfig()
-        config.outputDir = "/test"
-        config.tmdbApiKey = "key"
-        let data = try JSONEncoder().encode(config)
-        let json = String(data: data, encoding: .utf8)!
+        config.minDuration = 999
+        // Should be written to UserDefaults immediately
+        let stored = UserDefaults.standard.integer(forKey: "com.autoripper.minDuration")
+        XCTAssertEqual(stored, 999)
+        // Restore
+        config.minDuration = 120
+    }
 
-        // Verify snake_case keys
-        XCTAssertTrue(json.contains("output_dir"))
-        XCTAssertTrue(json.contains("tmdb_api_key"))
-        XCTAssertTrue(json.contains("min_duration"))
-        XCTAssertTrue(json.contains("auto_eject"))
-        XCTAssertTrue(json.contains("default_preset"))
-        XCTAssertTrue(json.contains("discord_webhook"))
-        XCTAssertTrue(json.contains("nas_movies_path"))
-        XCTAssertTrue(json.contains("nas_tv_path"))
-        XCTAssertTrue(json.contains("nas_upload_enabled"))
+    func testPropertyDidSetWritesToDefaults() {
+        let config = AppConfig()
+        config.outputDir = "/test/path"
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "com.autoripper.outputDir"), "/test/path")
+        // Restore
+        config.outputDir = NSHomeDirectory() + "/Desktop/Ripped"
     }
 }
 
