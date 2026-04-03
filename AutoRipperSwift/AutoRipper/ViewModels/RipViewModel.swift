@@ -23,8 +23,8 @@ final class RipViewModel: ObservableObject {
     private let discord: DiscordService
     private var runningTask: Task<Void, Never>?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed)
-    var onRipComplete: ((String, URL, TimeInterval) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution)
+    var onRipComplete: ((String, URL, TimeInterval, String) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -211,7 +211,8 @@ final class RipViewModel: ObservableObject {
                     let elapsed = Date().timeIntervalSince(start)
                     // Only queue for encode pipeline when Full Auto is on (largest title only)
                     if fullAutoEnabled && tid == largestId {
-                        onRipComplete?(info.name, file, elapsed)
+                        let resolution = info.titles.first(where: { $0.id == tid })?.resolution ?? ""
+                        onRipComplete?(info.name, file, elapsed, resolution)
                     }
                 } catch {
                     sizeMonitor.cancel()

@@ -10,6 +10,7 @@ struct Job: Identifiable, Sendable {
     let id: String
     let discName: String
     let rippedFile: URL
+    var resolution: String = ""
     var encodedFile: URL?
     var organizedFile: URL?
     var status: JobStatus = .queued
@@ -18,10 +19,11 @@ struct Job: Identifiable, Sendable {
     var progressText: String = "Queued"
     var ripElapsed: TimeInterval = 0
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "") {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1000))"
         self.discName = discName
         self.rippedFile = rippedFile
         self.ripElapsed = ripElapsed
+        self.resolution = resolution
     }
 }

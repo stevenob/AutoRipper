@@ -347,8 +347,8 @@ struct ContentView: View {
             Text(ripVM.errorMessage ?? "")
         }
         .onAppear {
-            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed in
-                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed)
+            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution in
+                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution)
             }
             NotificationService.shared.requestPermission()
             updateService.checkForUpdates()

@@ -20,8 +20,8 @@ final class QueueViewModel: ObservableObject {
         self.discord = DiscordService(config: config)
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "") {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution)
         jobs.append(job)
         startWorkerIfNeeded()
     }
@@ -221,6 +221,10 @@ final class QueueViewModel: ObservableObject {
             // This is just a container for cancellation
         }
 
+        // Pick preset by resolution, fallback to 1080p
+        let preset = HandBrakeService.autoPreset(for: jobs[index].resolution)
+            ?? "H.265 Apple VideoToolbox 1080p"
+
         // Scan tracks and select all audio + subtitles
         let (audio, subs) = try await handbrake.scanTracks(inputPath: input.path)
         let audioIdxs = audio.isEmpty ? nil : audio.map(\.index)
@@ -229,7 +233,7 @@ final class QueueViewModel: ObservableObject {
         let result = try await handbrake.encode(
             inputPath: input.path,
             outputPath: outputPath,
-            preset: config.defaultPreset,
+            preset: preset,
             audioTracks: audioIdxs,
             subtitleTracks: subIdxs,
             progressCallback: { [weak self] pct, text in
