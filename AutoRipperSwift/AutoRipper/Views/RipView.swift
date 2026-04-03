@@ -107,16 +107,18 @@ struct RipView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else {
-                    VStack(spacing: 12) {
-                        Image(systemName: "opticaldisc")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.quaternary)
-                        Button { vm.scanDisc() } label: {
-                            Label("Scan Disc", systemImage: "magnifyingglass")
+                    Button { vm.scanDisc() } label: {
+                        VStack(spacing: 16) {
+                            Image(systemName: "opticaldisc.fill")
+                                .font(.system(size: 64))
+                            Text("Scan Disc")
+                                .font(.title2)
+                                .fontWeight(.semibold)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
+                        .frame(width: 180, height: 160)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
                 Spacer()
             }
