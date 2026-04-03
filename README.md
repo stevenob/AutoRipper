@@ -57,22 +57,44 @@ Insert Disc → Scan → Auto-label + TMDb lookup                       │
 ## Requirements
 
 - **macOS 14+** (Sonoma or later, Apple Silicon recommended)
-- **Xcode 15.3+** (for building the Swift version)
 - **[MakeMKV](https://www.makemkv.com/)** installed at `/Applications/MakeMKV.app`
 - **[HandBrake CLI](https://handbrake.fr/)** — install via `brew install handbrake`
 - **TMDb API key** (free) — [get one here](https://www.themoviedb.org/settings/api)
-- **Discord webhook** (optional) — for pipeline notifications
-- **NAS path** (optional) — for auto-copy to network storage
+- **Discord webhook** (optional) — pipeline notifications
+- **NAS path** (optional) — auto-copy to network storage
 
-## Quick Start
+## Installation
+
+### Download (recommended)
+
+1. Download **AutoRipper-Installer.dmg** from the [latest release](https://github.com/stevenob/AutoRipper/releases/latest)
+2. Open the DMG and drag **AutoRipper** to **Applications**
+3. First launch: right-click the app → **Open** (required once for ad-hoc signed apps)
+
+### Install dependencies
+
+```bash
+# MakeMKV — install from https://www.makemkv.com/download/
+
+# HandBrake CLI
+brew install handbrake
+```
+
+### Build from source
+
+Requires Xcode 15.3+.
 
 ```bash
 git clone https://github.com/stevenob/AutoRipper.git
-cd AutoRipper/AutoRipperSwift
-swift build && .build/debug/AutoRipper
+cd AutoRipper
+bash build-swift.sh
+# → dist/AutoRipper.app (2.4MB, code-signed)
+
+# Install
+cp -r dist/AutoRipper.app /Applications/
 ```
 
-### Run Tests
+### Run tests
 
 ```bash
 cd AutoRipperSwift && swift test
