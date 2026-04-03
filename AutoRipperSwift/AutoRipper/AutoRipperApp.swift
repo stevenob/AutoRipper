@@ -3,8 +3,20 @@ import os
 
 private let log = Logger(subsystem: "com.autoripper.app", category: "app")
 
+/// Ensures the app quits when the last window is closed.
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        log.info("AutoRipper shutting down")
+    }
+}
+
 @main
 struct AutoRipperApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var config = AppConfig.shared
 
     var body: some Scene {
