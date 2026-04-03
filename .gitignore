@@ -208,3 +208,6 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 .DS_Store
+
+# Swift build artifacts
+AutoRipperSwift/.build/
