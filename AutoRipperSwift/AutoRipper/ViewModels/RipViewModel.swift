@@ -99,26 +99,52 @@ final class RipViewModel: ObservableObject {
 
             for (idx, tid) in titlesToRip.enumerated() {
                 statusText = "Ripping title \(tid) (\(idx + 1)/\(titlesToRip.count))…"
+                let expectedSize = info.titles.first(where: { $0.id == tid })?.sizeBytes ?? 0
+
+                // Monitor file size for progress
+                let monitorDir = outputDir
+                let sizeMonitor = Task<Void, Never> {
+                    let fm = FileManager.default
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard let files = try? fm.contentsOfDirectory(atPath: monitorDir) else { continue }
+                        let mkvFiles = files.filter { $0.hasSuffix(".mkv") }
+                        var totalSize: Int64 = 0
+                        for f in mkvFiles {
+                            let path = URL(fileURLWithPath: monitorDir).appendingPathComponent(f).path
+                            if let attrs = try? fm.attributesOfItem(atPath: path),
+                               let size = attrs[.size] as? Int64 {
+                                totalSize += size
+                            }
+                        }
+                        if expectedSize > 0 {
+                            let pct = min(Double(totalSize) / Double(expectedSize), 0.99)
+                            let sizeMB = totalSize / (1024 * 1024)
+                            let totalMB = expectedSize / (1024 * 1024)
+                            await MainActor.run {
+                                self.ripProgress = pct
+                                self.statusText = "Ripping: \(Int(pct * 100))% — \(sizeMB) / \(totalMB) MB"
+                            }
+                        }
+                    }
+                }
+
                 do {
                     let file = try await makemkv.ripTitle(
                         titleId: tid,
                         outputDir: outputDir,
-                        progressCallback: { [weak self] pct, text in
-                            Task { @MainActor in
-                                self?.ripProgress = Double(pct) / 100.0
-                                self?.statusText = text
-                            }
-                        },
                         logCallback: { [weak self] line in
                             Task { @MainActor in self?.logLines.append(line) }
                         }
                     )
+                    sizeMonitor.cancel()
                     let elapsed = Date().timeIntervalSince(start)
                     // Only queue for encode pipeline when Full Auto is on (largest title only)
                     if fullAutoEnabled && tid == largestId {
                         onRipComplete?(info.name, file, elapsed)
                     }
                 } catch {
+                    sizeMonitor.cancel()
                     statusText = "Rip failed: \(error.localizedDescription)"
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
                     await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
