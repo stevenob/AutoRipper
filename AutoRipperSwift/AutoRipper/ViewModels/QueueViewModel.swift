@@ -205,7 +205,12 @@ final class QueueViewModel: ObservableObject {
             await card.skip("nas")
         }
 
-        // Done
+        // Done — clean up rip source directory
+        let ripDir = jobs[index].rippedFile.deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: ripDir.path) {
+            try? FileManager.default.removeItem(at: ripDir)
+        }
+
         jobs[index].status = .done
         jobs[index].progress = 100
         jobs[index].progressText = "Complete"
