@@ -4,9 +4,9 @@ struct RipView: View {
     @ObservedObject var vm: RipViewModel
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             // Toolbar
-            HStack {
+            HStack(spacing: 12) {
                 Button { vm.scanDisc() } label: {
                     Label("Scan Disc", systemImage: "opticaldisc")
                 }
@@ -24,104 +24,159 @@ struct RipView: View {
                 Spacer()
 
                 Text("Min duration: \(vm.minDuration)s")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
                     .font(.caption)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
 
             Divider()
 
-            // Titles table
+            // Content
             if let info = vm.discInfo {
-                Text(info.name)
-                    .font(.headline)
-
-                Table(info.titles, selection: $vm.selectedTitles) {
-                    TableColumn("") { title in
-                        Image(systemName: vm.selectedTitles.contains(title.id) ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(vm.selectedTitles.contains(title.id) ? .accentColor : .secondary)
+                VStack(spacing: 0) {
+                    // Disc header
+                    HStack {
+                        Image(systemName: info.type == "bluray" ? "opticaldisc.fill" : "opticaldisc")
+                            .foregroundStyle(.secondary)
+                        Text(info.name)
+                            .font(.headline)
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text("\(info.titles.count) titles")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                        Spacer()
                     }
-                    .width(24)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
 
-                    TableColumn("ID") { title in
-                        Text("\(title.id)")
-                    }
-                    .width(30)
+                    // Titles table
+                    Table(info.titles, selection: $vm.selectedTitles) {
+                        TableColumn("") { title in
+                            Image(systemName: vm.selectedTitles.contains(title.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(vm.selectedTitles.contains(title.id) ? .accentColor : .gray)
+                                .font(.body)
+                        }
+                        .width(28)
 
-                    TableColumn("Name") { title in
-                        Text(title.name)
-                    }
+                        TableColumn("Title") { title in
+                            Text(title.name)
+                                .fontWeight(title.durationSeconds >= vm.minDuration ? .medium : .regular)
+                                .foregroundStyle(title.durationSeconds >= vm.minDuration ? .primary : .tertiary)
+                        }
 
-                    TableColumn("Duration") { title in
-                        Text(title.duration)
-                    }
-                    .width(70)
+                        TableColumn("Duration") { title in
+                            Text(title.duration)
+                                .monospacedDigit()
+                                .foregroundStyle(title.durationSeconds >= vm.minDuration ? .primary : .tertiary)
+                        }
+                        .width(70)
 
-                    TableColumn("Size") { title in
-                        Text(title.humanSize)
-                    }
-                    .width(70)
+                        TableColumn("Size") { title in
+                            Text(title.humanSize)
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        .width(80)
 
-                    TableColumn("Res") { title in
-                        Text(title.resolutionLabel)
-                    }
-                    .width(50)
+                        TableColumn("Res") { title in
+                            if !title.resolutionLabel.isEmpty {
+                                Text(title.resolutionLabel)
+                                    .font(.caption)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(.quaternary)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .width(60)
 
-                    TableColumn("Ch") { title in
-                        Text("\(title.chapters)")
+                        TableColumn("Ch") { title in
+                            Text("\(title.chapters)")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                        }
+                        .width(30)
                     }
-                    .width(30)
+                    .tableStyle(.inset(alternatesRowBackgrounds: true))
                 }
             } else {
                 Spacer()
                 if vm.isScanning {
-                    ProgressView("Scanning…")
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text("Scanning disc…")
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
-                    Text("Insert a disc and click Scan")
-                        .foregroundStyle(.secondary)
+                    VStack(spacing: 8) {
+                        Image(systemName: "opticaldisc")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.quaternary)
+                        Text("Insert a disc and click Scan")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
             }
 
-            // Progress
+            // Progress bar
             if vm.isRipping || vm.ripProgress > 0 {
-                ProgressView(value: vm.ripProgress)
-                    .padding(.horizontal)
+                Divider()
+                VStack(spacing: 4) {
+                    ProgressView(value: vm.ripProgress)
+                    Text(vm.statusText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
 
-            // Actions + status
-            HStack {
+            Divider()
+
+            // Bottom bar
+            HStack(spacing: 12) {
                 Button("Rip Selected") { vm.ripSelected() }
                     .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
+                    .buttonStyle(.borderedProminent)
 
                 Button("Abort") { vm.abort() }
                     .disabled(!vm.isScanning && !vm.isRipping)
 
                 Spacer()
 
-                Text(vm.statusText)
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-                    .lineLimit(1)
+                if !vm.isRipping {
+                    Text(vm.statusText)
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                        .lineLimit(1)
+                }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
 
-            // Log area
+            // Log
             DisclosureGroup("Log") {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 1) {
                             ForEach(Array(vm.logLines.enumerated()), id: \.offset) { idx, line in
                                 Text(line)
-                                    .font(.system(.caption, design: .monospaced))
+                                    .font(.system(.caption2, design: .monospaced))
                                     .textSelection(.enabled)
                                     .id(idx)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(4)
+                        .padding(6)
                     }
-                    .frame(height: 120)
+                    .frame(height: 100)
                     .background(Color(nsColor: .textBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .onChange(of: vm.logLines.count) {
@@ -131,8 +186,8 @@ struct RipView: View {
                     }
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
         }
-        .padding(.vertical, 8)
     }
 }

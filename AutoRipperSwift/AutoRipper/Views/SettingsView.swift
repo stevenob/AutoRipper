@@ -5,79 +5,73 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                Form {
-                    // Application
-                    Section("Application") {
-                        HStack {
-                            TextField("Output Directory:", text: $vm.outputDir)
-                                .textFieldStyle(.roundedBorder)
-                            Button("Browse…") { browseFolder(binding: $vm.outputDir) }
-                        }
-
-                        TextField("TMDb API Key:", text: $vm.tmdbApiKey)
+            Form {
+                Section("Application") {
+                    HStack {
+                        TextField("Output Directory:", text: $vm.outputDir)
                             .textFieldStyle(.roundedBorder)
-
-                        TextField("MakeMKV Path:", text: $vm.makemkvPath)
-                            .textFieldStyle(.roundedBorder)
-
-                        TextField("HandBrake CLI Path:", text: $vm.handbrakePath)
-                            .textFieldStyle(.roundedBorder)
-
-                        HStack {
-                            TextField("Discord Webhook:", text: $vm.discordWebhook)
-                                .textFieldStyle(.roundedBorder)
-                            Button("Test") { vm.testDiscord() }
-                                .disabled(vm.discordWebhook.isEmpty)
-                        }
+                        Button("Browse…") { browseFolder(binding: $vm.outputDir) }
                     }
 
-                    // NAS Upload
-                    Section("NAS Upload") {
-                        Toggle("Enable NAS Upload", isOn: $vm.nasUploadEnabled)
+                    TextField("TMDb API Key:", text: $vm.tmdbApiKey)
+                        .textFieldStyle(.roundedBorder)
 
-                        HStack {
-                            TextField("Movies Path:", text: $vm.nasMoviesPath)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(!vm.nasUploadEnabled)
-                            Button("Browse…") { browseFolder(binding: $vm.nasMoviesPath) }
-                                .disabled(!vm.nasUploadEnabled)
-                        }
+                    TextField("MakeMKV Path:", text: $vm.makemkvPath)
+                        .textFieldStyle(.roundedBorder)
 
-                        HStack {
-                            TextField("TV Path:", text: $vm.nasTvPath)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(!vm.nasUploadEnabled)
-                            Button("Browse…") { browseFolder(binding: $vm.nasTvPath) }
-                                .disabled(!vm.nasUploadEnabled)
-                        }
-                    }
+                    TextField("HandBrake CLI Path:", text: $vm.handbrakePath)
+                        .textFieldStyle(.roundedBorder)
 
-                    // Preferences
-                    Section("Preferences") {
-                        HStack {
-                            Text("Min Duration (seconds):")
-                            TextField("", value: $vm.minDuration, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 80)
-                        }
-
-                        Toggle("Auto-Eject After Rip", isOn: $vm.autoEject)
-
-                        TextField("Default Preset:", text: $vm.defaultPreset)
+                    HStack {
+                        TextField("Discord Webhook:", text: $vm.discordWebhook)
                             .textFieldStyle(.roundedBorder)
-
-                        Picker("Default Media Type:", selection: $vm.defaultMediaType) {
-                            Text("Movie").tag("movie")
-                            Text("TV Show").tag("tvshow")
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(maxWidth: 300)
+                        Button("Test") { vm.testDiscord() }
+                            .disabled(vm.discordWebhook.isEmpty)
                     }
                 }
-                .formStyle(.grouped)
-                .padding()
+
+                Section("NAS Upload") {
+                    Toggle("Enable NAS Upload", isOn: $vm.nasUploadEnabled)
+
+                    HStack {
+                        TextField("Movies Path:", text: $vm.nasMoviesPath)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(!vm.nasUploadEnabled)
+                        Button("Browse…") { browseFolder(binding: $vm.nasMoviesPath) }
+                            .disabled(!vm.nasUploadEnabled)
+                    }
+
+                    HStack {
+                        TextField("TV Path:", text: $vm.nasTvPath)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(!vm.nasUploadEnabled)
+                        Button("Browse…") { browseFolder(binding: $vm.nasTvPath) }
+                            .disabled(!vm.nasUploadEnabled)
+                    }
+                }
+
+                Section("Preferences") {
+                    HStack {
+                        Text("Min Duration (seconds):")
+                        TextField("", value: $vm.minDuration, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                    }
+
+                    Toggle("Auto-Eject After Rip", isOn: $vm.autoEject)
+
+                    TextField("Default Preset:", text: $vm.defaultPreset)
+                        .textFieldStyle(.roundedBorder)
+
+                    Picker("Default Media Type:", selection: $vm.defaultMediaType) {
+                        Text("Movie").tag("movie")
+                        Text("TV Show").tag("tvshow")
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 300)
+                }
             }
+            .formStyle(.grouped)
 
             // Footer
             HStack {
@@ -88,12 +82,18 @@ struct SettingsView: View {
                     Text(vm.statusText)
                         .foregroundStyle(.secondary)
                         .font(.caption)
+                        .transition(.opacity)
                 }
 
                 Spacer()
+
+                Text("Settings auto-save on change")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
         }
     }
 

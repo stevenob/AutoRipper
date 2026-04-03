@@ -4,14 +4,22 @@ struct QueueView: View {
     @ObservedObject var vm: QueueViewModel
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             if vm.jobs.isEmpty {
                 Spacer()
-                Text("No jobs in queue")
-                    .foregroundStyle(.secondary)
-                Text("Ripped files will appear here for post-processing.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 12) {
+                    Image(systemName: "list.bullet.rectangle")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.quaternary)
+                    Text("No jobs in queue")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text("Ripped files will appear here for encoding, organizing, and scraping.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
                 Spacer()
             } else {
                 Table(vm.jobs) {
@@ -22,28 +30,47 @@ struct QueueView: View {
 
                     TableColumn("Title") { job in
                         Text(job.discName)
+                            .fontWeight(.medium)
                     }
 
                     TableColumn("Step") { job in
                         Text(job.progressText)
                             .foregroundStyle(.secondary)
+                            .font(.callout)
                     }
-                    .width(200)
+                    .width(220)
 
                     TableColumn("Progress") { job in
-                        if job.status == .done || job.status == .failed {
-                            Text(job.status == .done ? "100%" : "—")
+                        if job.status == .done {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                        } else if job.status == .failed {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.red)
+                        } else if job.status == .queued {
+                            Text("Waiting")
+                                .foregroundStyle(.tertiary)
+                                .font(.caption)
                         } else {
-                            Text("\(job.progress)%")
+                            HStack(spacing: 6) {
+                                ProgressView(value: Double(job.progress) / 100.0)
+                                    .frame(width: 60)
+                                Text("\(job.progress)%")
+                                    .monospacedDigit()
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    .width(60)
+                    .width(100)
                 }
+                .tableStyle(.inset(alternatesRowBackgrounds: true))
             }
 
             Divider()
 
-            HStack {
+            // Bottom bar
+            HStack(spacing: 12) {
                 Button("Abort Current") { vm.abortCurrent() }
                     .disabled(vm.jobs.allSatisfy { $0.status == .done || $0.status == .failed || $0.status == .queued })
 
@@ -53,9 +80,10 @@ struct QueueView: View {
                     .foregroundStyle(.secondary)
                     .font(.caption)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
         }
-        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -67,15 +95,19 @@ struct QueueView: View {
         case .encoding:
             Image(systemName: "film")
                 .foregroundColor(.blue)
+                .symbolEffect(.pulse)
         case .organizing:
             Image(systemName: "folder")
                 .foregroundColor(.orange)
+                .symbolEffect(.pulse)
         case .scraping:
             Image(systemName: "photo")
                 .foregroundColor(.purple)
+                .symbolEffect(.pulse)
         case .uploading:
             Image(systemName: "icloud.and.arrow.up")
                 .foregroundColor(.cyan)
+                .symbolEffect(.pulse)
         case .done:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
