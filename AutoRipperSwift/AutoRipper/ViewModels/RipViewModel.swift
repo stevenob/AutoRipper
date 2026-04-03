@@ -18,6 +18,7 @@ final class RipViewModel: ObservableObject {
 
     private let config: AppConfig
     private let makemkv: MakeMKVService
+    private let discord: DiscordService
     private var runningTask: Task<Void, Never>?
 
     /// Called when a rip completes: (discName, rippedFile, elapsed)
@@ -28,6 +29,7 @@ final class RipViewModel: ObservableObject {
     init(config: AppConfig = .shared) {
         self.config = config
         self.makemkv = MakeMKVService(config: config)
+        self.discord = DiscordService(config: config)
     }
 
     func scanDisc() {
@@ -90,6 +92,8 @@ final class RipViewModel: ObservableObject {
 
         runningTask = Task {
             let start = Date()
+            await discord.notifyInfo("🎬 Ripping \(folderName) — \(titlesToRip.count) title(s)")
+
             for (idx, tid) in titlesToRip.enumerated() {
                 statusText = "Ripping title \(tid) (\(idx + 1)/\(titlesToRip.count))…"
                 do {
@@ -114,6 +118,7 @@ final class RipViewModel: ObservableObject {
                 } catch {
                     statusText = "Rip failed: \(error.localizedDescription)"
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
+                    await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
                 }
             }
 
@@ -136,6 +141,11 @@ final class RipViewModel: ObservableObject {
             ripProgress = 1.0
             statusText = "Rip complete"
             isRipping = false
+
+            let elapsed = Date().timeIntervalSince(start)
+            let mins = Int(elapsed) / 60
+            let secs = Int(elapsed) % 60
+            await discord.notifySuccess("\(folderName) — rip complete in \(mins)m \(secs)s")
 
             if config.autoEject { ejectDisc() }
         }
