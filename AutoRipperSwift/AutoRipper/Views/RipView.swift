@@ -39,8 +39,18 @@ struct RipView: View {
                     HStack {
                         Image(systemName: info.type == "bluray" ? "opticaldisc.fill" : "opticaldisc")
                             .foregroundStyle(.secondary)
-                        Text(info.name)
-                            .font(.headline)
+                        if !info.mediaTitle.isEmpty {
+                            Text(info.mediaTitle)
+                                .font(.headline)
+                            Text("·")
+                                .foregroundStyle(.tertiary)
+                            Text(info.name)
+                                .font(.subheadline)
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            Text(info.name)
+                                .font(.headline)
+                        }
                         Text("·")
                             .foregroundStyle(.tertiary)
                         Text("\(info.titles.count) titles")
@@ -59,6 +69,14 @@ struct RipView: View {
                                 .font(.body)
                         }
                         .width(28)
+
+                        TableColumn("Type") { title in
+                            if !title.label.isEmpty {
+                                Text(title.label)
+                                    .font(.caption)
+                            }
+                        }
+                        .width(110)
 
                         TableColumn("Title") { title in
                             Text(title.name)

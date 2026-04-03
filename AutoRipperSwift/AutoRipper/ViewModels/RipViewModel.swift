@@ -40,15 +40,27 @@ final class RipViewModel: ObservableObject {
 
         runningTask = Task {
             do {
-                let info = try await makemkv.scanDisc { [weak self] line in
+                var info = try await makemkv.scanDisc { [weak self] line in
                     Task { @MainActor in self?.logLines.append(line) }
                 }
+
+                // Auto-label titles by duration/size
+                info.autoLabel()
+
+                // TMDb lookup to get the real movie/show name
+                let tmdb = TMDbService(config: config)
+                let results = await tmdb.searchMedia(query: info.name)
+                if let match = results.first {
+                    info.mediaTitle = match.displayTitle
+                }
+
                 self.discInfo = info
                 // Auto-select titles above min duration
                 for title in info.titles where title.durationSeconds >= config.minDuration {
                     selectedTitles.insert(title.id)
                 }
-                statusText = "Scanned: \(info.name) — \(info.titles.count) titles"
+                let displayName = info.mediaTitle.isEmpty ? info.name : info.mediaTitle
+                statusText = "Scanned: \(displayName) — \(info.titles.count) titles"
             } catch {
                 statusText = "Scan failed: \(error.localizedDescription)"
                 log.error("Scan failed: \(error.localizedDescription)")
