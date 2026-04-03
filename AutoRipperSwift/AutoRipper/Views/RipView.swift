@@ -17,14 +17,14 @@ struct RipView: View {
                 .toggleStyle(.checkbox)
                 .disabled(vm.isScanning || vm.isRipping)
 
-                Text("Min:")
+                Text("Skip under:")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                Stepper(value: $config.minDuration, in: 0...7200, step: 30) {
-                    Text("\(config.minDuration)s")
+                Stepper(value: $config.minDuration, in: 0...7200, step: 60) {
+                    Text("\(config.minDuration / 60) min")
                         .monospacedDigit()
                         .font(.caption)
-                        .frame(width: 40)
+                        .frame(width: 45)
                 }
                 .controlSize(.small)
 
@@ -163,20 +163,23 @@ struct RipView: View {
                         VStack(spacing: 12) {
                             Image(systemName: vm.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
                                 .font(.system(size: 64))
-                            Text(vm.fullAutoEnabled ? "Full Auto" : "Scan Disc")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                            if !vm.detectedDiscType.isEmpty {
-                                HStack(spacing: 4) {
-                                    Text(vm.detectedDiscType)
-                                        .fontWeight(.medium)
-                                    if !vm.detectedDiscName.isEmpty {
-                                        Text("·")
-                                        Text(vm.detectedDiscName)
-                                    }
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.white.opacity(0.8))
+                            if vm.fullAutoEnabled {
+                                Text("Full Auto")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            } else if !vm.detectedDiscType.isEmpty {
+                                Text("Scan \(vm.detectedDiscType)")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            } else {
+                                Text("Scan Disc")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            if !vm.detectedDiscName.isEmpty {
+                                Text(vm.detectedDiscName)
+                                    .font(.caption)
+                                    .foregroundStyle(.white.opacity(0.8))
                             }
                         }
                         .frame(width: 220, height: 180)
