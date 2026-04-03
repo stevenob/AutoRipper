@@ -37,12 +37,54 @@
     "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swiftdeps",
     "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.dia"
   },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/ArtworkService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ArtworkService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ArtworkService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ArtworkService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ArtworkService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ArtworkService.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/DiscordService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscordService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscordService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscordService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscordService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscordService.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/HandBrakeService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/HandBrakeService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/HandBrakeService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/HandBrakeService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/HandBrakeService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/HandBrakeService.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/MakeMKVService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MakeMKVService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MakeMKVService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MakeMKVService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MakeMKVService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MakeMKVService.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/NotificationService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/NotificationService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/NotificationService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/NotificationService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/NotificationService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/NotificationService.dia"
+  },
   "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/OrganizerService.swift": {
     "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.d",
     "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o",
     "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService~partial.swiftmodule",
     "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swiftdeps",
     "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/TMDbService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/TMDbService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/TMDbService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/TMDbService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/TMDbService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/TMDbService.dia"
   },
   "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Views/ContentView.swift": {
     "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.d",

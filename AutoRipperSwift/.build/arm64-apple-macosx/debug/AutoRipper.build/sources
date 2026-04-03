@@ -3,5 +3,11 @@
 /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/DiscInfo.swift
 /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/Job.swift
 /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/MediaResult.swift
+/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/ArtworkService.swift
+/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/DiscordService.swift
+/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/HandBrakeService.swift
+/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/MakeMKVService.swift
+/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/NotificationService.swift
 /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/OrganizerService.swift
+/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/TMDbService.swift
 /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Views/ContentView.swift
