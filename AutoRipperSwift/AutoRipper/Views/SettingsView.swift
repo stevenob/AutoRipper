@@ -79,51 +79,6 @@ struct SettingsView: View {
                     } label: {
                         Label("NAS Upload", systemImage: "externaldrive.connected.to.line.below")
                     }
-
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("Min Duration (sec):")
-                                    .frame(width: 140, alignment: .trailing)
-                                Stepper(value: $config.minDuration, in: 0...7200, step: 30) {
-                                    TextField("", value: $config.minDuration, formatter: NumberFormatter())
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(width: 80)
-                                }
-                                Spacer()
-                            }
-
-                            HStack {
-                                Text("")
-                                    .frame(width: 140)
-                                Toggle("Auto-Eject After Rip", isOn: $config.autoEject)
-                                Spacer()
-                            }
-
-                            HStack {
-                                Text("Default Preset:")
-                                    .frame(width: 140, alignment: .trailing)
-                                TextField("", text: $config.defaultPreset)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-
-                            HStack {
-                                Text("Media Type:")
-                                    .frame(width: 140, alignment: .trailing)
-                                Picker("", selection: $config.defaultMediaType) {
-                                    Text("Movie").tag("movie")
-                                    Text("TV Show").tag("tvshow")
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.segmented)
-                                .frame(maxWidth: 200)
-                                Spacer()
-                            }
-                        }
-                        .padding(4)
-                    } label: {
-                        Label("Preferences", systemImage: "slider.horizontal.3")
-                    }
                 }
                 .padding(16)
             }

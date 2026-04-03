@@ -16,11 +16,31 @@ struct RipView: View {
                 .toggleStyle(.checkbox)
                 .disabled(vm.isScanning || vm.isRipping)
 
+                Divider()
+                    .frame(height: 16)
+
+                Toggle("Auto-Eject", isOn: Binding(
+                    get: { AppConfig.shared.autoEject },
+                    set: { AppConfig.shared.autoEject = $0 }
+                ))
+                .toggleStyle(.checkbox)
+                .font(.caption)
+
                 Spacer()
 
-                Text("Min duration: \(vm.minDuration)s")
-                    .foregroundStyle(.tertiary)
+                Text("Min:")
+                    .foregroundStyle(.secondary)
                     .font(.caption)
+                Stepper(value: Binding(
+                    get: { AppConfig.shared.minDuration },
+                    set: { AppConfig.shared.minDuration = $0 }
+                ), in: 0...7200, step: 30) {
+                    Text("\(AppConfig.shared.minDuration)s")
+                        .monospacedDigit()
+                        .font(.caption)
+                        .frame(width: 40)
+                }
+                .controlSize(.small)
 
                 Button { vm.ejectDisc() } label: {
                     Label("Eject", systemImage: "eject.fill")
