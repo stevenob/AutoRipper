@@ -1,0 +1,54 @@
+{
+  "": {
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/master.swiftdeps"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/AutoRipperApp.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/AppConfig.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/DiscInfo.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/Job.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/MediaResult.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/OrganizerService.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.dia"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Views/ContentView.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.dia"
+  }
+}

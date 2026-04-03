@@ -1,0 +1,146 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "AutoRipper-arm64-apple-macosx26.0-debug.exe": ["<AutoRipper-arm64-apple-macosx26.0-debug.exe>"]
+  "AutoRipper-arm64-apple-macosx26.0-debug.module": ["<AutoRipper-arm64-apple-macosx26.0-debug.module>"]
+  "AutoRipperPackageTests-arm64-apple-macosx26.0-debug.module": ["<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.module>"]
+  "AutoRipperPackageTests-arm64-apple-macosx26.0-debug.test": ["<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.test>"]
+  "AutoRipperTests-arm64-apple-macosx26.0-debug.module": ["<AutoRipperTests-arm64-apple-macosx26.0-debug.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<AutoRipper-arm64-apple-macosx26.0-debug.exe>","<AutoRipper-arm64-apple-macosx26.0-debug.module>"]
+  "test": ["<AutoRipper-arm64-apple-macosx26.0-debug.exe>","<AutoRipper-arm64-apple-macosx26.0-debug.module>","<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.test>","<AutoRipperTests-arm64-apple-macosx26.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipperTests/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper":
+    is-mutated: true
+commands:
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper-entitlement.plist"]
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper-entitlement.plist"
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/AutoRipperApp.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/AppConfig.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/DiscInfo.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/Job.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/MediaResult.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/OrganizerService.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Views/ContentView.swift"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/sources"]
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/sources"
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.product/Objects.LinkFileList"
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.derived/runner.swift"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/sources"]
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/sources"
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.derived/runner.swift":
+    tool: test-entry-point-tool
+    inputs: []
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.derived/runner.swift"]
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/runner.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.swift.o"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.product/Objects.LinkFileList"
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipperTests/Phase1Tests.swift"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/sources"]
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/sources"
+
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Library/Developer/CommandLineTools/usr/bin/swiftc"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt"
+
+  "<AutoRipper-arm64-apple-macosx26.0-debug.exe>":
+    tool: phony
+    inputs: ["<AutoRipper-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    outputs: ["<AutoRipper-arm64-apple-macosx26.0-debug.exe>"]
+
+  "<AutoRipper-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipper.swiftmodule"]
+    outputs: ["<AutoRipper-arm64-apple-macosx26.0-debug.module>"]
+
+  "<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/runner.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperPackageTests.swiftmodule"]
+    outputs: ["<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.module>"]
+
+  "<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.test>":
+    tool: phony
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.xctest/Contents/MacOS/AutoRipperPackageTests"]
+    outputs: ["<AutoRipperPackageTests-arm64-apple-macosx26.0-debug.test>"]
+
+  "<AutoRipperTests-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperTests.swiftmodule"]
+    outputs: ["<AutoRipperTests-arm64-apple-macosx26.0-debug.module>"]
+
+  "C.AutoRipper-arm64-apple-macosx26.0-debug.exe":
+    tool: shell
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.product/Objects.LinkFileList"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/AutoRipper"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug","-o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper","-module-name","AutoRipper","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_AutoRipper_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx14.0","-Xlinker","-add_ast_path","-Xlinker","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipper.swiftmodule","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g"]
+
+  "C.AutoRipper-arm64-apple-macosx26.0-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper-entitlement.plist"]
+    outputs: ["<AutoRipper-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/AutoRipper"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper-entitlement.plist","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper"]
+
+  "C.AutoRipper-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/AutoRipperApp.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/AppConfig.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/DiscInfo.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/Job.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Models/MediaResult.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Services/OrganizerService.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/Views/ContentView.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/sources"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipper.swiftmodule"]
+    description: "Compiling Swift Module 'AutoRipper' (7 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AutoRipper","-emit-dependencies","-emit-module","-emit-module-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipper.swiftmodule","-output-file-map","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/output-file-map.json","-incremental","-c","@/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/sources","-I","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j8","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","AutoRipper_main","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","autoripperswift"]
+
+  "C.AutoRipperPackageTests-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.derived/runner.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperTests.swiftmodule","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/sources"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/runner.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperPackageTests.swiftmodule"]
+    description: "Compiling Swift Module 'AutoRipperPackageTests' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AutoRipperPackageTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperPackageTests.swiftmodule","-output-file-map","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/sources","-I","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j8","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-emit-objc-header","-emit-objc-header-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/include/AutoRipperPackageTests-Swift.h","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","autoripperswift"]
+
+  "C.AutoRipperPackageTests-arm64-apple-macosx26.0-debug.test":
+    tool: shell
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AppConfig.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/AutoRipperApp.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/ContentView.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/DiscInfo.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/Job.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/MediaResult.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper.build/OrganizerService.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/runner.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.product/Objects.LinkFileList"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.xctest/Contents/MacOS/AutoRipperPackageTests"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/AutoRipperPackageTests.xctest/Contents/MacOS/AutoRipperPackageTests"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-L","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug","-o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.xctest/Contents/MacOS/AutoRipperPackageTests","-module-name","AutoRipperPackageTests","-Xlinker","-no_warn_duplicate_libraries","-Xlinker","-bundle","-Xlinker","-rpath","-Xlinker","@loader_path/../../../","@/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Library/Developer/CommandLineTools/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx14.0","-Xlinker","-add_ast_path","-Xlinker","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipper.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperPackageTests.swiftmodule","-Xlinker","-add_ast_path","-Xlinker","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperTests.swiftmodule","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g"]
+
+  "C.AutoRipperTests-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipperTests/Phase1Tests.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/swift-version--1AB21518FC5DEDBE.txt","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipper","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/sources"]
+    outputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.swift.o","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperTests.swiftmodule"]
+    description: "Compiling Swift Module 'AutoRipperTests' (1 sources)"
+    args: ["/Library/Developer/CommandLineTools/usr/bin/swiftc","-module-name","AutoRipperTests","-emit-dependencies","-emit-module","-emit-module-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules/AutoRipperTests.swiftmodule","-output-file-map","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/output-file-map.json","-parse-as-library","-incremental","-c","@/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/sources","-I","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx14.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-Xfrontend","-enable-cross-import-overlays","-j8","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-parse-as-library","-swift-version","5","-I","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-L","/Library/Developer/CommandLineTools/Library/Developer/Frameworks","-plugin-path","/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing","-sdk","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-g","-Xcc","-isysroot","-Xcc","/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk","-Xcc","-fPIC","-Xcc","-g","-package-name","autoripperswift"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipper/","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipperTests/","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/Package.swift","/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

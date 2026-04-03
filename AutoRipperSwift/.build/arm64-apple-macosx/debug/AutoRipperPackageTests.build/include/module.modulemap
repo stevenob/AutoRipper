@@ -1,0 +1,3 @@
+module AutoRipperPackageTests {
+    header "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperPackageTests.build/include/AutoRipperPackageTests-Swift.h"
+}

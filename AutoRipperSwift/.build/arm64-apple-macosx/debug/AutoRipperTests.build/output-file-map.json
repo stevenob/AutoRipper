@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/master.swiftdeps"
+  },
+  "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/AutoRipperTests/Phase1Tests.swift": {
+    "dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.d",
+    "object": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.swift.o",
+    "swiftmodule": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests~partial.swiftmodule",
+    "swift-dependencies": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.swiftdeps",
+    "diagnostics": "/Users/stevenobrien/repos/AutoRipper/AutoRipperSwift/.build/arm64-apple-macosx/debug/AutoRipperTests.build/Phase1Tests.dia"
+  }
+}
