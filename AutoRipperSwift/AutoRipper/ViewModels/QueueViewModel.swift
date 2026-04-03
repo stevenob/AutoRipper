@@ -216,10 +216,17 @@ final class QueueViewModel: ObservableObject {
             // This is just a container for cancellation
         }
 
+        // Scan tracks and select all audio + subtitles
+        let (audio, subs) = try await handbrake.scanTracks(inputPath: input.path)
+        let audioIdxs = audio.isEmpty ? nil : audio.map(\.index)
+        let subIdxs = subs.isEmpty ? nil : subs.map(\.index)
+
         let result = try await handbrake.encode(
             inputPath: input.path,
             outputPath: outputPath,
             preset: config.defaultPreset,
+            audioTracks: audioIdxs,
+            subtitleTracks: subIdxs,
             progressCallback: { [weak self] pct, text in
                 Task { @MainActor in
                     guard let self else { return }

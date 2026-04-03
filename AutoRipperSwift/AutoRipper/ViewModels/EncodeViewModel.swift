@@ -56,10 +56,9 @@ final class EncodeViewModel: ObservableObject {
                 let (audio, subs) = try await handbrake.scanTracks(inputPath: input.path)
                 self.audioTracks = audio
                 self.subtitleTracks = subs
-                // Auto-select first audio track
-                if let first = audio.first {
-                    self.selectedAudioTracks = [first.index]
-                }
+                // Auto-select all audio and subtitle tracks
+                self.selectedAudioTracks = Set(audio.map(\.index))
+                self.selectedSubtitleTracks = Set(subs.map(\.index))
                 statusText = "Found \(audio.count) audio, \(subs.count) subtitle tracks"
             } catch {
                 statusText = "Track scan failed: \(error.localizedDescription)"
