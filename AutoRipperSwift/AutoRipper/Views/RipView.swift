@@ -141,20 +141,23 @@ struct RipView: View {
 
             // Bottom bar
             HStack(spacing: 12) {
-                Button("Rip Selected") { vm.ripSelected() }
-                    .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
-                    .buttonStyle(.borderedProminent)
-
-                Button("Abort") { vm.abort() }
-                    .disabled(!vm.isScanning && !vm.isRipping)
-
-                Spacer()
+                if vm.discInfo != nil {
+                    Button("Rip Selected") { vm.ripSelected() }
+                        .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
+                        .buttonStyle(.borderedProminent)
+                }
 
                 if !vm.isRipping {
                     Text(vm.statusText)
                         .foregroundStyle(.secondary)
                         .font(.caption)
                         .lineLimit(1)
+                }
+
+                Spacer()
+
+                if vm.isScanning || vm.isRipping {
+                    Button("Abort") { vm.abort() }
                 }
             }
             .padding(.horizontal, 16)
