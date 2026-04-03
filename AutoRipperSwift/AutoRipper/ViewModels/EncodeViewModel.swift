@@ -120,6 +120,7 @@ final class EncodeViewModel: ObservableObject {
     func abort() {
         runningTask?.cancel()
         runningTask = nil
+        ProcessTracker.shared.terminateLatest()
         isEncoding = false
         progress = 0
         progressText = ""

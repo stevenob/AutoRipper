@@ -15,6 +15,7 @@ final class RipViewModel: ObservableObject {
     @Published var statusText: String = "Idle"
     @Published var logLines: [String] = []
     @Published var fullAutoEnabled: Bool = false
+    @Published var errorMessage: String?
 
     private let config: AppConfig
     private let makemkv: MakeMKVService
@@ -66,6 +67,7 @@ final class RipViewModel: ObservableObject {
                 NotificationService.shared.notify(title: "Scan Complete", message: "\(displayName) — \(info.titles.count) titles")
             } catch {
                 statusText = "Scan failed: \(error.localizedDescription)"
+                errorMessage = error.localizedDescription
                 log.error("Scan failed: \(error.localizedDescription)")
                 NotificationService.shared.notify(title: "Scan Failed", message: error.localizedDescription)
             }
@@ -147,6 +149,7 @@ final class RipViewModel: ObservableObject {
                 } catch {
                     sizeMonitor.cancel()
                     statusText = "Rip failed: \(error.localizedDescription)"
+                    errorMessage = error.localizedDescription
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
                     await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
                     NotificationService.shared.notify(title: "Rip Failed", message: "\(folderName): \(error.localizedDescription)")
@@ -233,6 +236,7 @@ final class RipViewModel: ObservableObject {
     func abort() {
         runningTask?.cancel()
         runningTask = nil
+        ProcessTracker.shared.terminateLatest()
         isScanning = false
         isRipping = false
         ripProgress = 0

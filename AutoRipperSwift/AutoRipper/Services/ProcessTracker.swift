@@ -22,6 +22,18 @@ final class ProcessTracker: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Terminate the most recently registered running process (for abort).
+    func terminateLatest() {
+        lock.lock()
+        let running = processes.values.filter { $0.isRunning }
+        lock.unlock()
+
+        if let latest = running.last {
+            log.info("Aborting process \(latest.processIdentifier)")
+            latest.terminate()
+        }
+    }
+
     func terminateAll() {
         lock.lock()
         let running = processes.values.filter { $0.isRunning }

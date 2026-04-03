@@ -25,6 +25,7 @@ struct RipView: View {
                 Button { vm.ejectDisc() } label: {
                     Label("Eject", systemImage: "eject.fill")
                 }
+                .keyboardShortcut("d", modifiers: .command)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -204,6 +205,7 @@ struct RipView: View {
 
                 if vm.isScanning || vm.isRipping {
                     Button("Abort") { vm.abort() }
+                        .keyboardShortcut(".", modifiers: .command)
                 }
 
                 if vm.discInfo != nil {
@@ -212,6 +214,7 @@ struct RipView: View {
                     }
                     .disabled(vm.selectedTitles.isEmpty || vm.isRipping || vm.isScanning)
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("r", modifiers: .command)
                 }
             }
             .padding(.horizontal, 16)
@@ -245,6 +248,14 @@ struct RipView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
+        }
+        .alert("Error", isPresented: Binding(
+            get: { vm.errorMessage != nil },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )) {
+            Button("OK") { vm.errorMessage = nil }
+        } message: {
+            Text(vm.errorMessage ?? "")
         }
     }
 }

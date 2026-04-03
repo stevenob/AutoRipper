@@ -67,6 +67,11 @@ final class QueueViewModel: ObservableObject {
         // Rip stage already done
         await card.finish("rip", detail: formatElapsed(jobs[index].ripElapsed))
 
+        // TMDb lookup — cache for organize + NAS routing
+        let tmdb = TMDbService(config: config)
+        let tmdbResults = await tmdb.searchMedia(query: jobs[index].discName)
+        let tmdbMedia = tmdbResults.first
+
         // Encode
         jobs[index].status = .encoding
         jobs[index].progressText = "Encoding…"
@@ -97,10 +102,8 @@ final class QueueViewModel: ObservableObject {
 
         do {
             let source = jobs[index].encodedFile ?? jobs[index].rippedFile
-            let tmdb = TMDbService(config: config)
-            let results = await tmdb.searchMedia(query: jobs[index].discName)
             let dest: URL
-            if let media = results.first {
+            if let media = tmdbMedia {
                 if media.mediaType == "tv" {
                     // For TV, use the TV path builder
                     dest = OrganizerService.buildTvPath(
@@ -160,9 +163,7 @@ final class QueueViewModel: ObservableObject {
                 let folderName = sourceDir.lastPathComponent
 
                 // Pick the right NAS base path based on media type
-                let tmdb = TMDbService(config: config)
-                let results = await tmdb.searchMedia(query: jobs[index].discName)
-                let isTV = results.first?.mediaType == "tv"
+                let isTV = tmdbMedia?.mediaType == "tv"
                 let nasBase = isTV ? config.nasTvPath : config.nasMoviesPath
 
                 guard !nasBase.isEmpty else {

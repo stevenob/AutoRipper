@@ -39,6 +39,12 @@ struct AutoRipperApp: App {
                     )
                 }
             }
+            CommandGroup(after: .appInfo) {
+                Divider()
+                Button("Check for Updates…") {
+                    NSWorkspace.shared.open(URL(string: "https://github.com/stevenob/AutoRipper/releases/latest")!)
+                }
+            }
         }
     }
 

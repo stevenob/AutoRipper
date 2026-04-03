@@ -197,11 +197,13 @@ struct EncodeView: View {
 
                 if vm.isEncoding {
                     Button("Abort") { vm.abort() }
+                        .keyboardShortcut(".", modifiers: .command)
                 }
 
                 Button("Encode") { vm.encode() }
                     .disabled(vm.inputFile == nil || vm.isEncoding)
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("e", modifiers: .command)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -210,6 +212,17 @@ struct EncodeView: View {
         .onAppear { vm.loadPresets() }
         .onChange(of: vm.inputFile) {
             vm.scanTracks()
+        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url {
+                    Task { @MainActor in
+                        vm.inputFile = url
+                    }
+                }
+            }
+            return true
         }
     }
 }
