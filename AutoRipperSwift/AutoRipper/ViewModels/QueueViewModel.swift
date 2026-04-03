@@ -194,8 +194,12 @@ final class QueueViewModel: ObservableObject {
 
                 await card.finish("nas", detail: nasDest.path)
             } catch {
-                jobs[index].progressText = "NAS copy failed: \(error.localizedDescription)"
+                jobs[index].status = .failed
+                jobs[index].error = "NAS copy failed: \(error.localizedDescription)"
+                jobs[index].progressText = "NAS copy failed"
                 await card.fail("nas", detail: error.localizedDescription)
+                NotificationService.shared.notify(title: "NAS Copy Failed", message: jobs[index].discName)
+                return
             }
         } else {
             await card.skip("nas")

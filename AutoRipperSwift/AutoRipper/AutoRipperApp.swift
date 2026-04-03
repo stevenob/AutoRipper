@@ -18,12 +18,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct AutoRipperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var config = AppConfig.shared
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(config)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -31,7 +29,7 @@ struct AutoRipperApp: App {
                     NSApplication.shared.orderFrontStandardAboutPanel(
                         options: [
                             .applicationName: "AutoRipper",
-                            .applicationVersion: "2.1.0",
+                            .applicationVersion: UpdateService.currentVersion,
                             .credits: NSAttributedString(
                                 string: "Automated DVD/Blu-ray ripping pipeline.\ngithub.com/stevenob/AutoRipper"
                             ),
@@ -49,6 +47,6 @@ struct AutoRipperApp: App {
     }
 
     init() {
-        log.info("AutoRipper 2.1.0 starting")
+        log.info("AutoRipper \(UpdateService.currentVersion) starting")
     }
 }

@@ -7,7 +7,6 @@ private let log = Logger(subsystem: "com.autoripper.app", category: "rip-vm")
 @MainActor
 final class RipViewModel: ObservableObject {
     @Published var discInfo: DiscInfo?
-    @Published var scanProgress: String = ""
     @Published var ripProgress: Double = 0
     @Published var isScanning: Bool = false
     @Published var isRipping: Bool = false

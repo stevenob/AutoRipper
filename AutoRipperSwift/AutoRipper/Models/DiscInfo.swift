@@ -50,20 +50,16 @@ struct DiscInfo: Sendable {
     mutating func autoLabel() {
         guard !titles.isEmpty else { return }
 
-        let sorted = titles.sorted { $0.sizeBytes > $1.sizeBytes }
-        let largest = sorted[0]
+        let largestId = titles.max(by: { $0.sizeBytes < $1.sizeBytes })!.id
 
         for i in titles.indices {
-            let t = titles[i]
-            if t.id == largest.id && t.durationSeconds >= 3600 {
+            if titles[i].id == largestId {
                 titles[i].label = "🎬 Main Feature"
-            } else if t.id == largest.id {
-                titles[i].label = "🎬 Main Feature"
-            } else if t.durationSeconds < 60 {
+            } else if titles[i].durationSeconds < 60 {
                 titles[i].label = "⏭️ Trailer"
-            } else if t.durationSeconds < 300 {
+            } else if titles[i].durationSeconds < 300 {
                 titles[i].label = "🎞️ Short Extra"
-            } else if t.durationSeconds < 1800 {
+            } else if titles[i].durationSeconds < 1800 {
                 titles[i].label = "📀 Extra"
             } else {
                 titles[i].label = "🎥 Feature"

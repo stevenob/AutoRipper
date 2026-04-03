@@ -1,77 +1,6 @@
 import XCTest
 @testable import AutoRipper
 
-// MARK: - EncodeViewModel Tests
-
-@MainActor
-final class EncodeViewModelTests: XCTestCase {
-
-    func testInitialState() {
-        let vm = EncodeViewModel()
-        XCTAssertNil(vm.inputFile)
-        XCTAssertNil(vm.outputFile)
-        XCTAssertEqual(vm.progress, 0)
-        XCTAssertFalse(vm.isEncoding)
-        XCTAssertFalse(vm.isScanning)
-        XCTAssertTrue(vm.presets.isEmpty)
-        XCTAssertTrue(vm.audioTracks.isEmpty)
-        XCTAssertTrue(vm.subtitleTracks.isEmpty)
-        XCTAssertTrue(vm.selectedAudioTracks.isEmpty)
-        XCTAssertTrue(vm.selectedSubtitleTracks.isEmpty)
-        XCTAssertEqual(vm.statusText, "Idle")
-    }
-
-    func testAutoSelectPreset1080p() {
-        let vm = EncodeViewModel()
-        vm.autoSelectPreset(resolution: "1920x1080")
-        XCTAssertEqual(vm.selectedPreset, "H.265 Apple VideoToolbox 1080p")
-    }
-
-    func testAutoSelectPreset4K() {
-        let vm = EncodeViewModel()
-        vm.autoSelectPreset(resolution: "3840x2160")
-        XCTAssertEqual(vm.selectedPreset, "H.265 Apple VideoToolbox 2160p 4K")
-    }
-
-    func testAutoSelectPresetInvalidDoesNotChange() {
-        let vm = EncodeViewModel()
-        let original = vm.selectedPreset
-        vm.autoSelectPreset(resolution: "invalid")
-        XCTAssertEqual(vm.selectedPreset, original)
-    }
-
-    func testAbortResetsState() {
-        let vm = EncodeViewModel()
-        vm.isEncoding = true
-        vm.progress = 0.5
-        vm.progressText = "Encoding..."
-
-        vm.abort()
-
-        XCTAssertFalse(vm.isEncoding)
-        XCTAssertEqual(vm.progress, 0)
-        XCTAssertEqual(vm.progressText, "")
-        XCTAssertEqual(vm.statusText, "Aborted")
-    }
-
-    func testEncodeRequiresInputFile() {
-        let vm = EncodeViewModel()
-        vm.inputFile = nil
-        vm.encode()
-        XCTAssertFalse(vm.isEncoding)
-    }
-
-    func testEncodeDoesNotStartWhileEncoding() {
-        let vm = EncodeViewModel()
-        vm.inputFile = URL(fileURLWithPath: "/tmp/test.mkv")
-        vm.isEncoding = true
-        let progressBefore = vm.progress
-        vm.encode()
-        // Should not reset progress since it's already encoding
-        XCTAssertEqual(vm.progress, progressBefore)
-    }
-}
-
 // MARK: - RipViewModel Tests
 
 @MainActor
@@ -178,35 +107,6 @@ final class QueueViewModelTests: XCTestCase {
         vm.addJob(discName: "Movie 2", rippedFile: URL(fileURLWithPath: "/tmp/b.mkv"), ripElapsed: 0)
         vm.addJob(discName: "Movie 3", rippedFile: URL(fileURLWithPath: "/tmp/c.mkv"), ripElapsed: 0)
         XCTAssertEqual(vm.jobs.count, 3)
-    }
-}
-
-// MARK: - ScrapeViewModel Tests
-
-@MainActor
-final class ScrapeViewModelTests: XCTestCase {
-
-    func testInitialState() {
-        let vm = ScrapeViewModel()
-        XCTAssertEqual(vm.discName, "")
-        XCTAssertFalse(vm.isScraping)
-        XCTAssertTrue(vm.logLines.isEmpty)
-    }
-
-    func testScrapeRequiresDiscName() {
-        let vm = ScrapeViewModel()
-        vm.discName = ""
-        vm.destDir = "/tmp"
-        vm.scrape()
-        XCTAssertFalse(vm.isScraping)
-    }
-
-    func testScrapeRequiresDestDir() {
-        let vm = ScrapeViewModel()
-        vm.discName = "TEST"
-        vm.destDir = ""
-        vm.scrape()
-        XCTAssertFalse(vm.isScraping)
     }
 }
 

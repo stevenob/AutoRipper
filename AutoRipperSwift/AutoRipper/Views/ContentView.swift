@@ -1,8 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @EnvironmentObject private var config: AppConfig
-    @ObservedObject private var appConfig = AppConfig.shared
+    @ObservedObject private var config = AppConfig.shared
     @StateObject private var updateService = UpdateService()
     @StateObject private var ripVM = RipViewModel()
     @StateObject private var queueVM = QueueViewModel()
@@ -53,8 +52,8 @@ struct ContentView: View {
                 Text("Skip under:")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                Stepper(value: $appConfig.minDuration, in: 0...7200, step: 60) {
-                    Text("\(appConfig.minDuration / 60) min")
+                Stepper(value: $config.minDuration, in: 0...7200, step: 60) {
+                    Text("\(config.minDuration / 60) min")
                         .monospacedDigit()
                         .font(.caption)
                         .frame(width: 45)
@@ -63,7 +62,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                Toggle("Auto-Eject", isOn: $appConfig.autoEject)
+                Toggle("Auto-Eject", isOn: $config.autoEject)
                     .toggleStyle(.checkbox)
                     .font(.caption)
 
@@ -97,7 +96,7 @@ struct ContentView: View {
                             Text(info.name)
                                 .font(.headline)
                         }
-                        let filtered = info.titles.filter { $0.durationSeconds >= appConfig.minDuration }
+                        let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
                         Text("·")
                             .foregroundStyle(.tertiary)
                         Text("\(filtered.count) of \(info.titles.count) titles")
@@ -108,7 +107,7 @@ struct ContentView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
 
-                    let filteredTitles = info.titles.filter { $0.durationSeconds >= appConfig.minDuration }
+                    let filteredTitles = info.titles.filter { $0.durationSeconds >= config.minDuration }
                     Table(filteredTitles) {
                         TableColumn("") { title in
                             Button {
@@ -262,7 +261,7 @@ struct ContentView: View {
             // Bottom bar
             HStack(spacing: 12) {
                 if let info = ripVM.discInfo {
-                    let filtered = info.titles.filter { $0.durationSeconds >= appConfig.minDuration }
+                    let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
                     Button("Select All") {
                         ripVM.selectedTitles = Set(filtered.map(\.id))
                     }
