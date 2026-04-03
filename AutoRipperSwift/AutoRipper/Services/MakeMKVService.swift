@@ -118,7 +118,7 @@ actor MakeMKVService {
         try fm.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
         let startTime = ContinuousClock.now
-        var outputFile = ""
+        nonisolated(unsafe) var outputFile = ""
 
         let (_, exitCode) = try await runProcess(
             path: mkvPath,

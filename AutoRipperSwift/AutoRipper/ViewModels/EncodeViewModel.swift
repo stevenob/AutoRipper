@@ -14,6 +14,11 @@ final class EncodeViewModel: ObservableObject {
     @Published var presets: [String] = []
     @Published var selectedPreset: String = ""
     @Published var statusText: String = "Idle"
+    @Published var audioTracks: [AudioTrack] = []
+    @Published var subtitleTracks: [SubtitleTrack] = []
+    @Published var selectedAudioTracks: Set<Int> = []
+    @Published var selectedSubtitleTracks: Set<Int> = []
+    @Published var isScanning: Bool = false
 
     private let config: AppConfig
     private let handbrake: HandBrakeService
@@ -40,6 +45,35 @@ final class EncodeViewModel: ObservableObject {
         }
     }
 
+    func scanTracks() {
+        guard let input = inputFile else { return }
+        isScanning = true
+        statusText = "Scanning tracks…"
+        Task {
+            do {
+                let (audio, subs) = try await handbrake.scanTracks(inputPath: input.path)
+                self.audioTracks = audio
+                self.subtitleTracks = subs
+                // Auto-select first audio track
+                if let first = audio.first {
+                    self.selectedAudioTracks = [first.index]
+                }
+                statusText = "Found \(audio.count) audio, \(subs.count) subtitle tracks"
+            } catch {
+                statusText = "Track scan failed: \(error.localizedDescription)"
+                log.error("Track scan failed: \(error.localizedDescription)")
+            }
+            isScanning = false
+        }
+    }
+
+    func autoSelectPreset(resolution: String) {
+        if let preset = HandBrakeService.autoPreset(for: resolution) {
+            selectedPreset = preset
+            statusText = "Auto-selected preset: \(preset)"
+        }
+    }
+
     func encode() {
         guard let input = inputFile, !isEncoding else { return }
         isEncoding = true
@@ -51,10 +85,14 @@ final class EncodeViewModel: ObservableObject {
 
         runningTask = Task {
             do {
+                let audioIdxs = selectedAudioTracks.isEmpty ? nil : Array(selectedAudioTracks).sorted()
+                let subIdxs = selectedSubtitleTracks.isEmpty ? nil : Array(selectedSubtitleTracks).sorted()
                 let result = try await handbrake.encode(
                     inputPath: input.path,
                     outputPath: outputPath,
                     preset: selectedPreset,
+                    audioTracks: audioIdxs,
+                    subtitleTracks: subIdxs,
                     progressCallback: { [weak self] pct, text in
                         Task { @MainActor in
                             self?.progress = Double(pct) / 100.0

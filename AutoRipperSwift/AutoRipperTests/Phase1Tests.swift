@@ -80,3 +80,65 @@ final class MediaResultTests: XCTestCase {
         XCTAssertEqual(m.displayTitle, "Unknown")
     }
 }
+
+// MARK: - Phase 2 Tests
+
+final class AutoPresetTests: XCTestCase {
+
+    func testAutoPreset4K() {
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "3840x2160"), "H.265 Apple VideoToolbox 2160p 4K")
+    }
+
+    func testAutoPreset1080p() {
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "1920x1080"), "H.265 Apple VideoToolbox 1080p")
+    }
+
+    func testAutoPreset720p() {
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "1280x720"), "H.265 MKV 720p30")
+    }
+
+    func testAutoPreset576p() {
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x576"), "H.265 MKV 576p25")
+    }
+
+    func testAutoPreset480p() {
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x480"), "H.265 MKV 480p30")
+    }
+
+    func testAutoPresetInvalidReturnsNil() {
+        XCTAssertNil(HandBrakeService.autoPreset(for: "invalid"))
+        XCTAssertNil(HandBrakeService.autoPreset(for: ""))
+    }
+}
+
+final class TMDbCleanDiscNameTests: XCTestCase {
+
+    func testCleanBasicDiscName() {
+        let cleaned = TMDbService.cleanDiscName("THE_MATRIX_DISC_1")
+        XCTAssertFalse(cleaned.contains("_"))
+        XCTAssertFalse(cleaned.lowercased().contains("disc"))
+    }
+
+    func testCleanResolutionTags() {
+        let cleaned = TMDbService.cleanDiscName("MOVIE_1080p_HEVC")
+        XCTAssertFalse(cleaned.lowercased().contains("1080p"))
+        XCTAssertFalse(cleaned.lowercased().contains("hevc"))
+    }
+}
+
+final class MakeMKVParseSizeTests: XCTestCase {
+
+    func testParseMB() {
+        let bytes = MakeMKVService.parseSizeToBytes("500 MB")
+        XCTAssertEqual(bytes, 500 * 1024 * 1024)
+    }
+
+    func testParseGB() {
+        let bytes = MakeMKVService.parseSizeToBytes("1.5 GB")
+        XCTAssertEqual(bytes, Int64(1.5 * 1024 * 1024 * 1024))
+    }
+
+    func testParseInvalid() {
+        XCTAssertEqual(MakeMKVService.parseSizeToBytes("invalid"), 0)
+    }
+}

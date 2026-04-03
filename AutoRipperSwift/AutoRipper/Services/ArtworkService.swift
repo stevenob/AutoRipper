@@ -68,6 +68,35 @@ struct ArtworkService {
         return nfoPath
     }
 
+    /// Create an episode NFO file with season/episode metadata.
+    func createEpisodeNFO(
+        media: MediaResult,
+        season: Int,
+        episode: Int,
+        episodeName: String,
+        destDir: URL,
+        logCallback: (@Sendable (String) -> Void)? = nil
+    ) -> URL {
+        try? FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        xml += "<episodedetails>\n"
+        xml += "  <title>\(escapeXML(episodeName))</title>\n"
+        xml += "  <showtitle>\(escapeXML(media.title))</showtitle>\n"
+        xml += "  <season>\(season)</season>\n"
+        xml += "  <episode>\(episode)</episode>\n"
+        xml += "  <plot>\(escapeXML(media.overview))</plot>\n"
+        xml += "  <tmdbid>\(media.tmdbId)</tmdbid>\n"
+        xml += "  <uniqueid type=\"tmdb\">\(media.tmdbId)</uniqueid>\n"
+        xml += "</episodedetails>\n"
+
+        let nfoName = "\(OrganizerService.cleanFilename(media.title)) - S\(String(format: "%02d", season))E\(String(format: "%02d", episode)).nfo"
+        let nfoPath = destDir.appendingPathComponent(nfoName)
+        try? xml.write(to: nfoPath, atomically: true, encoding: .utf8)
+        logCallback?("  ✓ Created \(nfoName)")
+        return nfoPath
+    }
+
     /// Full scrape: search TMDb, download artwork, create NFO.
     func scrapeAndSave(
         discName: String,
@@ -93,6 +122,38 @@ struct ArtworkService {
         _ = await downloadArtwork(media: media, destDir: destDir, logCallback: logCallback)
         _ = createNFO(media: media, destDir: destDir, logCallback: logCallback)
         logCallback?("Scrape complete.")
+        return true
+    }
+
+    /// Full scrape for a TV episode: search TMDb, download artwork, create episode NFO.
+    func scrapeAndSaveEpisode(
+        discName: String,
+        destDir: URL,
+        season: Int,
+        episode: Int,
+        episodeName: String,
+        logCallback: (@Sendable (String) -> Void)? = nil
+    ) async -> Bool {
+        logCallback?("Searching TMDb for '\(discName)'…")
+        let tmdb = TMDbService()
+        let results = await tmdb.searchMedia(query: discName)
+        guard var media = results.first, media.mediaType == "tv" else {
+            logCallback?("No TV results found on TMDb.")
+            return false
+        }
+        logCallback?("Found: \(media.displayTitle) [tv]")
+
+        if let details = await tmdb.getTvDetails(tmdbId: media.tmdbId) {
+            media = details
+        }
+
+        _ = await downloadArtwork(media: media, destDir: destDir, logCallback: logCallback)
+        _ = createNFO(media: media, destDir: destDir, logCallback: logCallback)
+        _ = createEpisodeNFO(
+            media: media, season: season, episode: episode,
+            episodeName: episodeName, destDir: destDir, logCallback: logCallback
+        )
+        logCallback?("Episode scrape complete.")
         return true
     }
 

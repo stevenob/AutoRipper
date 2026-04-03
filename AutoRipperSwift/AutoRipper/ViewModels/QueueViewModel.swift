@@ -76,6 +76,11 @@ final class QueueViewModel: ObservableObject {
             let encoded = try await encodeJob(at: index)
             jobs[index].encodedFile = encoded
             await card.finish("encode")
+            // Delete original rip to save space
+            let rippedPath = jobs[index].rippedFile.path
+            if rippedPath != encoded.path, FileManager.default.fileExists(atPath: rippedPath) {
+                try? FileManager.default.removeItem(at: jobs[index].rippedFile)
+            }
         } catch {
             jobs[index].status = .failed
             jobs[index].error = error.localizedDescription
@@ -92,10 +97,31 @@ final class QueueViewModel: ObservableObject {
 
         do {
             let source = jobs[index].encodedFile ?? jobs[index].rippedFile
-            let dest = OrganizerService.buildMoviePath(
-                outputDir: config.outputDir,
-                title: jobs[index].discName
-            )
+            let tmdb = TMDbService(config: config)
+            let results = await tmdb.searchMedia(query: jobs[index].discName)
+            let dest: URL
+            if let media = results.first {
+                if media.mediaType == "tv" {
+                    // For TV, use the TV path builder
+                    dest = OrganizerService.buildTvPath(
+                        outputDir: config.outputDir,
+                        show: media.title,
+                        season: 1,
+                        episode: 1
+                    )
+                } else {
+                    dest = OrganizerService.buildMoviePath(
+                        outputDir: config.outputDir,
+                        title: media.title,
+                        year: media.year
+                    )
+                }
+            } else {
+                dest = OrganizerService.buildMoviePath(
+                    outputDir: config.outputDir,
+                    title: OrganizerService.cleanFilename(jobs[index].discName)
+                )
+            }
             let organized = try OrganizerService.organizeFile(source: source, destination: dest)
             jobs[index].organizedFile = organized
             await card.finish("organize")
@@ -130,16 +156,44 @@ final class QueueViewModel: ObservableObject {
 
             do {
                 let source = jobs[index].organizedFile ?? jobs[index].rippedFile
-                let nasBase = config.nasMoviesPath
-                let nasDest = URL(fileURLWithPath: nasBase)
-                    .appendingPathComponent(source.deletingLastPathComponent().lastPathComponent)
-                    .appendingPathComponent(source.lastPathComponent)
-                try FileManager.default.createDirectory(
-                    at: nasDest.deletingLastPathComponent(), withIntermediateDirectories: true
-                )
-                try FileManager.default.copyItem(at: source, to: nasDest)
-                await card.finish("nas")
+                let sourceDir = source.deletingLastPathComponent()
+                let folderName = sourceDir.lastPathComponent
+
+                // Pick the right NAS base path based on media type
+                let tmdb = TMDbService(config: config)
+                let results = await tmdb.searchMedia(query: jobs[index].discName)
+                let isTV = results.first?.mediaType == "tv"
+                let nasBase = isTV ? config.nasTvPath : config.nasMoviesPath
+
+                guard !nasBase.isEmpty else {
+                    await card.skip("nas")
+                    // jump to done
+                    jobs[index].status = .done
+                    jobs[index].progress = 100
+                    jobs[index].progressText = "Complete (NAS path not configured)"
+                    await card.complete(footer: "Total: \(formatElapsed(jobs[index].ripElapsed))")
+                    NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
+                    return
+                }
+
+                let nasDest = URL(fileURLWithPath: nasBase).appendingPathComponent(folderName)
+
+                // Remove existing destination if present
+                let fm = FileManager.default
+                if fm.fileExists(atPath: nasDest.path) {
+                    try fm.removeItem(at: nasDest)
+                }
+
+                // Copy entire organized folder to NAS
+                try fm.copyItem(at: sourceDir, to: nasDest)
+                jobs[index].progressText = "Copied to NAS: \(nasDest.path)"
+
+                // Clean up local files after successful NAS copy
+                try? fm.removeItem(at: sourceDir)
+
+                await card.finish("nas", detail: nasDest.path)
             } catch {
+                jobs[index].progressText = "NAS copy failed: \(error.localizedDescription)"
                 await card.fail("nas", detail: error.localizedDescription)
             }
         } else {

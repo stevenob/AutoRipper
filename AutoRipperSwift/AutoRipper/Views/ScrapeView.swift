@@ -61,7 +61,7 @@ struct ScrapeView: View {
                 }
                 .background(Color(nsColor: .textBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 4))
-                .onChange(of: vm.logLines.count) { _ in
+                .onChange(of: vm.logLines.count) {
                     if let last = vm.logLines.indices.last {
                         proxy.scrollTo(last, anchor: .bottom)
                     }

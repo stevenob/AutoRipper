@@ -50,6 +50,34 @@ actor DiscordService {
             log.error("Discord edit failed: \(error.localizedDescription)")
         }
     }
+
+    // MARK: - One-shot Notifications
+
+    /// Send a standalone one-shot notification embed.
+    func sendNotification(message: String, title: String = "AutoRipper", color: Int = 0x5865F2) async {
+        let embed: [String: Any] = ["title": title, "description": message, "color": color]
+        _ = await sendEmbed(embed)
+    }
+
+    /// Blue notification for general info.
+    func notifyInfo(_ message: String) async {
+        await sendNotification(message: message, color: 0x5865F2)
+    }
+
+    /// Yellow notification for progress updates.
+    func notifyProgress(_ message: String) async {
+        await sendNotification(message: message, title: "⏳ In Progress", color: 0xFEE75C)
+    }
+
+    /// Green notification for success.
+    func notifySuccess(_ message: String) async {
+        await sendNotification(message: message, title: "✅ Complete", color: 0x57F287)
+    }
+
+    /// Red notification for errors.
+    func notifyError(_ message: String) async {
+        await sendNotification(message: message, title: "❌ Error", color: 0xED4245)
+    }
 }
 
 // MARK: - Job Card

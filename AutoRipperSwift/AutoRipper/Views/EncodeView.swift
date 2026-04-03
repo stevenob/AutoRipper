@@ -38,6 +38,73 @@ struct EncodeView: View {
 
             Divider()
 
+            // Track selection
+            if !vm.audioTracks.isEmpty || !vm.subtitleTracks.isEmpty {
+                HStack(alignment: .top, spacing: 20) {
+                    // Audio tracks
+                    if !vm.audioTracks.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Audio Tracks")
+                                .font(.headline)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(vm.audioTracks) { track in
+                                        Toggle(isOn: Binding(
+                                            get: { vm.selectedAudioTracks.contains(track.index) },
+                                            set: { selected in
+                                                if selected {
+                                                    vm.selectedAudioTracks.insert(track.index)
+                                                } else {
+                                                    vm.selectedAudioTracks.remove(track.index)
+                                                }
+                                            }
+                                        )) {
+                                            Text("\(track.index): \(track.description)")
+                                                .font(.caption)
+                                        }
+                                        .toggleStyle(.checkbox)
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 100)
+                        }
+                    }
+
+                    // Subtitle tracks
+                    if !vm.subtitleTracks.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Subtitle Tracks")
+                                .font(.headline)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    ForEach(vm.subtitleTracks) { track in
+                                        Toggle(isOn: Binding(
+                                            get: { vm.selectedSubtitleTracks.contains(track.index) },
+                                            set: { selected in
+                                                if selected {
+                                                    vm.selectedSubtitleTracks.insert(track.index)
+                                                } else {
+                                                    vm.selectedSubtitleTracks.remove(track.index)
+                                                }
+                                            }
+                                        )) {
+                                            Text("\(track.index): \(track.language) (\(track.type))")
+                                                .font(.caption)
+                                        }
+                                        .toggleStyle(.checkbox)
+                                    }
+                                }
+                            }
+                            .frame(maxHeight: 100)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            } else if vm.isScanning {
+                ProgressView("Scanning tracks…")
+                    .padding()
+            }
+
             Spacer()
 
             // Progress
@@ -71,5 +138,8 @@ struct EncodeView: View {
         }
         .padding(.vertical, 8)
         .onAppear { vm.loadPresets() }
+        .onChange(of: vm.inputFile) {
+            vm.scanTracks()
+        }
     }
 }

@@ -187,6 +187,23 @@ actor HandBrakeService {
         }
         return groups
     }
+
+    /// Pick the best HandBrake preset based on video resolution string (e.g. "1920x1080").
+    static func autoPreset(for resolution: String) -> String? {
+        let parts = resolution.lowercased().split(separator: "x")
+        guard parts.count == 2, let height = Int(parts[1]) else { return nil }
+        if height >= 2160 {
+            return "H.265 Apple VideoToolbox 2160p 4K"
+        } else if height >= 1080 {
+            return "H.265 Apple VideoToolbox 1080p"
+        } else if height >= 720 {
+            return "H.265 MKV 720p30"
+        } else if height >= 576 {
+            return "H.265 MKV 576p25"
+        } else {
+            return "H.265 MKV 480p30"
+        }
+    }
 }
 
 // MARK: - Track Models
