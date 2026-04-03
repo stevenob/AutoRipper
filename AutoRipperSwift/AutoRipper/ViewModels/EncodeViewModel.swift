@@ -8,6 +8,7 @@ private let log = Logger(subsystem: "com.autoripper.app", category: "encode-vm")
 final class EncodeViewModel: ObservableObject {
     @Published var inputFile: URL?
     @Published var outputFile: URL?
+    @Published var outputDir: String
     @Published var progress: Double = 0
     @Published var progressText: String = ""
     @Published var isEncoding: Bool = false
@@ -28,6 +29,7 @@ final class EncodeViewModel: ObservableObject {
         self.config = config
         self.handbrake = HandBrakeService(config: config)
         self.selectedPreset = config.defaultPreset
+        self.outputDir = config.outputDir
     }
 
     func loadPresets() {
@@ -81,7 +83,13 @@ final class EncodeViewModel: ObservableObject {
         progressText = "Starting encode…"
         statusText = "Encoding…"
 
-        let outputPath = input.deletingPathExtension().path + "_encoded.mkv"
+        let outputPath: String
+        if !outputDir.isEmpty {
+            let filename = input.deletingPathExtension().lastPathComponent + "_encoded.mkv"
+            outputPath = URL(fileURLWithPath: outputDir).appendingPathComponent(filename).path
+        } else {
+            outputPath = input.deletingPathExtension().path + "_encoded.mkv"
+        }
 
         runningTask = Task {
             do {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct EncodeView: View {
     @ObservedObject var vm: EncodeViewModel
@@ -11,9 +12,15 @@ struct EncodeView: View {
                     GroupBox {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Button("Choose File…") {
+                                Text("File:")
+                                    .frame(width: 40, alignment: .trailing)
+                                    .foregroundStyle(.secondary)
+                                Button("Choose…") {
                                     let panel = NSOpenPanel()
-                                    panel.allowedContentTypes = [.movie, .mpeg4Movie, .avi]
+                                    panel.allowedContentTypes = [
+                                        .movie, .mpeg4Movie, .avi,
+                                        UTType(filenameExtension: "mkv") ?? .movie,
+                                    ]
                                     panel.allowsMultipleSelection = false
                                     if panel.runModal() == .OK {
                                         vm.inputFile = panel.url
@@ -23,34 +30,77 @@ struct EncodeView: View {
                                 if let file = vm.inputFile {
                                     Image(systemName: "doc.fill")
                                         .foregroundStyle(.secondary)
-                                    Text(file.lastPathComponent)
+                                    Text(file.path)
                                         .lineLimit(1)
-                                        .truncationMode(.middle)
+                                        .truncationMode(.head)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 } else {
                                     Text("No file selected")
                                         .foregroundStyle(.tertiary)
                                 }
-
                                 Spacer()
-                            }
-
-                            Divider()
-
-                            HStack {
-                                Text("Preset:")
-                                    .foregroundStyle(.secondary)
-                                Picker("", selection: $vm.selectedPreset) {
-                                    ForEach(vm.presets, id: \.self) { preset in
-                                        Text(preset).tag(preset)
-                                    }
-                                }
-                                .labelsHidden()
-                                .frame(maxWidth: 350)
                             }
                         }
                         .padding(4)
                     } label: {
                         Label("Input", systemImage: "film")
+                    }
+                    .padding(.horizontal, 16)
+
+                    // Output section
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Dir:")
+                                    .frame(width: 40, alignment: .trailing)
+                                    .foregroundStyle(.secondary)
+                                TextField("Output directory", text: $vm.outputDir)
+                                    .textFieldStyle(.roundedBorder)
+                                Button("Browse…") {
+                                    let panel = NSOpenPanel()
+                                    panel.canChooseFiles = false
+                                    panel.canChooseDirectories = true
+                                    panel.allowsMultipleSelection = false
+                                    if panel.runModal() == .OK, let url = panel.url {
+                                        vm.outputDir = url.path
+                                    }
+                                }
+                            }
+
+                            if let input = vm.inputFile {
+                                HStack {
+                                    Text("File:")
+                                        .frame(width: 40, alignment: .trailing)
+                                        .foregroundStyle(.secondary)
+                                    let filename = input.deletingPathExtension().lastPathComponent + "_encoded.mkv"
+                                    Text(filename)
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                        .padding(4)
+                    } label: {
+                        Label("Output", systemImage: "square.and.arrow.down")
+                    }
+                    .padding(.horizontal, 16)
+
+                    // Preset
+                    GroupBox {
+                        HStack {
+                            Text("Preset:")
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: $vm.selectedPreset) {
+                                ForEach(vm.presets, id: \.self) { preset in
+                                    Text(preset).tag(preset)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                        .padding(4)
+                    } label: {
+                        Label("Encoding", systemImage: "gearshape.2")
                     }
                     .padding(.horizontal, 16)
 
@@ -139,18 +189,19 @@ struct EncodeView: View {
 
             // Bottom bar
             HStack(spacing: 12) {
-                Button("Encode") { vm.encode() }
-                    .disabled(vm.inputFile == nil || vm.isEncoding)
-                    .buttonStyle(.borderedProminent)
-
-                Button("Abort") { vm.abort() }
-                    .disabled(!vm.isEncoding)
-
-                Spacer()
-
                 Text(vm.statusText)
                     .foregroundStyle(.secondary)
                     .font(.caption)
+
+                Spacer()
+
+                if vm.isEncoding {
+                    Button("Abort") { vm.abort() }
+                }
+
+                Button("Encode") { vm.encode() }
+                    .disabled(vm.inputFile == nil || vm.isEncoding)
+                    .buttonStyle(.borderedProminent)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
