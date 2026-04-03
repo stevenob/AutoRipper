@@ -18,7 +18,7 @@ final class AppConfigTests: XCTestCase {
         let config = AppConfig()
         config.minDuration = 999
         // Should be written to UserDefaults immediately
-        let stored = UserDefaults.standard.integer(forKey: "minDuration")
+        let stored = UserDefaults(suiteName: "group.com.autoripper")!.integer(forKey: "minDuration")
         XCTAssertEqual(stored, 999)
         // Restore
         config.minDuration = 120
@@ -27,7 +27,7 @@ final class AppConfigTests: XCTestCase {
     func testPropertyDidSetWritesToDefaults() {
         let config = AppConfig()
         config.outputDir = "/test/path"
-        XCTAssertEqual(UserDefaults.standard.string(forKey: "outputDir"), "/test/path")
+        XCTAssertEqual(UserDefaults(suiteName: "group.com.autoripper")!.string(forKey: "outputDir"), "/test/path")
         // Restore
         config.outputDir = NSHomeDirectory() + "/Desktop/Ripped"
     }

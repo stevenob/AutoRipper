@@ -10,7 +10,7 @@ final class AppConfig: ObservableObject {
         return config
     }()
 
-    private let defaults = UserDefaults.standard
+    private let defaults = UserDefaults(suiteName: "group.com.autoripper")!
 
     @Published var outputDir: String {
         didSet { defaults.set(outputDir, forKey: "outputDir") }
@@ -50,7 +50,7 @@ final class AppConfig: ObservableObject {
     }
 
     init() {
-        let d = UserDefaults.standard
+        let d = UserDefaults(suiteName: "group.com.autoripper")!
         self.outputDir = d.string(forKey: "outputDir") ?? NSHomeDirectory() + "/Desktop/Ripped"
         self.makemkvPath = d.string(forKey: "makemkvPath") ?? "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
         self.handbrakePath = d.string(forKey: "handbrakePath") ?? "/opt/homebrew/bin/HandBrakeCLI"
