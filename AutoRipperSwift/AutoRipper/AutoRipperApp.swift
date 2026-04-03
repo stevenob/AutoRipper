@@ -26,12 +26,6 @@ struct AutoRipperApp: App {
                     )
                 }
             }
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
         }
     }
 
