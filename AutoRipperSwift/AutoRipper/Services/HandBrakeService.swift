@@ -42,10 +42,16 @@ actor HandBrakeService {
 
         var presets: [String] = []
         for line in output.components(separatedBy: .newlines) {
-            if let groups = Self.match(line, pattern: #"^\s{4,}\+\s+(.+)$"#) {
-                let name = groups[1].trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty && !name.hasSuffix("/") {
-                    presets.append(name)
+            // Match preset names: exactly 4 spaces indent, starts with a letter
+            // Old format: "    + Preset Name"  New format: "    Preset Name"
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty && !trimmed.hasSuffix("/") && !trimmed.hasPrefix("[") {
+                if let _ = Self.match(line, pattern: #"^\s{4}\S"#), Self.match(line, pattern: #"^\s{8}"#) == nil {
+                    // Remove leading "+ " if present (old format)
+                    let name = trimmed.hasPrefix("+ ") ? String(trimmed.dropFirst(2)) : trimmed
+                    if !name.isEmpty {
+                        presets.append(name)
+                    }
                 }
             }
         }
