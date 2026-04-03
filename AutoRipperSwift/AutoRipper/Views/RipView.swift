@@ -7,25 +7,20 @@ struct RipView: View {
         VStack(spacing: 0) {
             // Toolbar
             HStack(spacing: 12) {
-                Button { vm.scanDisc() } label: {
-                    Label("Scan Disc", systemImage: "opticaldisc")
-                }
-                .disabled(vm.isScanning || vm.isRipping)
-
                 Button { vm.fullAuto() } label: {
                     Label("Full Auto", systemImage: "bolt.fill")
                 }
                 .disabled(vm.isScanning || vm.isRipping)
-
-                Button { vm.ejectDisc() } label: {
-                    Label("Eject", systemImage: "eject.fill")
-                }
 
                 Spacer()
 
                 Text("Min duration: \(vm.minDuration)s")
                     .foregroundStyle(.tertiary)
                     .font(.caption)
+
+                Button { vm.ejectDisc() } label: {
+                    Label("Eject", systemImage: "eject.fill")
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
