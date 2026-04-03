@@ -71,13 +71,15 @@ struct QueueView: View {
 
             // Bottom bar
             HStack(spacing: 12) {
-                Button("Abort Current") { vm.abortCurrent() }
-                    .disabled(vm.jobs.allSatisfy { $0.status == .done || $0.status == .failed || $0.status == .queued })
+                Text(vm.statusLabel)
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
 
                 Spacer()
 
-                Text(vm.statusLabel)
-                    .foregroundStyle(.secondary)
+                if vm.jobs.contains(where: { $0.status != .done && $0.status != .failed && $0.status != .queued }) {
+                    Button("Abort Current") { vm.abortCurrent() }
+                }
                     .font(.caption)
             }
             .padding(.horizontal, 16)
