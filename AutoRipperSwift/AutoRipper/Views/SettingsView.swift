@@ -81,7 +81,7 @@ struct SettingsView: View {
 
             // Footer
             HStack {
-                Button("Save Settings") { vm.save() }
+                Button("Save Settings") { vm.save(quiet: false) }
                     .keyboardShortcut("s", modifiers: .command)
 
                 if !vm.statusText.isEmpty {
