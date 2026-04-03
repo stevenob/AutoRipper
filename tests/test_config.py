@@ -13,6 +13,9 @@ import config
 
 
 class TestLoadConfigDefaults(unittest.TestCase):
+    def setUp(self):
+        config._cache = None
+
     @patch("config.os.path.exists", return_value=False)
     def test_returns_defaults_when_no_file(self, _mock_exists):
         result = config.load_config()
@@ -22,6 +25,9 @@ class TestLoadConfigDefaults(unittest.TestCase):
 
 
 class TestSaveAndLoadConfig(unittest.TestCase):
+    def setUp(self):
+        config._cache = None
+
     def test_round_trip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_file = os.path.join(tmpdir, "settings.json")
@@ -38,6 +44,9 @@ class TestSaveAndLoadConfig(unittest.TestCase):
 
 
 class TestLoadConfigMergesDefaults(unittest.TestCase):
+    def setUp(self):
+        config._cache = None
+
     def test_missing_keys_filled(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_file = os.path.join(tmpdir, "settings.json")

@@ -20,6 +20,7 @@ class MediaResult:
     tmdb_id: int
     overview: str
     poster_path: str | None
+    backdrop_path: str | None = None
 
 
 @dataclass
@@ -105,6 +106,7 @@ def search_media(query: str) -> list[MediaResult]:
                 tmdb_id=item.get("id", 0),
                 overview=item.get("overview", ""),
                 poster_path=item.get("poster_path"),
+                backdrop_path=item.get("backdrop_path"),
             )
         )
 
@@ -143,6 +145,7 @@ def get_movie_details(tmdb_id: int) -> MediaResult | None:
         tmdb_id=item.get("id", tmdb_id),
         overview=item.get("overview", ""),
         poster_path=item.get("poster_path"),
+        backdrop_path=item.get("backdrop_path"),
     )
 
 

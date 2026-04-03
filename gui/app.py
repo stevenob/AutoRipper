@@ -284,7 +284,14 @@ class AutoRipperApp(ctk.CTk):
             messagebox.showerror("Error", f"Failed to save settings:\n{exc}")
 
     def _auto_save_prefs(self):
-        """Silently save preferences when they change."""
+        """Debounced save — waits 500ms after last change before writing."""
+        if hasattr(self, "_autosave_id") and self._autosave_id is not None:
+            self.after_cancel(self._autosave_id)
+        self._autosave_id = self.after(500, self._do_auto_save)
+
+    def _do_auto_save(self):
+        """Actually write preferences to disk."""
+        self._autosave_id = None
         try:
             config = load_config()
             config["min_duration"] = self.settings_min_dur_var.get()

@@ -5,6 +5,9 @@ from typing import Optional
 
 from config import load_config
 
+# Reusable session for connection pooling across webhook calls
+_session = requests.Session()
+
 # Stage display order and labels
 _STAGES = ("rip", "encode", "organize", "scrape", "nas")
 _STAGE_LABELS = {
@@ -37,7 +40,7 @@ def send_embed(embed: dict) -> str | None:
     if not url:
         return None
     try:
-        resp = requests.post(
+        resp = _session.post(
             f"{url}?wait=true", json={"embeds": [embed]}, timeout=10,
         )
         if resp.ok:
@@ -53,7 +56,7 @@ def edit_embed(message_id: str, embed: dict) -> None:
     if not url or not message_id:
         return
     try:
-        requests.patch(
+        _session.patch(
             f"{url}/messages/{message_id}", json={"embeds": [embed]}, timeout=10,
         )
     except Exception:

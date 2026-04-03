@@ -78,8 +78,10 @@ def download_artwork(
         if log_callback:
             log_callback("  ✗ No poster available on TMDb")
 
-    # Fanart / backdrop
-    backdrop_path = _fetch_backdrop_path(media_result.tmdb_id, media_result.media_type)
+    # Fanart / backdrop — use backdrop_path from MediaResult (no extra API call)
+    backdrop_path = media_result.backdrop_path
+    if not backdrop_path:
+        backdrop_path = _fetch_backdrop_path(media_result.tmdb_id, media_result.media_type)
     if backdrop_path:
         fanart_url = f"{TMDB_IMAGE_BASE}/original{backdrop_path}"
         fanart_dest = os.path.join(dest_dir, "fanart.jpg")
@@ -166,6 +168,7 @@ def scrape_and_save(
                 tmdb_id=media.tmdb_id,
                 overview=media.overview,
                 poster_path=media.poster_path,
+                backdrop_path=media.backdrop_path,
             )
 
     download_artwork(media, dest_dir, log_callback)

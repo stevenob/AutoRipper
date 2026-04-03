@@ -212,17 +212,27 @@ def encode(
     if proc_callback:
         proc_callback(proc)
 
-    # HandBrake uses \r for progress updates — read char by char to catch them
-    buf = []
+    # HandBrake uses \r for progress updates — read in chunks, split on \r or \n
+    buf = ""
     while True:
-        ch = proc.stdout.read(1)  # type: ignore[union-attr]
-        if not ch:
+        chunk = proc.stdout.read(4096)  # type: ignore[union-attr]
+        if not chunk:
             if proc.poll() is not None:
                 break
             continue
-        if ch in ("\r", "\n"):
-            line = "".join(buf).strip()
-            buf.clear()
+        buf += chunk
+        while "\r" in buf or "\n" in buf:
+            # Split on whichever delimiter comes first
+            ri = buf.find("\r")
+            ni = buf.find("\n")
+            if ri == -1:
+                idx = ni
+            elif ni == -1:
+                idx = ri
+            else:
+                idx = min(ri, ni)
+            line = buf[:idx].strip()
+            buf = buf[idx + 1:]
             if not line:
                 continue
 
@@ -238,8 +248,6 @@ def encode(
                 fps_m = re.search(r"(\d+\.\d+)\s*fps", line)
                 fps = f" ({fps_m.group(1)} fps)" if fps_m else ""
                 progress_callback(min(percent, 100), f"Encoding: {percent}%{eta}{fps}")
-        else:
-            buf.append(ch)
 
     proc.wait()
 

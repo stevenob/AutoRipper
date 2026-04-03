@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
+import threading
 
 CONFIG_DIR = os.path.expanduser("~/.config/autoripper")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "settings.json")
@@ -21,17 +23,35 @@ DEFAULTS = {
     "nas_upload_enabled": False,
 }
 
+_lock = threading.Lock()
+_cache: dict | None = None
+
 
 def load_config() -> dict:
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            saved = json.load(f)
-        merged = {**DEFAULTS, **saved}
-        return merged
-    return dict(DEFAULTS)
+    global _cache
+    with _lock:
+        if _cache is not None:
+            return dict(_cache)
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r") as f:
+                saved = json.load(f)
+            merged = {**DEFAULTS, **saved}
+        else:
+            merged = dict(DEFAULTS)
+        _cache = merged
+        return dict(_cache)
 
 
 def save_config(config: dict):
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
+    global _cache
+    with _lock:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".json")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(config, f, indent=2)
+            os.replace(tmp, CONFIG_FILE)
+        except BaseException:
+            os.unlink(tmp)
+            raise
+        _cache = dict(config)

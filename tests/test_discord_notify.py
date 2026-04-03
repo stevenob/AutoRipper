@@ -58,7 +58,7 @@ class TestBuildEmbed(unittest.TestCase):
 
 
 class TestSendEmbed(unittest.TestCase):
-    @patch("core.discord_notify.requests.post")
+    @patch("core.discord_notify._session.post")
     @patch("core.discord_notify._get_webhook_url", return_value="https://discord.com/api/webhooks/123/abc")
     def test_posts_to_webhook_with_wait(self, mock_url, mock_post):
         mock_resp = MagicMock()
@@ -77,13 +77,13 @@ class TestSendEmbed(unittest.TestCase):
         result = dn.send_embed({"title": "test"})
         self.assertIsNone(result)
 
-    @patch("core.discord_notify.requests.post", side_effect=Exception("network"))
+    @patch("core.discord_notify._session.post", side_effect=Exception("network"))
     @patch("core.discord_notify._get_webhook_url", return_value="https://hook.url")
     def test_returns_none_on_exception(self, mock_url, mock_post):
         result = dn.send_embed({"title": "test"})
         self.assertIsNone(result)
 
-    @patch("core.discord_notify.requests.post")
+    @patch("core.discord_notify._session.post")
     @patch("core.discord_notify._get_webhook_url", return_value="https://hook.url")
     def test_returns_none_when_response_not_ok(self, mock_url, mock_post):
         mock_resp = MagicMock()
@@ -94,26 +94,26 @@ class TestSendEmbed(unittest.TestCase):
 
 
 class TestEditEmbed(unittest.TestCase):
-    @patch("core.discord_notify.requests.patch")
+    @patch("core.discord_notify._session.patch")
     @patch("core.discord_notify._get_webhook_url", return_value="https://discord.com/api/webhooks/123/abc")
     def test_patches_correct_url(self, mock_url, mock_patch):
         dn.edit_embed("msg_42", {"title": "updated"})
         url_arg = mock_patch.call_args[0][0]
         self.assertIn("/messages/msg_42", url_arg)
 
-    @patch("core.discord_notify.requests.patch")
+    @patch("core.discord_notify._session.patch")
     @patch("core.discord_notify._get_webhook_url", return_value="")
     def test_no_patch_when_no_webhook(self, mock_url, mock_patch):
         dn.edit_embed("msg_42", {"title": "x"})
         mock_patch.assert_not_called()
 
-    @patch("core.discord_notify.requests.patch")
+    @patch("core.discord_notify._session.patch")
     @patch("core.discord_notify._get_webhook_url", return_value="https://hook.url")
     def test_no_patch_when_no_message_id(self, mock_url, mock_patch):
         dn.edit_embed("", {"title": "x"})
         mock_patch.assert_not_called()
 
-    @patch("core.discord_notify.requests.patch", side_effect=Exception("err"))
+    @patch("core.discord_notify._session.patch", side_effect=Exception("err"))
     @patch("core.discord_notify._get_webhook_url", return_value="https://hook.url")
     def test_does_not_raise_on_exception(self, mock_url, mock_patch):
         dn.edit_embed("msg_42", {"title": "x"})
