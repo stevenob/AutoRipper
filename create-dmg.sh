@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a drag-and-drop DMG installer for AutoRipper.
-# Requires: dist/AutoRipper.app (run build.sh first)
+# Requires: dist/AutoRipper.app (run build-swift.sh first)
 set -e
 
 APP_NAME="AutoRipper"
@@ -10,7 +10,7 @@ DMG_DIR="dist/dmg"
 DMG_PATH="dist/${DMG_NAME}.dmg"
 
 if [ ! -d "$APP_PATH" ]; then
-    echo "❌ $APP_PATH not found — run build.sh first"
+    echo "❌ $APP_PATH not found — run build-swift.sh first"
     exit 1
 fi
 
