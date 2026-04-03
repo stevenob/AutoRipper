@@ -101,17 +101,6 @@ cd AutoRipperSwift && swift test
 # 99 tests, 0 failures
 ```
 
-## Legacy Python Version
-
-A Python (customtkinter) version is also included:
-
-```bash
-pip install -r requirements.txt
-python3.13 main.py
-```
-
-Build standalone `.app`: `bash build.sh` · DMG installer: `bash create-dmg.sh`
-
 ## First-time Setup
 
 1. Click **Settings** in the sidebar
@@ -163,10 +152,9 @@ AutoRipper/
 │   │   ├── ViewModels/           # State + logic per screen
 │   │   └── Views/                # SwiftUI sidebar + 5 screens
 │   └── AutoRipperTests/          # 99 tests (4 files)
-├── main.py                       # Python entry point (legacy)
-├── core/                         # Python services
-├── gui/                          # Python UI (customtkinter)
-└── tests/                        # Python tests
+├── assets/                       # App icon (.icns, .png)
+├── build-swift.sh                # Build .app bundle
+└── create-dmg.sh                 # Create DMG installer
 ```
 
 ## License

@@ -148,6 +148,14 @@ final class RipViewModel: ObservableObject {
             await discord.notifySuccess("\(folderName) — rip complete in \(mins)m \(secs)s")
 
             if config.autoEject { ejectDisc() }
+
+            // Reset UX after a brief delay so the user sees "Rip complete"
+            try? await Task.sleep(for: .seconds(3))
+            discInfo = nil
+            selectedTitles = []
+            ripProgress = 0
+            logLines = []
+            statusText = "Ready — insert next disc"
         }
     }
 

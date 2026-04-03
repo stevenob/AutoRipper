@@ -2,6 +2,12 @@ import SwiftUI
 
 struct QueueView: View {
     @ObservedObject var vm: QueueViewModel
+    @State private var selectedJobId: String?
+
+    private var selectedJob: Job? {
+        guard let id = selectedJobId else { return nil }
+        return vm.jobs.first { $0.id == id }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,7 +28,7 @@ struct QueueView: View {
                 .padding()
                 Spacer()
             } else {
-                Table(vm.jobs) {
+                Table(vm.jobs, selection: $selectedJobId) {
                     TableColumn("") { job in
                         statusIcon(for: job.status)
                     }
@@ -65,6 +71,39 @@ struct QueueView: View {
                     .width(100)
                 }
                 .tableStyle(.inset(alternatesRowBackgrounds: true))
+
+                // Detail panel
+                if let job = selectedJob {
+                    Divider()
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            detailRow("Title:", job.discName)
+                            detailRow("Status:", job.status.rawValue.capitalized)
+                            detailRow("Step:", job.progressText)
+                            detailRow("Ripped File:", job.rippedFile.path)
+                            if let encoded = job.encodedFile {
+                                detailRow("Encoded File:", encoded.path)
+                            }
+                            if let organized = job.organizedFile {
+                                detailRow("Organized File:", organized.path)
+                            }
+                            if !job.error.isEmpty {
+                                detailRow("Error:", job.error)
+                            }
+                            if job.ripElapsed > 0 {
+                                let mins = Int(job.ripElapsed) / 60
+                                let secs = Int(job.ripElapsed) % 60
+                                detailRow("Rip Time:", "\(mins)m \(secs)s")
+                            }
+                        }
+                        .padding(4)
+                        .font(.caption)
+                    } label: {
+                        Label("Job Details", systemImage: "info.circle")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
             }
 
             Divider()
@@ -84,6 +123,17 @@ struct QueueView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(.bar)
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 100, alignment: .trailing)
+            Text(value)
+                .textSelection(.enabled)
+            Spacer()
         }
     }
 
