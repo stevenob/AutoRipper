@@ -7,7 +7,7 @@ Built with [customtkinter](https://github.com/TomSchimansky/CustomTkinter) for a
 ## Features
 
 - **⚡ Full Auto Mode** — One click to rip, encode, organize, and scrape metadata automatically
-- **Job Queue** — Rip multiple discs back-to-back; encoding and processing happen in the background
+- **Job Queue** — Rip multiple discs back-to-back; encoding and processing happen in the background (auto-prunes completed jobs)
 - **Modern UI** — Native macOS appearance with dark/light mode, rounded buttons, and clean design
 - **Scan & Rip** — Detect discs, browse titles with resolution display (4K/1080p/720p/480p), min duration filter, file-size progress with ETA
 - **HandBrake Encoding** — H.265 quick presets auto-selected by resolution, Apple VideoToolbox hardware acceleration, audio/subtitle track chooser
@@ -17,7 +17,7 @@ Built with [customtkinter](https://github.com/TomSchimansky/CustomTkinter) for a
   - TV Shows: `Show/Season 01/Show - S01E01 - Episode Name.mkv`
 - **tinyMediaManager** — Optional post-organize scrape for artwork, NFO files, and subtitles
 - **Built-in Artwork & NFO** — Download poster/fanart and create Kodi/Jellyfin-compatible NFO files directly from TMDb (no Java needed)
-- **Auto-eject** — Eject disc after ripping (configurable)
+- **Auto-eject** — Eject disc after ripping (configurable), plus manual eject button
 - **Abort** — Cancel any running operation at any time
 - **Persistent Preferences** — Settings auto-save between sessions
 - **Streaming Logs** — Real-time output from MakeMKV and HandBrake
@@ -48,7 +48,8 @@ Insert Disc → Scan → Rip → Encode → Auto-Organize → tMM Scrape
 - **[HandBrake CLI](https://handbrake.fr/)** — install via `brew install handbrake`
 - **TMDb API key** (free) — [get one here](https://www.themoviedb.org/settings/api)
 - **[tinyMediaManager](https://www.tinymediamanager.org/)** (optional) — for advanced artwork and NFO scraping
-- **Discord webhook** (optional) — for pipeline notifications
+- **Discord webhook** (optional) — for pipeline notifications (single updating card per title)
+- **NAS Upload** (optional) — auto-copy organized media to NAS with local cleanup
 
 ## Installation
 
@@ -92,7 +93,7 @@ python3.13 main.py
    - Organizes into `Title (Year)/Title (Year).mkv`
    - Downloads poster, fanart, and creates NFO file
    - Ejects the disc when done
-   - Sends Discord notifications at each step
+   - Sends a single Discord notification card that updates at each step
 5. Insert next disc and repeat — previous jobs encode in the background
 
 ### Manual Mode

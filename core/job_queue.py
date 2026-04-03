@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 import threading
 import time
+import weakref
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+
+_MAX_FINISHED_JOBS = 50
 
 
 @dataclass
@@ -22,6 +25,7 @@ class Job:
     error: str = ""
     progress: int = 0
     progress_text: str = "Queued"
+    rip_elapsed: float = 0.0
 
 
 class JobQueue:
@@ -33,14 +37,15 @@ class JobQueue:
         self._worker_thread: threading.Thread | None = None
         self._running = False
         self._current_proc: Optional[object] = None  # subprocess for abort
-        self._callbacks: list[Callable] = []  # GUI update callbacks
+        self._callbacks: list[weakref.WeakMethod | weakref.ref] = []
 
-    def add_job(self, disc_name: str, ripped_file: str) -> Job:
+    def add_job(self, disc_name: str, ripped_file: str, rip_elapsed: float = 0.0) -> Job:
         """Add a new job to the queue and start processing if not already running."""
         job = Job(
             id=f"job_{int(time.time() * 1000)}",
             disc_name=disc_name,
             ripped_file=ripped_file,
+            rip_elapsed=rip_elapsed,
         )
         with self._lock:
             self._jobs.append(job)
@@ -60,17 +65,36 @@ class JobQueue:
             proc.kill()
 
     def on_update(self, callback: Callable) -> None:
-        """Register a callback to be called when job state changes."""
-        self._callbacks.append(callback)
+        """Register a callback via weak reference so it doesn't prevent GC."""
+        if hasattr(callback, "__self__"):
+            ref = weakref.WeakMethod(callback)
+        else:
+            ref = weakref.ref(callback)
+        self._callbacks.append(ref)
 
     # -------------------------------------------------------------- internal
 
     def _notify(self) -> None:
-        for cb in self._callbacks:
-            try:
-                cb()
-            except Exception:
-                pass
+        alive: list[weakref.WeakMethod | weakref.ref] = []
+        for ref in self._callbacks:
+            cb = ref()
+            if cb is not None:
+                try:
+                    cb()
+                except Exception:
+                    pass
+                alive.append(ref)
+        self._callbacks = alive
+
+    def _prune_finished(self) -> None:
+        """Remove oldest finished jobs when the history exceeds the limit."""
+        with self._lock:
+            finished = [j for j in self._jobs if j.status in ("done", "failed")]
+            excess = len(finished) - _MAX_FINISHED_JOBS
+            if excess <= 0:
+                return
+            to_remove = set(id(j) for j in finished[:excess])
+            self._jobs = [j for j in self._jobs if id(j) not in to_remove]
 
     def _ensure_worker(self) -> None:
         if self._running:
@@ -86,6 +110,7 @@ class JobQueue:
                 self._running = False
                 return
             self._process_job(job)
+            self._prune_finished()
 
     def _next_queued(self) -> Job | None:
         with self._lock:
@@ -101,9 +126,11 @@ class JobQueue:
         from core.organizer import build_movie_path, organize_file, clean_filename
         from core.metadata import search_media
         from core.artwork import scrape_and_save
-        from core.discord_notify import notify_info, notify_progress, notify_success, notify_error
+        from core.discord_notify import JobCard
 
         config = load_config()
+        nas_enabled = config.get("nas_upload_enabled", False)
+        card = JobCard(job.disc_name, nas_enabled=nas_enabled)
 
         def _human_size(size_bytes):
             for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -119,18 +146,24 @@ class JobQueue:
                 return f"{h}h{m:02d}m{s:02d}s"
             return f"{m}m{s:02d}s"
 
+        # Mark rip as already done
+        rip_size = 0
+        try:
+            rip_size = os.path.getsize(job.ripped_file)
+        except OSError:
+            pass
+        rip_detail = _human_size(rip_size)
+        if job.rip_elapsed > 0:
+            rip_detail += f" · {_human_time(job.rip_elapsed)}"
+        card.finish("rip", detail=rip_detail)
+
         # Step 1: Encode
         job.status = "encoding"
         job.progress = 0
         job.progress_text = "Encoding..."
         self._notify()
 
-        rip_size = 0
-        try:
-            rip_size = os.path.getsize(job.ripped_file)
-        except OSError:
-            pass
-        notify_info(f"🎬 Encoding: {job.disc_name}\n📁 Source: {_human_size(rip_size)}")
+        card.start("encode")
 
         encode_start = time.monotonic()
         try:
@@ -158,7 +191,7 @@ class JobQueue:
             job.error = f"Encode failed: {exc}"
             job.progress_text = "Encode failed"
             self._notify()
-            notify_error(f"🎬 {job.disc_name}\n❌ {job.error}")
+            card.fail("encode", detail=str(exc))
             return
 
         encode_elapsed = time.monotonic() - encode_start
@@ -167,6 +200,11 @@ class JobQueue:
             encoded_size = os.path.getsize(job.encoded_file)
         except OSError:
             pass
+
+        card.finish(
+            "encode",
+            detail=f"{_human_size(rip_size)} → {_human_size(encoded_size)} · {preset} · {_human_time(encode_elapsed)}",
+        )
 
         # Delete original rip to save space
         try:
@@ -180,10 +218,7 @@ class JobQueue:
         job.progress = 0
         job.progress_text = "Organizing..."
         self._notify()
-        notify_progress(
-            f"📂 Organizing: {job.disc_name}\n"
-            f"🔄 Encoded: {_human_size(rip_size)} → {_human_size(encoded_size)} in {_human_time(encode_elapsed)}"
-        )
+        card.start("organize")
 
         try:
             output_dir = config.get("output_dir", "")
@@ -209,23 +244,27 @@ class JobQueue:
             job.error = f"Organize failed: {exc}"
             job.progress_text = "Organize failed"
             self._notify()
-            notify_error(f"🎬 {job.disc_name}\n❌ {job.error}")
+            card.fail("organize", detail=str(exc))
             return
+
+        card.finish("organize")
 
         # Step 3: Scrape metadata & artwork (non-critical)
         job.status = "scraping"
         job.progress = 0
         job.progress_text = "Downloading artwork & NFO..."
         self._notify()
+        card.start("scrape")
 
         try:
             scrape_and_save(job.disc_name, os.path.dirname(job.organized_file))
+            card.finish("scrape")
         except Exception:
-            pass  # scrape failure is non-critical
+            card.finish("scrape")  # non-critical
 
         # Step 4: Copy to NAS (optional)
         nas_path = ""
-        if config.get("nas_upload_enabled", False):
+        if nas_enabled:
             import shutil
             media_type = config.get("default_media_type", "movie")
             if media_type == "movie":
@@ -238,8 +277,9 @@ class JobQueue:
                 job.progress = 0
                 job.progress_text = "Copying to NAS..."
                 self._notify()
-                notify_progress(f"📤 Copying to NAS: {job.disc_name}")
+                card.start("nas")
 
+                nas_start = time.monotonic()
                 try:
                     # Copy the entire organized folder to NAS
                     src_dir = os.path.dirname(job.organized_file)
@@ -250,25 +290,31 @@ class JobQueue:
                     shutil.copytree(src_dir, nas_dest)
                     nas_path = os.path.join(nas_dest, os.path.basename(job.organized_file))
                     job.progress_text = f"Copied to NAS: {nas_dest}"
+
+                    # Clean up local files now that they're on the NAS
+                    try:
+                        shutil.rmtree(src_dir)
+                    except OSError:
+                        pass
+                    nas_elapsed = time.monotonic() - nas_start
+                    card.finish("nas", detail=f"{nas_dest} · {_human_time(nas_elapsed)}")
                 except Exception as exc:
                     job.progress_text = f"NAS copy failed: {exc}"
-                    # non-critical — don't fail the job
+                    card.fail("nas", detail=str(exc))
+            else:
+                card.skip("nas")
+        else:
+            card.skip("nas")
 
         # Done
         job.status = "done"
         job.progress = 100
         job.progress_text = "Complete"
         self._notify()
-        total_elapsed = time.monotonic() - encode_start
+        total_elapsed = time.monotonic() - encode_start + job.rip_elapsed
         final_size = 0
         try:
             final_size = os.path.getsize(job.organized_file)
         except OSError:
             final_size = encoded_size
-        nas_line = f"\n📤 NAS: {nas_path}" if nas_path else ""
-        notify_success(
-            f"🎬 {job.disc_name}\n"
-            f"📁 {_human_size(rip_size)} → {_human_size(final_size)}\n"
-            f"⏱️ {_human_time(total_elapsed)}\n"
-            f"📂 {job.organized_file}{nas_line}"
-        )
+        card.complete(footer=f"Total: {_human_size(rip_size)} → {_human_size(final_size)} · {_human_time(total_elapsed)}")

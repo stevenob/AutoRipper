@@ -119,8 +119,9 @@ class AutoRipperApp(ctk.CTk):
         ctk.CTkLabel(row5, text="Discord webhook:").pack(side="left", padx=(0, 5))
         self.settings_discord_var = tk.StringVar(value=config.get("discord_webhook", ""))
         ctk.CTkEntry(row5, textvariable=self.settings_discord_var).pack(
-            side="left", fill="x", expand=True
+            side="left", fill="x", expand=True, padx=(0, 5)
         )
+        ctk.CTkButton(row5, text="Test", command=self._test_discord, width=60).pack(side="left")
 
         # -- NAS Upload --
         ctk.CTkLabel(frame, text="NAS Upload (optional)", font=ctk.CTkFont(weight="bold")).pack(
@@ -256,11 +257,43 @@ class AutoRipperApp(ctk.CTk):
         except Exception:
             pass
 
+    def _test_discord(self):
+        """Send a simulated job card to preview Discord output."""
+        import threading
+        import time
+        from core.discord_notify import JobCard
+
+        webhook = self.settings_discord_var.get().strip()
+        if not webhook:
+            messagebox.showwarning("Discord", "Enter a webhook URL first.")
+            return
+
+        self.set_status("Sending test card…")
+
+        def _run():
+            card = JobCard("The Matrix (1999)", nas_enabled=True)
+            card.finish("rip", detail="25.3 GB · 8m12s")
+            card.start("encode")
+            time.sleep(1.5)
+            card.finish("encode", detail="25.3 GB → 4.1 GB · HQ 1080p30 Surround · 12m34s")
+            card.start("organize")
+            time.sleep(1.0)
+            card.finish("organize")
+            card.start("scrape")
+            time.sleep(1.0)
+            card.finish("scrape")
+            card.start("nas")
+            time.sleep(1.0)
+            card.finish("nas", detail="/Volumes/NAS/Movies/The Matrix (1999) · 2m06s")
+            card.complete(footer="Total: 25.3 GB → 4.1 GB · 22m52s")
+
+        threading.Thread(target=_run, daemon=True).start()
+
     # --------------------------------------------------------- inter-tab API
-    def on_rip_complete(self, file_path: str, disc_name: str = "", auto_start: bool = False, resolution: str = ""):
+    def on_rip_complete(self, file_path: str, disc_name: str = "", auto_start: bool = False, resolution: str = "", rip_elapsed: float = 0.0):
         """Called by RipTab when a rip finishes."""
         if auto_start:
-            self.job_queue.add_job(disc_name, file_path)
+            self.job_queue.add_job(disc_name, file_path, rip_elapsed=rip_elapsed)
             self.tabview.set("Queue")
             self.set_status(f"Queued: {disc_name}")
         else:

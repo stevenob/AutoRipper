@@ -105,6 +105,9 @@ class RipTab(ctk.CTkFrame):
         )
         self.full_auto_btn.pack(side="left", padx=(5, 0))
 
+        self.eject_btn = ctk.CTkButton(btn_row, text="⏏ Eject", command=self._eject_disc, width=70)
+        self.eject_btn.pack(side="left", padx=(5, 0))
+
         ctk.CTkLabel(btn_row, text="Min duration (s):").pack(side="left", padx=(15, 0))
         config = load_config()
         self.min_duration_var = tk.IntVar(value=config.get("min_duration", 120))
@@ -574,7 +577,7 @@ class RipTab(ctk.CTkFrame):
                                 if t.id in selected_ids and t.resolution:
                                     resolution = t.resolution
                                     break
-                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=auto, resolution=resolution)
+                        self.app.on_rip_complete(ripped[-1], disc_name, auto_start=auto, resolution=resolution, rip_elapsed=rip_elapsed)
                     if auto:
                         # Reset for next disc
                         self.disc_info = None
