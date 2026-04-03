@@ -80,7 +80,6 @@ struct QueueView: View {
                 if vm.jobs.contains(where: { $0.status != .done && $0.status != .failed && $0.status != .queued }) {
                     Button("Abort Current") { vm.abortCurrent() }
                 }
-                    .font(.caption)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
