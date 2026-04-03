@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -9,6 +10,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from config import load_config, save_config
+from core.logger import APP_NAME, VERSION
 from core.organizer import build_movie_path, organize_file, clean_filename
 from core.metadata import search_media
 from core.job_queue import JobQueue
@@ -16,6 +18,8 @@ from gui.rip_tab import RipTab
 from gui.encode_tab import EncodeTab
 from gui.scrape_tab import ScrapeTab
 from gui.queue_tab import QueueTab
+
+log = logging.getLogger(__name__)
 
 ctk.set_appearance_mode("system")
 ctk.set_default_color_theme("blue")
@@ -30,7 +34,41 @@ class AutoRipperApp(ctk.CTk):
         self.geometry("900x650")
         self.minsize(700, 500)
 
+        self._build_menu()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_quit)
+
+    # ------------------------------------------------------------------ Menu
+    def _build_menu(self):
+        menubar = tk.Menu(self)
+
+        app_menu = tk.Menu(menubar, name="apple", tearoff=0)
+        app_menu.add_command(label="About AutoRipper", command=self._show_about)
+        app_menu.add_separator()
+        app_menu.add_command(label="Settings…", command=self._show_settings, accelerator="⌘,")
+        app_menu.add_separator()
+        app_menu.add_command(label="Quit AutoRipper", command=self._on_quit, accelerator="⌘Q")
+        menubar.add_cascade(menu=app_menu)
+
+        self.config(menu=menubar)
+        self.bind_all("<Command-q>", lambda _: self._on_quit())
+        self.bind_all("<Command-comma>", lambda _: self._show_settings())
+
+    def _show_about(self):
+        messagebox.showinfo(
+            "About AutoRipper",
+            f"AutoRipper {VERSION}\n\n"
+            "Automated DVD/Blu-ray ripping pipeline.\n"
+            "Rip → Encode → Organize → Scrape\n\n"
+            "github.com/stevenob/AutoRipper",
+        )
+
+    def _show_settings(self):
+        self.tabview.set("Settings")
+
+    def _on_quit(self):
+        log.info("Application closing")
+        self.destroy()
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):

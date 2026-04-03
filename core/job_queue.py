@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 import weakref
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+
+log = logging.getLogger(__name__)
 
 _MAX_FINISHED_JOBS = 50
 
@@ -49,6 +52,7 @@ class JobQueue:
         )
         with self._lock:
             self._jobs.append(job)
+        log.info("Job %s queued: %s (%s)", job.id, disc_name, ripped_file)
         self._ensure_worker()
         self._notify()
         return job
@@ -127,6 +131,7 @@ class JobQueue:
         from core.metadata import search_media
         from core.artwork import scrape_and_save
         from core.discord_notify import JobCard
+        from core.macos_notify import notify as mac_notify
 
         config = load_config()
         nas_enabled = config.get("nas_upload_enabled", False)
@@ -159,6 +164,7 @@ class JobQueue:
 
         # Step 1: Encode
         job.status = "encoding"
+        log.info("Job %s: encoding started (preset=%s)", job.id, config.get("default_preset", ""))
         job.progress = 0
         job.progress_text = "Encoding..."
         self._notify()
@@ -190,8 +196,10 @@ class JobQueue:
             job.status = "failed"
             job.error = f"Encode failed: {exc}"
             job.progress_text = "Encode failed"
+            log.error("Job %s: encode failed: %s", job.id, exc)
             self._notify()
             card.fail("encode", detail=str(exc))
+            mac_notify("AutoRipper — Failed", f"{job.disc_name}: Encode failed")
             return
 
         encode_elapsed = time.monotonic() - encode_start
@@ -243,8 +251,10 @@ class JobQueue:
             job.status = "failed"
             job.error = f"Organize failed: {exc}"
             job.progress_text = "Organize failed"
+            log.error("Job %s: organize failed: %s", job.id, exc)
             self._notify()
             card.fail("organize", detail=str(exc))
+            mac_notify("AutoRipper — Failed", f"{job.disc_name}: Organize failed")
             return
 
         card.finish("organize")
@@ -317,4 +327,9 @@ class JobQueue:
             final_size = os.path.getsize(job.organized_file)
         except OSError:
             final_size = encoded_size
+        log.info(
+            "Job %s: complete — %s → %s in %s",
+            job.id, _human_size(rip_size), _human_size(final_size), _human_time(total_elapsed),
+        )
         card.complete(footer=f"Total: {_human_size(rip_size)} → {_human_size(final_size)} · {_human_time(total_elapsed)}")
+        mac_notify("AutoRipper — Complete", f"{job.disc_name} · {_human_size(final_size)} · {_human_time(total_elapsed)}")

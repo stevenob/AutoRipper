@@ -21,6 +21,9 @@ Built with [customtkinter](https://github.com/TomSchimansky/CustomTkinter) for a
 - **Abort** — Cancel any running operation at any time
 - **Persistent Preferences** — Settings auto-save between sessions
 - **Streaming Logs** — Real-time output from MakeMKV and HandBrake
+- **File Logging** — Debug logs saved to `~/Library/Logs/AutoRipper/` with daily rotation
+- **macOS Notifications** — Notification Center alerts for job completion and failures
+- **Native Menu Bar** — About dialog, ⌘, for Settings, ⌘Q to quit
 
 ## Pipeline Flow
 
@@ -80,6 +83,13 @@ The app bundle will be at `dist/AutoRipper.app`. To install:
 cp -r dist/AutoRipper.app /Applications/
 ```
 
+To create a drag-and-drop DMG installer:
+
+```bash
+bash create-dmg.sh
+# → dist/AutoRipper-Installer.dmg
+```
+
 ## Usage
 
 ```bash
@@ -128,6 +138,10 @@ AutoRipper/
 ├── main.py              # Entry point
 ├── config.py            # Settings & preferences (JSON persistence)
 ├── requirements.txt     # Python dependencies
+├── build.sh             # PyInstaller → .app bundle
+├── create-dmg.sh        # DMG installer builder
+├── AutoRipper.spec      # PyInstaller spec
+├── assets/              # App icon (.icns, .png)
 ├── core/
 │   ├── disc.py          # Disc/title data models
 │   ├── makemkv.py       # MakeMKV CLI wrapper
@@ -135,10 +149,12 @@ AutoRipper/
 │   ├── metadata.py      # TMDb API integration
 │   ├── organizer.py     # File renaming & folder organization
 │   ├── artwork.py       # Poster/fanart download & NFO creation
-│   ├── discord_notify.py # Discord webhook notifications
+│   ├── discord_notify.py # Discord webhook (single updating card per job)
+│   ├── macos_notify.py  # macOS Notification Center alerts
+│   ├── logger.py        # File logging to ~/Library/Logs/AutoRipper
 │   └── job_queue.py     # Background job queue for multi-disc pipeline
 ├── gui/                 # customtkinter UI (dark/light mode)
-│   ├── app.py           # Main window, settings, pipeline orchestration
+│   ├── app.py           # Main window, menu bar, settings, pipeline orchestration
 │   ├── rip_tab.py       # Disc scanning & ripping
 │   ├── encode_tab.py    # HandBrake encoding with H.265 presets
 │   ├── scrape_tab.py    # Artwork & NFO scraper

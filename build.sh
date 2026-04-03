@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+echo "🧪 Running tests..."
+/opt/homebrew/bin/python3.13 -m pytest tests/ -q
+echo ""
+
 echo "🔨 Building AutoRipper.app..."
 /opt/homebrew/bin/python3.13 -m PyInstaller AutoRipper.spec --noconfirm --clean
 
