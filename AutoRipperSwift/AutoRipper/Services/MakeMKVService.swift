@@ -227,6 +227,7 @@ actor MakeMKVService {
         proc.standardError = pipe
 
         try proc.run()
+        ProcessTracker.shared.register(proc)
 
         var lines: [String] = []
         let handle = pipe.fileHandleForReading
@@ -243,6 +244,7 @@ actor MakeMKVService {
         }
 
         proc.waitUntilExit()
+        ProcessTracker.shared.unregister(proc)
         return (lines, proc.terminationStatus)
     }
 }

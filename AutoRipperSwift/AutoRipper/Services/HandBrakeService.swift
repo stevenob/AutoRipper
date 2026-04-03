@@ -122,6 +122,7 @@ actor HandBrakeService {
         proc.standardError = pipe
 
         try proc.run()
+        ProcessTracker.shared.register(proc)
 
         // Read chunks (4KB) and parse \r-delimited progress lines
         let handle = pipe.fileHandleForReading
@@ -145,6 +146,7 @@ actor HandBrakeService {
         }
 
         proc.waitUntilExit()
+        ProcessTracker.shared.unregister(proc)
 
         guard proc.terminationStatus == 0 else {
             throw HandBrakeError.encodeFailed("HandBrakeCLI exited with code \(proc.terminationStatus)")
@@ -168,8 +170,10 @@ actor HandBrakeService {
         proc.standardOutput = pipe
         proc.standardError = pipe
         try proc.run()
+        ProcessTracker.shared.register(proc)
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         proc.waitUntilExit()
+        ProcessTracker.shared.unregister(proc)
         return String(data: data, encoding: .utf8) ?? ""
     }
 

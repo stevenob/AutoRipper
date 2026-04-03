@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        ProcessTracker.shared.terminateAll()
         log.info("AutoRipper shutting down")
     }
 }
