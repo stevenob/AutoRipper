@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RipView: View {
     @ObservedObject var vm: RipViewModel
+    @ObservedObject private var config = AppConfig.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,10 +20,7 @@ struct RipView: View {
                 Divider()
                     .frame(height: 16)
 
-                Toggle("Auto-Eject", isOn: Binding(
-                    get: { AppConfig.shared.autoEject },
-                    set: { AppConfig.shared.autoEject = $0 }
-                ))
+                Toggle("Auto-Eject", isOn: $config.autoEject)
                 .toggleStyle(.checkbox)
                 .font(.caption)
 
@@ -31,11 +29,8 @@ struct RipView: View {
                 Text("Min:")
                     .foregroundStyle(.secondary)
                     .font(.caption)
-                Stepper(value: Binding(
-                    get: { AppConfig.shared.minDuration },
-                    set: { AppConfig.shared.minDuration = $0 }
-                ), in: 0...7200, step: 30) {
-                    Text("\(AppConfig.shared.minDuration)s")
+                Stepper(value: $config.minDuration, in: 0...7200, step: 30) {
+                    Text("\(config.minDuration)s")
                         .monospacedDigit()
                         .font(.caption)
                         .frame(width: 40)
@@ -74,7 +69,7 @@ struct RipView: View {
                         }
                         Text("·")
                             .foregroundStyle(.tertiary)
-                        let filtered = info.titles.filter { $0.durationSeconds >= vm.minDuration }
+                        let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
                         Text("\(filtered.count) of \(info.titles.count) titles")
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
@@ -84,7 +79,7 @@ struct RipView: View {
                     .padding(.vertical, 8)
 
                     // Titles table — only show titles meeting min duration
-                    let filteredTitles = info.titles.filter { $0.durationSeconds >= vm.minDuration }
+                    let filteredTitles = info.titles.filter { $0.durationSeconds >= config.minDuration }
                     Table(filteredTitles) {
                         TableColumn("") { title in
                             Button {
@@ -112,14 +107,14 @@ struct RipView: View {
 
                         TableColumn("Title") { title in
                             Text(title.name)
-                                .fontWeight(title.durationSeconds >= vm.minDuration ? .medium : .regular)
-                                .foregroundStyle(title.durationSeconds >= vm.minDuration ? .primary : .tertiary)
+                                .fontWeight(title.durationSeconds >= config.minDuration ? .medium : .regular)
+                                .foregroundStyle(title.durationSeconds >= config.minDuration ? .primary : .tertiary)
                         }
 
                         TableColumn("Duration") { title in
                             Text(title.duration)
                                 .monospacedDigit()
-                                .foregroundStyle(title.durationSeconds >= vm.minDuration ? .primary : .tertiary)
+                                .foregroundStyle(title.durationSeconds >= config.minDuration ? .primary : .tertiary)
                         }
                         .width(70)
 
@@ -202,7 +197,7 @@ struct RipView: View {
             // Bottom bar
             HStack(spacing: 12) {
                 if let info = vm.discInfo {
-                    let filtered = info.titles.filter { $0.durationSeconds >= vm.minDuration }
+                    let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
                     Button("Select All") {
                         vm.selectedTitles = Set(filtered.map(\.id))
                     }
