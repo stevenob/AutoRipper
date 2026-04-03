@@ -23,6 +23,7 @@ enum SidebarItem: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @EnvironmentObject private var config: AppConfig
     @State private var selection: SidebarItem? = .rip
+    @StateObject private var updateService = UpdateService()
 
     @StateObject private var ripVM = RipViewModel()
     @StateObject private var encodeVM = EncodeViewModel()
@@ -40,24 +41,56 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
             .listStyle(.sidebar)
         } detail: {
-            Group {
-                switch selection {
-                case .rip:
-                    RipView(vm: ripVM)
-                case .encode:
-                    EncodeView(vm: encodeVM)
-                case .scrape:
-                    ScrapeView(vm: scrapeVM)
-                case .queue:
-                    QueueView(vm: queueVM)
-                case .settings:
-                    SettingsView(vm: settingsVM)
-                case nil:
-                    Text("Select an item")
-                        .foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                // Update banner
+                if updateService.updateAvailable {
+                    HStack {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .foregroundStyle(.white)
+                        Text("AutoRipper \(updateService.latestVersion) is available")
+                            .fontWeight(.medium)
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Button("View Release") {
+                            if let url = URL(string: updateService.releaseURL) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white)
+
+                        Button {
+                            updateService.updateAvailable = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color.accentColor)
                 }
+
+                Group {
+                    switch selection {
+                    case .rip:
+                        RipView(vm: ripVM)
+                    case .encode:
+                        EncodeView(vm: encodeVM)
+                    case .scrape:
+                        ScrapeView(vm: scrapeVM)
+                    case .queue:
+                        QueueView(vm: queueVM)
+                    case .settings:
+                        SettingsView(vm: settingsVM)
+                    case nil:
+                        Text("Select an item")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 750, minHeight: 500)
         .onAppear {
@@ -65,6 +98,7 @@ struct ContentView: View {
                 queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed)
             }
             NotificationService.shared.requestPermission()
+            updateService.checkForUpdates()
         }
     }
 }

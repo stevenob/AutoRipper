@@ -93,6 +93,7 @@ final class RipViewModel: ObservableObject {
         runningTask = Task {
             let start = Date()
             await discord.notifyInfo("🎬 Ripping \(folderName) — \(titlesToRip.count) title(s)")
+            NotificationService.shared.notify(title: "Ripping", message: "\(folderName) — \(titlesToRip.count) title(s)")
 
             for (idx, tid) in titlesToRip.enumerated() {
                 statusText = "Ripping title \(tid) (\(idx + 1)/\(titlesToRip.count))…"
@@ -119,6 +120,7 @@ final class RipViewModel: ObservableObject {
                     statusText = "Rip failed: \(error.localizedDescription)"
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
                     await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
+                    NotificationService.shared.notify(title: "Rip Failed", message: "\(folderName): \(error.localizedDescription)")
                 }
             }
 
@@ -146,6 +148,7 @@ final class RipViewModel: ObservableObject {
             let mins = Int(elapsed) / 60
             let secs = Int(elapsed) % 60
             await discord.notifySuccess("\(folderName) — rip complete in \(mins)m \(secs)s")
+            NotificationService.shared.notify(title: "Rip Complete", message: "\(folderName) — \(mins)m \(secs)s")
 
             if config.autoEject { ejectDisc() }
 
