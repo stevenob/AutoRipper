@@ -65,6 +65,21 @@ pip install -r requirements.txt
 brew install handbrake
 ```
 
+## Building the App
+
+To build a standalone macOS `.app` bundle (double-click to launch, shows in Dock):
+
+```bash
+pip install pyinstaller
+bash build.sh
+```
+
+The app bundle will be at `dist/AutoRipper.app`. To install:
+
+```bash
+cp -r dist/AutoRipper.app /Applications/
+```
+
 ## Usage
 
 ```bash
