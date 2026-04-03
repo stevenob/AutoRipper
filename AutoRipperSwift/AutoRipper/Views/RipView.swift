@@ -163,14 +163,26 @@ struct RipView: View {
                             vm.scanDisc()
                         }
                     } label: {
-                        VStack(spacing: 16) {
-                            Image(systemName: "opticaldisc.fill")
+                        VStack(spacing: 12) {
+                            Image(systemName: vm.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
                                 .font(.system(size: 64))
                             Text(vm.fullAutoEnabled ? "Full Auto" : "Scan Disc")
                                 .font(.title2)
                                 .fontWeight(.semibold)
+                            if !vm.detectedDiscType.isEmpty {
+                                HStack(spacing: 4) {
+                                    Text(vm.detectedDiscType)
+                                        .fontWeight(.medium)
+                                    if !vm.detectedDiscName.isEmpty {
+                                        Text("·")
+                                        Text(vm.detectedDiscName)
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.8))
+                            }
                         }
-                        .frame(width: 180, height: 160)
+                        .frame(width: 220, height: 180)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)

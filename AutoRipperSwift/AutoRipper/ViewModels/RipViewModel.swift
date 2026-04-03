@@ -16,6 +16,8 @@ final class RipViewModel: ObservableObject {
     @Published var logLines: [String] = []
     @Published var fullAutoEnabled: Bool = false
     @Published var errorMessage: String?
+    @Published var detectedDiscType: String = ""
+    @Published var detectedDiscName: String = ""
 
     private let config: AppConfig
     private let makemkv: MakeMKVService
@@ -31,6 +33,72 @@ final class RipViewModel: ObservableObject {
         self.config = config
         self.makemkv = MakeMKVService(config: config)
         self.discord = DiscordService(config: config)
+        detectDisc()
+    }
+
+    func detectDisc() {
+        Task.detached {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/drutil")
+            proc.arguments = ["status"]
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = pipe
+            try? proc.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+
+            guard let output = String(data: data, encoding: .utf8) else { return }
+
+            var discType = ""
+            var discName = ""
+
+            for line in output.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("Type:") {
+                    let value = trimmed.replacingOccurrences(of: "Type:", with: "").trimmingCharacters(in: .whitespaces)
+                    if value.lowercased().contains("bd") || value.lowercased().contains("blu") {
+                        discType = "Blu-ray"
+                    } else if value.lowercased().contains("dvd") {
+                        discType = "DVD"
+                    } else if !value.isEmpty {
+                        discType = value
+                    }
+                }
+                if trimmed.hasPrefix("Name:") && trimmed.contains("/dev/") {
+                    // Get volume name from diskutil
+                    let devPath = trimmed.components(separatedBy: .whitespaces).last ?? ""
+                    if !devPath.isEmpty {
+                        let duProc = Process()
+                        duProc.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
+                        duProc.arguments = ["info", devPath]
+                        let duPipe = Pipe()
+                        duProc.standardOutput = duPipe
+                        try? duProc.run()
+                        let duData = duPipe.fileHandleForReading.readDataToEndOfFile()
+                        duProc.waitUntilExit()
+                        if let duOutput = String(data: duData, encoding: .utf8) {
+                            for duLine in duOutput.components(separatedBy: .newlines) {
+                                if duLine.contains("Volume Name:") {
+                                    discName = duLine.components(separatedBy: ":").last?.trimmingCharacters(in: .whitespaces) ?? ""
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            await MainActor.run { [weak self] in
+                self?.detectedDiscType = discType
+                self?.detectedDiscName = discName
+                if !discType.isEmpty {
+                    let name = discName.isEmpty ? "" : " — \(discName)"
+                    self?.statusText = "\(discType) detected\(name)"
+                } else {
+                    self?.statusText = "No disc detected"
+                }
+            }
+        }
     }
 
     func scanDisc() {
