@@ -33,7 +33,9 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(SidebarItem.allCases, selection: $selection) { item in
-                Label(item.rawValue, systemImage: item.icon)
+                NavigationLink(value: item) {
+                    Label(item.rawValue, systemImage: item.icon)
+                }
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
             .listStyle(.sidebar)
