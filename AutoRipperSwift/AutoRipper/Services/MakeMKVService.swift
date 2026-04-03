@@ -229,22 +229,55 @@ actor MakeMKVService {
         try proc.run()
         ProcessTracker.shared.register(proc)
 
-        var lines: [String] = []
+        // Stream output line-by-line in real time
+        let lines = LineAccumulator()
         let handle = pipe.fileHandleForReading
 
-        // Read in chunks on a background thread
-        let data = handle.readDataToEndOfFile()
-        let text = String(data: data, encoding: .utf8) ?? ""
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            lines.append(trimmed)
-            logCallback?(trimmed)
-            lineCallback?(trimmed)
+        handle.readabilityHandler = { fileHandle in
+            let data = fileHandle.availableData
+            guard !data.isEmpty, let chunk = String(data: data, encoding: .utf8) else { return }
+            for line in chunk.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                lines.append(trimmed)
+                logCallback?(trimmed)
+                lineCallback?(trimmed)
+            }
         }
 
         proc.waitUntilExit()
+        handle.readabilityHandler = nil
+        // Read any remaining data
+        let remaining = handle.readDataToEndOfFile()
+        if !remaining.isEmpty, let chunk = String(data: remaining, encoding: .utf8) {
+            for line in chunk.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                lines.append(trimmed)
+                logCallback?(trimmed)
+                lineCallback?(trimmed)
+            }
+        }
+
         ProcessTracker.shared.unregister(proc)
-        return (lines, proc.terminationStatus)
+        return (lines.result, proc.terminationStatus)
+    }
+}
+
+/// Thread-safe line accumulator for streaming process output.
+private final class LineAccumulator: @unchecked Sendable {
+    private var _lines: [String] = []
+    private let lock = NSLock()
+
+    func append(_ line: String) {
+        lock.lock()
+        _lines.append(line)
+        lock.unlock()
+    }
+
+    var result: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lines
     }
 }
