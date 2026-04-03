@@ -111,6 +111,7 @@ echo "   ✅ Verified"
 
 # 9. Create DMG
 echo "💿 Creating DMG..."
+cd "$BUILD_DIR"
 bash "$BUILD_DIR/create-dmg.sh"
 
 # 10. Git tag + GitHub release
