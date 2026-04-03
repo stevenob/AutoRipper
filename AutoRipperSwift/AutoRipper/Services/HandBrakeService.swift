@@ -118,6 +118,8 @@ actor HandBrakeService {
         }
         if let subs = subtitleTracks, !subs.isEmpty {
             cmd += ["--subtitle", subs.map(String.init).joined(separator: ",")]
+            // Keep subtitles as soft/passthrough — never burn in
+            cmd += ["--no-subtitle-burned"]
         }
 
         let proc = Process()
