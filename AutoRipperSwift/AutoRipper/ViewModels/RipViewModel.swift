@@ -77,6 +77,10 @@ final class RipViewModel: ObservableObject {
 
         let titlesToRip = selectedTitles.sorted()
         let outputDir = config.outputDir
+        // In Full Auto, only queue the largest title for encode
+        let largestId = info.titles
+            .filter { selectedTitles.contains($0.id) }
+            .max(by: { $0.sizeBytes < $1.sizeBytes })?.id
 
         runningTask = Task {
             let start = Date()
@@ -97,7 +101,10 @@ final class RipViewModel: ObservableObject {
                         }
                     )
                     let elapsed = Date().timeIntervalSince(start)
-                    onRipComplete?(info.name, file, elapsed)
+                    // Queue for encode: all titles when Full Auto off, only largest when on
+                    if !fullAutoEnabled || tid == largestId {
+                        onRipComplete?(info.name, file, elapsed)
+                    }
                 } catch {
                     statusText = "Rip failed: \(error.localizedDescription)"
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
