@@ -63,9 +63,11 @@ final class RipViewModel: ObservableObject {
                 }
                 let displayName = info.mediaTitle.isEmpty ? info.name : info.mediaTitle
                 statusText = "Scanned: \(displayName) — \(info.titles.count) titles"
+                NotificationService.shared.notify(title: "Scan Complete", message: "\(displayName) — \(info.titles.count) titles")
             } catch {
                 statusText = "Scan failed: \(error.localizedDescription)"
                 log.error("Scan failed: \(error.localizedDescription)")
+                NotificationService.shared.notify(title: "Scan Failed", message: error.localizedDescription)
             }
             isScanning = false
         }
