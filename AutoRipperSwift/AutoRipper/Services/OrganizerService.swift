@@ -10,6 +10,7 @@ enum OrganizerService {
     static func cleanFilename(_ name: String) -> String {
         let illegal = CharacterSet(charactersIn: "/\\:*?\"<>|")
         var cleaned = name
+            .replacingOccurrences(of: "_", with: " ")
             .components(separatedBy: illegal)
             .joined()
             .replacingOccurrences(of: "  ", with: " ")
