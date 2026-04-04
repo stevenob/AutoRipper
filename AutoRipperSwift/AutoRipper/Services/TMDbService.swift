@@ -19,6 +19,21 @@ struct TMDbService {
     /// Clean a disc name for TMDb search (strip tags, underscores, etc.)
     static func cleanDiscName(_ name: String) -> String {
         var cleaned = name.replacingOccurrences(of: "_", with: " ")
+        // Strip leading single letter prefix before a number (e.g. T28 → 28)
+        if let regex = try? NSRegularExpression(pattern: #"^[A-Za-z](?=\d)"#) {
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "")
+        }
+        // Strip trailing numbers that look like disc metadata (e.g. 169, 01)
+        if let regex = try? NSRegularExpression(pattern: #"\d{2,4}$"#) {
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "")
+        }
+        // Insert space between letters and numbers (e.g. 28DAYS → 28 DAYS)
+        if let regex = try? NSRegularExpression(pattern: #"(\d)([A-Za-z])"#) {
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "$1 $2")
+        }
+        if let regex = try? NSRegularExpression(pattern: #"([A-Za-z])(\d)"#) {
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "$1 $2")
+        }
         // Strip common disc tags
         let tags = [
             "DISC\\s*\\d*", "BD", "DVD", "\\d{3,4}[pi]",
