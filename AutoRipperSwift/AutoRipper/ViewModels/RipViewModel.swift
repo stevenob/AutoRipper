@@ -122,6 +122,9 @@ final class RipViewModel: ObservableObject {
                 let results = await tmdb.searchMedia(query: info.name)
                 if let match = results.first {
                     info.mediaTitle = match.displayTitle
+                } else {
+                    await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
+                    NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
                 }
 
                 self.discInfo = info
