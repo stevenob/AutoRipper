@@ -306,35 +306,46 @@ final class TMDbCleanDiscNameExtendedTests: XCTestCase {
 
     func testRemovesUnderscores() {
         let cleaned = TMDbService.cleanDiscName("THE_MATRIX_RELOADED")
-        XCTAssertFalse(cleaned.contains("_"))
-        XCTAssertTrue(cleaned.lowercased().contains("matrix"))
+        XCTAssertFalse(cleaned.query.contains("_"))
+        XCTAssertTrue(cleaned.query.lowercased().contains("matrix"))
     }
 
     func testRemovesDiscNumbers() {
         let cleaned = TMDbService.cleanDiscName("INCEPTION_DISC_2")
-        XCTAssertFalse(cleaned.lowercased().contains("disc"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("disc"))
     }
 
     func testRemovesResolutionTags() {
         let cleaned = TMDbService.cleanDiscName("MOVIE_1080p_HEVC_HDR")
-        XCTAssertFalse(cleaned.lowercased().contains("1080p"))
-        XCTAssertFalse(cleaned.lowercased().contains("hevc"))
-        XCTAssertFalse(cleaned.lowercased().contains("hdr"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("1080p"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("hevc"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("hdr"))
     }
 
     func testRemovesBDTag() {
         let cleaned = TMDbService.cleanDiscName("MOVIE_BD")
-        XCTAssertFalse(cleaned.lowercased().contains(" bd"))
+        XCTAssertFalse(cleaned.query.lowercased().contains(" bd"))
     }
 
     func testTitleCasesResult() {
         let cleaned = TMDbService.cleanDiscName("the dark knight")
-        XCTAssertEqual(cleaned, "The Dark Knight")
+        XCTAssertEqual(cleaned.query, "The Dark Knight")
     }
 
     func testEmptyInput() {
         let cleaned = TMDbService.cleanDiscName("")
-        // Empty input returns empty capitalized string — that's fine
-        XCTAssertEqual(cleaned, "")
+        XCTAssertEqual(cleaned.query, "")
+    }
+
+    func testExtractsYear() {
+        let cleaned = TMDbService.cleanDiscName("THE_DARK_KNIGHT_2008")
+        XCTAssertEqual(cleaned.year, 2008)
+        XCTAssertTrue(cleaned.query.lowercased().contains("dark knight"))
+    }
+
+    func testStripsParentheticalVersionTags() {
+        let cleaned = TMDbService.cleanDiscName("DIRTY_GRANDPA_(UNRATED)")
+        XCTAssertFalse(cleaned.query.lowercased().contains("unrated"))
+        XCTAssertTrue(cleaned.query.lowercased().contains("dirty grandpa"))
     }
 }

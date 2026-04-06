@@ -47,6 +47,6 @@ struct AutoRipperApp: App {
     }
 
     init() {
-        log.info("AutoRipper 2.1.3 starting")
+        log.info("AutoRipper 2.1.4 starting")
     }
 }

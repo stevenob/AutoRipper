@@ -22,9 +22,10 @@ final class RipViewModel: ObservableObject {
     private let makemkv: MakeMKVService
     private let discord: DiscordService
     private var runningTask: Task<Void, Never>?
+    private var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution)
-    var onRipComplete: ((String, URL, TimeInterval, String) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -120,11 +121,19 @@ final class RipViewModel: ObservableObject {
                 // TMDb lookup to get the real movie/show name
                 let tmdb = TMDbService(config: config)
                 let results = await tmdb.searchMedia(query: info.name)
-                if let match = results.first {
+                if var match = results.first {
+                    // Fetch full details for poster/backdrop paths
+                    if match.mediaType == "movie", let details = await tmdb.getMovieDetails(tmdbId: match.tmdbId) {
+                        match = details
+                    } else if match.mediaType == "tv", let details = await tmdb.getTvDetails(tmdbId: match.tmdbId) {
+                        match = details
+                    }
                     info.mediaTitle = match.displayTitle
+                    self.cachedMediaResult = match
                 } else {
                     await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
                     NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
+                    self.cachedMediaResult = nil
                 }
 
                 self.discInfo = info
@@ -166,7 +175,16 @@ final class RipViewModel: ObservableObject {
 
         runningTask = Task {
             let start = Date()
-            await discord.notifyInfo("🎬 Ripping \(folderName) — \(titlesToRip.count) title(s)")
+
+            // Create a single JobCard for full-auto mode (covers rip → encode → done)
+            var card: JobCard? = nil
+            if fullAutoEnabled {
+                card = JobCard(discName: folderName,
+                               nasEnabled: config.nasUploadEnabled,
+                               discord: discord)
+                await card?.start("rip")
+            }
+
             NotificationService.shared.notify(title: "Ripping", message: "\(folderName) — \(titlesToRip.count) title(s)")
 
             for (idx, tid) in titlesToRip.enumerated() {
@@ -215,32 +233,42 @@ final class RipViewModel: ObservableObject {
                     // Only queue for encode pipeline when Full Auto is on (largest title only)
                     if fullAutoEnabled && tid == largestId {
                         let resolution = info.titles.first(where: { $0.id == tid })?.resolution ?? ""
-                        onRipComplete?(info.name, file, elapsed, resolution)
+                        let mins = Int(elapsed) / 60
+                        let secs = Int(elapsed) % 60
+                        await card?.finish("rip", detail: "\(mins)m \(secs)s")
+                        onRipComplete?(info.name, file, elapsed, resolution, card, cachedMediaResult)
                     }
                 } catch {
                     sizeMonitor.cancel()
                     statusText = "Rip failed: \(error.localizedDescription)"
                     errorMessage = error.localizedDescription
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
-                    await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
+                    if fullAutoEnabled {
+                        await card?.fail("rip", detail: error.localizedDescription)
+                    } else {
+                        await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
+                    }
                     NotificationService.shared.notify(title: "Rip Failed", message: "\(folderName): \(error.localizedDescription)")
                 }
             }
 
             // Scrape artwork/NFO into the title folder right after rip
-            statusText = "Scraping artwork & NFO…"
-            logLines.append("Scraping artwork for \(folderName)…")
-            let destDir = URL(fileURLWithPath: outputDir)
-            let artwork = ArtworkService()
-            let scraped = await artwork.scrapeAndSave(
-                discName: info.name,
-                destDir: destDir,
-                logCallback: { [weak self] line in
-                    Task { @MainActor in self?.logLines.append(line) }
+            // (skip in full-auto mode — QueueViewModel handles it after organize)
+            if !fullAutoEnabled {
+                statusText = "Scraping artwork & NFO…"
+                logLines.append("Scraping artwork for \(folderName)…")
+                let destDir = URL(fileURLWithPath: outputDir)
+                let artwork = ArtworkService()
+                let scraped = await artwork.scrapeAndSave(
+                    discName: info.name,
+                    destDir: destDir,
+                    logCallback: { [weak self] line in
+                        Task { @MainActor in self?.logLines.append(line) }
+                    }
+                )
+                if scraped {
+                    logLines.append("✓ Artwork & NFO saved")
                 }
-            )
-            if scraped {
-                logLines.append("✓ Artwork & NFO saved")
             }
 
             ripProgress = 1.0
@@ -250,7 +278,9 @@ final class RipViewModel: ObservableObject {
             let elapsed = Date().timeIntervalSince(start)
             let mins = Int(elapsed) / 60
             let secs = Int(elapsed) % 60
-            await discord.notifySuccess("\(folderName) — rip complete in \(mins)m \(secs)s")
+            if !fullAutoEnabled {
+                await discord.notifySuccess("\(folderName) — rip complete in \(mins)m \(secs)s")
+            }
             NotificationService.shared.notify(title: "Rip Complete", message: "\(folderName) — \(mins)m \(secs)s")
 
             if config.autoEject { ejectDisc() }

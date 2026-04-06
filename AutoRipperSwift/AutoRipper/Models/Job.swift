@@ -18,12 +18,17 @@ struct Job: Identifiable, Sendable {
     var progress: Int = 0
     var progressText: String = "Queued"
     var ripElapsed: TimeInterval = 0
+    var encodeElapsed: TimeInterval = 0
+    var mediaResult: MediaResult?
+    nonisolated(unsafe) var card: JobCard?
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "") {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1000))"
         self.discName = discName
         self.rippedFile = rippedFile
         self.ripElapsed = ripElapsed
         self.resolution = resolution
+        self.card = card
+        self.mediaResult = mediaResult
     }
 }

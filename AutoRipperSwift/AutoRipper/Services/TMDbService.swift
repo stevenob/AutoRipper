@@ -17,8 +17,25 @@ struct TMDbService {
     private var apiKey: String { config.tmdbApiKey }
 
     /// Clean a disc name for TMDb search (strip tags, underscores, etc.)
-    static func cleanDiscName(_ name: String) -> String {
+    /// Also extracts a 4-digit year (1900–2099) if present before stripping trailing digits.
+    static func cleanDiscName(_ name: String) -> (query: String, year: Int?) {
         var cleaned = name.replacingOccurrences(of: "_", with: " ")
+
+        // Extract year before we strip trailing digits
+        var extractedYear: Int?
+        if let regex = try? NSRegularExpression(pattern: #"\b(19\d{2}|20\d{2})\b"#) {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            if let m = regex.firstMatch(in: cleaned, range: range),
+               let r = Range(m.range(at: 1), in: cleaned) {
+                extractedYear = Int(cleaned[r])
+            }
+        }
+
+        // Strip parenthetical version tags (e.g. "(Unrated)", "(Extended Cut)", "(Director's Cut)")
+        if let regex = try? NSRegularExpression(pattern: #"\([^)]*\)"#) {
+            cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "")
+        }
+
         // Strip leading single letter prefix before a number (e.g. T28 → 28)
         if let regex = try? NSRegularExpression(pattern: #"^[A-Za-z](?=\d)"#) {
             cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "")
@@ -50,7 +67,7 @@ struct TMDbService {
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespaces)
         // Title case
-        return cleaned.capitalized
+        return (cleaned.capitalized, extractedYear)
     }
 
     /// Search TMDb for movies and TV shows.
@@ -59,12 +76,16 @@ struct TMDbService {
             log.warning("TMDb API key not configured")
             return []
         }
-        let cleaned = Self.cleanDiscName(query)
+        let (cleaned, discYear) = Self.cleanDiscName(query)
         guard var url = URL(string: "\(baseURL)/search/multi") else { return [] }
-        url.append(queryItems: [
+        var queryItems = [
             URLQueryItem(name: "api_key", value: apiKey),
             URLQueryItem(name: "query", value: cleaned),
-        ])
+        ]
+        if let year = discYear {
+            queryItems.append(URLQueryItem(name: "year", value: String(year)))
+        }
+        url.append(queryItems: queryItems)
 
         do {
             let (data, _) = try await session.data(from: url)

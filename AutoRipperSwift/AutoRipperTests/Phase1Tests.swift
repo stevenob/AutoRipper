@@ -115,14 +115,14 @@ final class TMDbCleanDiscNameTests: XCTestCase {
 
     func testCleanBasicDiscName() {
         let cleaned = TMDbService.cleanDiscName("THE_MATRIX_DISC_1")
-        XCTAssertFalse(cleaned.contains("_"))
-        XCTAssertFalse(cleaned.lowercased().contains("disc"))
+        XCTAssertFalse(cleaned.query.contains("_"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("disc"))
     }
 
     func testCleanResolutionTags() {
         let cleaned = TMDbService.cleanDiscName("MOVIE_1080p_HEVC")
-        XCTAssertFalse(cleaned.lowercased().contains("1080p"))
-        XCTAssertFalse(cleaned.lowercased().contains("hevc"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("1080p"))
+        XCTAssertFalse(cleaned.query.lowercased().contains("hevc"))
     }
 }
 

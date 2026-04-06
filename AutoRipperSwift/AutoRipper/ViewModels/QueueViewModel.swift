@@ -20,8 +20,8 @@ final class QueueViewModel: ObservableObject {
         self.discord = DiscordService(config: config)
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "") {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult)
         jobs.append(job)
         startWorkerIfNeeded()
     }
@@ -60,27 +60,38 @@ final class QueueViewModel: ObservableObject {
     }
 
     private func processJob(at index: Int) async {
-        let card = JobCard(discName: jobs[index].discName,
-                           nasEnabled: config.nasUploadEnabled,
-                           discord: discord)
+        let card = jobs[index].card ?? JobCard(
+            discName: jobs[index].discName,
+            nasEnabled: config.nasUploadEnabled,
+            discord: discord
+        )
 
-        // Rip stage already done
-        await card.finish("rip", detail: formatElapsed(jobs[index].ripElapsed))
+        // Rip stage already done — only mark if card was just created (no pre-existing card)
+        if jobs[index].card == nil {
+            await card.finish("rip", detail: formatElapsed(jobs[index].ripElapsed))
+        }
 
-        // TMDb lookup — cache for organize + NAS routing
-        let tmdb = TMDbService(config: config)
-        let tmdbResults = await tmdb.searchMedia(query: jobs[index].discName)
-        let tmdbMedia = tmdbResults.first
+        // Use cached TMDb result if available, otherwise look up
+        let tmdbMedia: MediaResult?
+        if let cached = jobs[index].mediaResult {
+            tmdbMedia = cached
+        } else {
+            let tmdb = TMDbService(config: config)
+            tmdbMedia = (await tmdb.searchMedia(query: jobs[index].discName)).first
+        }
 
         // Encode
         jobs[index].status = .encoding
         jobs[index].progressText = "Encoding…"
         await card.start("encode")
+        let encodeStart = Date()
 
         do {
             let encoded = try await encodeJob(at: index)
+            let encodeElapsed = Date().timeIntervalSince(encodeStart)
+            jobs[index].encodeElapsed = encodeElapsed
             jobs[index].encodedFile = encoded
-            await card.finish("encode")
+            await card.finish("encode", detail: formatElapsed(encodeElapsed))
             // Delete original rip to save space
             let rippedPath = jobs[index].rippedFile.path
             if rippedPath != encoded.path, FileManager.default.fileExists(atPath: rippedPath) {
@@ -144,7 +155,12 @@ final class QueueViewModel: ObservableObject {
         let destDir = (jobs[index].organizedFile ?? jobs[index].rippedFile)
             .deletingLastPathComponent()
         let artwork = ArtworkService()
-        let scraped = await artwork.scrapeAndSave(discName: jobs[index].discName, destDir: destDir)
+        let scraped: Bool
+        if let media = tmdbMedia {
+            scraped = await artwork.scrapeAndSave(media: media, destDir: destDir)
+        } else {
+            scraped = await artwork.scrapeAndSave(discName: jobs[index].discName, destDir: destDir)
+        }
         if scraped {
             await card.finish("scrape")
         } else {
@@ -172,7 +188,7 @@ final class QueueViewModel: ObservableObject {
                     jobs[index].status = .done
                     jobs[index].progress = 100
                     jobs[index].progressText = "Complete (NAS path not configured)"
-                    await card.complete(footer: "Total: \(formatElapsed(jobs[index].ripElapsed))")
+                    await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
                     NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
                     return
                 }
@@ -205,16 +221,17 @@ final class QueueViewModel: ObservableObject {
             await card.skip("nas")
         }
 
-        // Done — clean up rip source directory
+        // Done — clean up rip source directory (if it wasn't already removed by NAS step)
         let ripDir = jobs[index].rippedFile.deletingLastPathComponent()
-        if FileManager.default.fileExists(atPath: ripDir.path) {
+        let organizedDir = (jobs[index].organizedFile ?? jobs[index].rippedFile).deletingLastPathComponent()
+        if ripDir.path != organizedDir.path, FileManager.default.fileExists(atPath: ripDir.path) {
             try? FileManager.default.removeItem(at: ripDir)
         }
 
         jobs[index].status = .done
         jobs[index].progress = 100
         jobs[index].progressText = "Complete"
-        await card.complete(footer: "Total: \(formatElapsed(jobs[index].ripElapsed))")
+        await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
         NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
     }
 
@@ -268,5 +285,10 @@ final class QueueViewModel: ObservableObject {
         let mins = Int(interval) / 60
         let secs = Int(interval) % 60
         return "\(mins)m \(secs)s"
+    }
+
+    private func buildFooter(ripElapsed: TimeInterval, encodeElapsed: TimeInterval) -> String {
+        let total = ripElapsed + encodeElapsed
+        return "Rip: \(formatElapsed(ripElapsed))  •  Encode: \(formatElapsed(encodeElapsed))  •  Total: \(formatElapsed(total))"
     }
 }

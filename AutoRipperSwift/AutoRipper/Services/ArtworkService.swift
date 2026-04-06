@@ -97,6 +97,19 @@ struct ArtworkService {
         return nfoPath
     }
 
+    /// Full scrape using a pre-fetched MediaResult (avoids redundant TMDb search).
+    func scrapeAndSave(
+        media: MediaResult,
+        destDir: URL,
+        logCallback: (@Sendable (String) -> Void)? = nil
+    ) async -> Bool {
+        logCallback?("Scraping artwork for \(media.displayTitle)…")
+        _ = await downloadArtwork(media: media, destDir: destDir, logCallback: logCallback)
+        _ = createNFO(media: media, destDir: destDir, logCallback: logCallback)
+        logCallback?("Scrape complete.")
+        return true
+    }
+
     /// Full scrape: search TMDb, download artwork, create NFO.
     func scrapeAndSave(
         discName: String,
