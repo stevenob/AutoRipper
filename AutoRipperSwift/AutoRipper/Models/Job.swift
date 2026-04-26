@@ -15,7 +15,7 @@ enum JobIntent: String, Sendable {
 }
 
 /// A single ripped file going through the post-rip pipeline.
-struct Job: Identifiable, Sendable {
+struct Job: Identifiable, Sendable, Codable {
     let id: String
     let discName: String
     let rippedFile: URL
@@ -33,7 +33,23 @@ struct Job: Identifiable, Sendable {
     /// For `intent == .edition` only — e.g. "Theatrical", "Director's Cut".
     /// Becomes the `{edition-...}` tag in the output filename.
     var editionLabel: String?
+    /// Streaming log lines from HandBrake/MakeMKV captured during processing.
+    /// Capped at 200 lines to keep persisted JSON small.
+    var logLines: [String] = []
+    /// When the job was created (used for history retention pruning).
+    var createdAt: Date = Date()
+    /// When the job reached a terminal state (.done or .failed). Nil while in flight.
+    var finishedAt: Date?
+
+    /// JobCard is a class with a non-Codable Discord webhook session — it's runtime
+    /// state, not durable. Skipped during serialization and rebuilt on demand.
     nonisolated(unsafe) var card: JobCard?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, discName, rippedFile, resolution, encodedFile, organizedFile,
+             status, error, progress, progressText, ripElapsed, encodeElapsed,
+             mediaResult, intent, editionLabel, logLines, createdAt, finishedAt
+    }
 
     init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
@@ -46,4 +62,13 @@ struct Job: Identifiable, Sendable {
         self.intent = intent
         self.editionLabel = editionLabel
     }
+
+    /// Append a streaming log line (capped at 200 to keep JSON small).
+    mutating func appendLog(_ line: String) {
+        logLines.append(line)
+        if logLines.count > 200 { logLines.removeFirst(logLines.count - 200) }
+    }
 }
+
+extension JobStatus: Codable {}
+extension JobIntent: Codable {}

@@ -48,6 +48,9 @@ final class AppConfig: ObservableObject {
     @Published var nasUploadEnabled: Bool {
         didSet { defaults.set(nasUploadEnabled, forKey: "nasUploadEnabled") }
     }
+    @Published var historyRetentionDays: Int {
+        didSet { defaults.set(historyRetentionDays, forKey: "historyRetentionDays") }
+    }
 
     init() {
         let d = UserDefaults(suiteName: "group.com.autoripper")!
@@ -63,6 +66,7 @@ final class AppConfig: ObservableObject {
         self.nasMoviesPath = d.string(forKey: "nasMoviesPath") ?? ""
         self.nasTvPath = d.string(forKey: "nasTvPath") ?? ""
         self.nasUploadEnabled = d.object(forKey: "nasUploadEnabled") as? Bool ?? false
+        self.historyRetentionDays = d.object(forKey: "historyRetentionDays") as? Int ?? 30
     }
 
 }

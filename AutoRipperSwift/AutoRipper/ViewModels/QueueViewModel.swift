@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import Combine
 import os
 
 private let log = Logger(subsystem: "com.autoripper.app", category: "queue-vm")
@@ -11,13 +12,48 @@ final class QueueViewModel: ObservableObject {
     private let config: AppConfig
     private let handbrake: HandBrakeService
     private let discord: DiscordService
+    private let store: JobStore
     private var workerTask: Task<Void, Never>?
     private var currentTask: Task<Void, Never>?
+    private var saveCancellable: AnyCancellable?
 
-    init(config: AppConfig = .shared) {
+    init(config: AppConfig = .shared, store: JobStore = .shared) {
         self.config = config
         self.handbrake = HandBrakeService(config: config)
         self.discord = DiscordService(config: config)
+        self.store = store
+        loadFromStore()
+        // Persist on every change. Debounced via JobStore's serial queue, so rapid
+        // progress updates don't pile up I/O.
+        saveCancellable = $jobs
+            .dropFirst()
+            .sink { [store] jobs in store.save(jobs) }
+    }
+
+    private func loadFromStore() {
+        var loaded = store.load()
+        // Any job that was mid-pipeline when the app was killed/crashed is now stale.
+        // Mark as failed so the user can see what happened and decide whether to retry.
+        let interrupted: Set<JobStatus> = [.encoding, .organizing, .scraping, .uploading]
+        var rescued = 0
+        for i in loaded.indices where interrupted.contains(loaded[i].status) {
+            loaded[i].status = .failed
+            loaded[i].error = "Interrupted (app exited mid-job)"
+            loaded[i].progressText = "Interrupted"
+            loaded[i].finishedAt = Date()
+            rescued += 1
+        }
+        // Drop any history older than the retention window (default 30 days).
+        let retention = TimeInterval(max(1, config.historyRetentionDays) * 86_400)
+        let cutoff = Date().addingTimeInterval(-retention)
+        let beforePrune = loaded.count
+        loaded.removeAll { job in
+            (job.status == .done || job.status == .failed)
+                && (job.finishedAt ?? job.createdAt) < cutoff
+        }
+        let pruned = beforePrune - loaded.count
+        jobs = loaded
+        FileLogger.shared.info("queue", "loaded \(loaded.count) jobs (interrupted: \(rescued), pruned: \(pruned))")
     }
 
     func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil) {
@@ -37,6 +73,7 @@ final class QueueViewModel: ObservableObject {
             jobs[idx].status = .failed
             jobs[idx].error = "Aborted by user"
             jobs[idx].progressText = "Aborted"
+            jobs[idx].finishedAt = Date()
         }
     }
 
@@ -80,6 +117,7 @@ final class QueueViewModel: ObservableObject {
             jobs[index].status = .done
             jobs[index].progress = 100
             jobs[index].progressText = "Extra — kept as raw rip"
+            jobs[index].finishedAt = Date()
             await card.skip("encode")
             await card.skip("organize")
             await card.skip("scrape")
@@ -121,6 +159,7 @@ final class QueueViewModel: ObservableObject {
             jobs[index].status = .failed
             jobs[index].error = error.localizedDescription
             jobs[index].progressText = "Encode failed"
+            jobs[index].finishedAt = Date()
             FileLogger.shared.error("queue", "encode FAILED: \(jobs[index].discName) — \(error.localizedDescription)")
             await card.fail("encode", detail: error.localizedDescription)
             NotificationService.shared.notify(title: "Encode Failed", message: jobs[index].discName)
@@ -167,6 +206,7 @@ final class QueueViewModel: ObservableObject {
             jobs[index].status = .failed
             jobs[index].error = error.localizedDescription
             jobs[index].progressText = "Organize failed"
+            jobs[index].finishedAt = Date()
             await card.fail("organize", detail: error.localizedDescription)
             return
         }
@@ -212,6 +252,7 @@ final class QueueViewModel: ObservableObject {
                     jobs[index].status = .done
                     jobs[index].progress = 100
                     jobs[index].progressText = "Complete (NAS path not configured)"
+                    jobs[index].finishedAt = Date()
                     await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
                     NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
                     return
@@ -237,6 +278,7 @@ final class QueueViewModel: ObservableObject {
                 jobs[index].status = .failed
                 jobs[index].error = "NAS copy failed: \(error.localizedDescription)"
                 jobs[index].progressText = "NAS copy failed"
+                jobs[index].finishedAt = Date()
                 await card.fail("nas", detail: error.localizedDescription)
                 NotificationService.shared.notify(title: "NAS Copy Failed", message: jobs[index].discName)
                 return
@@ -255,6 +297,7 @@ final class QueueViewModel: ObservableObject {
         jobs[index].status = .done
         jobs[index].progress = 100
         jobs[index].progressText = "Complete"
+        jobs[index].finishedAt = Date()
         await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
         NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
     }
@@ -297,11 +340,11 @@ final class QueueViewModel: ObservableObject {
     }
 
     private func pruneFinished() {
-        let finished = jobs.filter { $0.status == .done || $0.status == .failed }
-        if finished.count > 50 {
-            let excess = finished.count - 50
-            let toRemove = finished.prefix(excess).map(\.id)
-            jobs.removeAll { toRemove.contains($0.id) }
+        let retention = TimeInterval(max(1, config.historyRetentionDays) * 86_400)
+        let cutoff = Date().addingTimeInterval(-retention)
+        jobs.removeAll { job in
+            (job.status == .done || job.status == .failed)
+                && (job.finishedAt ?? job.createdAt) < cutoff
         }
     }
 
