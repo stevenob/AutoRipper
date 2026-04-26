@@ -121,6 +121,8 @@ actor HandBrakeService {
             cmd += ["--subtitle-burned=none"]
         }
 
+        FileLogger.shared.info("handbrake", "encode start: \(cmd.joined(separator: " "))")
+
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: hbPath)
         proc.arguments = Array(cmd.dropFirst())
@@ -168,14 +170,20 @@ actor HandBrakeService {
 
         guard status == 0 else {
             let recent = tail.snapshot()
+            FileLogger.shared.error(
+                "handbrake",
+                "encode FAILED exit=\(status) input=\(inputPath)\n" + recent.joined(separator: "\n")
+            )
             let suffix = recent.isEmpty ? "" : "\n--- last HandBrakeCLI output ---\n" + recent.joined(separator: "\n")
             throw HandBrakeError.encodeFailed("HandBrakeCLI exited with code \(status)\(suffix)")
         }
         guard FileManager.default.fileExists(atPath: outURL.path) else {
+            FileLogger.shared.error("handbrake", "encode finished exit=0 but output missing: \(outURL.path)")
             throw HandBrakeError.encodeFailed("Encoding completed but output file not found: \(outURL.path)")
         }
 
         progressCallback?(100, "Encoding complete")
+        FileLogger.shared.info("handbrake", "encode success: \(outURL.path)")
         log.info("Encoded \(inputPath) → \(outURL.path)")
         return outURL
     }

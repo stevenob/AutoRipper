@@ -300,6 +300,19 @@ struct ContentView: View {
                     Image(systemName: "gear")
                 }
                 .keyboardShortcut(",", modifiers: .command)
+
+                Button {
+                    let path = config.outputDir
+                    let url = URL(fileURLWithPath: path)
+                    if !FileManager.default.fileExists(atPath: path) {
+                        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                    }
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .help("Open Ripped Folder (\(config.outputDir))")
+                .keyboardShortcut("o", modifiers: [.command, .shift])
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

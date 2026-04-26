@@ -86,11 +86,13 @@ final class QueueViewModel: ObservableObject {
         await card.start("encode")
         let encodeStart = Date()
 
+        FileLogger.shared.info("queue", "encode start: \(jobs[index].discName) <- \(jobs[index].rippedFile.path)")
         do {
             let encoded = try await encodeJob(at: index)
             let encodeElapsed = Date().timeIntervalSince(encodeStart)
             jobs[index].encodeElapsed = encodeElapsed
             jobs[index].encodedFile = encoded
+            FileLogger.shared.info("queue", "encode done: \(jobs[index].discName) in \(formatElapsed(encodeElapsed)) -> \(encoded.path)")
             await card.finish("encode", detail: formatElapsed(encodeElapsed))
             // Delete original rip to save space
             let rippedPath = jobs[index].rippedFile.path
@@ -101,6 +103,7 @@ final class QueueViewModel: ObservableObject {
             jobs[index].status = .failed
             jobs[index].error = error.localizedDescription
             jobs[index].progressText = "Encode failed"
+            FileLogger.shared.error("queue", "encode FAILED: \(jobs[index].discName) — \(error.localizedDescription)")
             await card.fail("encode", detail: error.localizedDescription)
             NotificationService.shared.notify(title: "Encode Failed", message: jobs[index].discName)
             return

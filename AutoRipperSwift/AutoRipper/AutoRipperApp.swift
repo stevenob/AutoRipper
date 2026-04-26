@@ -11,6 +11,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         ProcessTracker.shared.terminateAll()
+        FileLogger.shared.info("app", "AutoRipper shutting down")
         log.info("AutoRipper shutting down")
     }
 }
@@ -47,6 +48,7 @@ struct AutoRipperApp: App {
     }
 
     init() {
-        log.info("AutoRipper 2.1.5 starting")
+        FileLogger.shared.info("app", "AutoRipper 2.1.6 starting")
+        log.info("AutoRipper 2.1.6 starting")
     }
 }
