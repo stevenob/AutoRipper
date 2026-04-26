@@ -112,6 +112,11 @@ actor HandBrakeService {
             at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
 
+        // Pre-flight free-space check: HandBrake encode usually shrinks the source,
+        // but during encode HandBrake may need ~1x source size of working space, plus
+        // the final output. Require source-size + 2 GB headroom on the output volume.
+        try Self.preflightDiskSpace(inputPath: inputPath, outputPath: outURL.path)
+
         var cmd = [hbPath, "-i", inputPath, "-o", outURL.path, "--preset", preset]
         if let audio = audioTracks, !audio.isEmpty {
             cmd += ["--audio", audio.map(String.init).joined(separator: ",")]
@@ -234,6 +239,37 @@ actor HandBrakeService {
             return "H.265 MKV 576p25"
         } else {
             return "H.265 MKV 480p30"
+        }
+    }
+
+    /// Throws `HandBrakeError.encodeFailed` if the output volume doesn't have at least
+    /// (source size + 2 GB headroom) free. Saves the embarrassment of an exit-code-4
+    /// after hours of encoding.
+    static func preflightDiskSpace(inputPath: String, outputPath: String) throws {
+        let fm = FileManager.default
+        let sourceSize: Int64
+        if let attrs = try? fm.attributesOfItem(atPath: inputPath),
+           let size = attrs[.size] as? Int64 {
+            sourceSize = size
+        } else {
+            return  // can't stat source, skip check rather than block
+        }
+        let outDir = (outputPath as NSString).deletingLastPathComponent
+        guard let attrs = try? fm.attributesOfFileSystem(forPath: outDir),
+              let free = attrs[.systemFreeSize] as? Int64 else {
+            return
+        }
+        let headroom: Int64 = 2 * 1024 * 1024 * 1024  // 2 GB
+        let required = sourceSize + headroom
+        if free < required {
+            let freeGB  = Double(free)     / 1_073_741_824
+            let needGB  = Double(required) / 1_073_741_824
+            let msg = String(
+                format: "Not enough free space at %@ — %.1f GB free, need at least %.1f GB (source + 2 GB headroom).",
+                outDir, freeGB, needGB
+            )
+            FileLogger.shared.error("handbrake", "preflight FAILED: \(msg)")
+            throw HandBrakeError.encodeFailed(msg)
         }
     }
 }
