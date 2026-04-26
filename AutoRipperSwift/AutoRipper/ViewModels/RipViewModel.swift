@@ -21,6 +21,10 @@ final class RipViewModel: ObservableObject {
     /// disc and runs Full Auto again automatically. Disables on the next call to
     /// `abort()` or when the user toggles it off.
     @Published var batchModeEnabled: Bool = false
+    /// Set after a scan when TMDb couldn't identify the disc. UI shows a dismissible
+    /// banner prompting the user to set per-title search overrides. Cleared on dismiss
+    /// or new scan.
+    @Published var unidentifiedDiscName: String?
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
@@ -50,7 +54,27 @@ final class RipViewModel: ObservableObject {
         self.config = config
         self.makemkv = MakeMKVService(config: config)
         self.discord = DiscordService(config: config)
+        cleanupOrphanedRip()
         detectDisc()
+    }
+
+    /// If a rip was in flight when the app exited/crashed, MakeMKV left a partial
+    /// `.mkv` on disk. Delete it (and its parent dir if empty) so the user doesn't
+    /// later think it's a real rip.
+    private func cleanupOrphanedRip() {
+        guard let path = config.inFlightRipPath else { return }
+        let url = URL(fileURLWithPath: path)
+        let dir = url.deletingLastPathComponent()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) {
+            try? fm.removeItem(at: url)
+            FileLogger.shared.warn("rip-vm", "cleaned up partial rip from previous session: \(path)")
+        }
+        // Try to remove the dir if it's now empty (don't recurse — leave any user files).
+        if let contents = try? fm.contentsOfDirectory(atPath: dir.path), contents.isEmpty {
+            try? fm.removeItem(at: dir)
+        }
+        config.inFlightRipPath = nil
     }
 
     func detectDisc() {
@@ -147,10 +171,12 @@ final class RipViewModel: ObservableObject {
                     }
                     info.mediaTitle = match.displayTitle
                     self.cachedMediaResult = match
+                    self.unidentifiedDiscName = nil
                 } else {
                     await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
                     NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
                     self.cachedMediaResult = nil
+                    self.unidentifiedDiscName = info.name
                 }
 
                 self.discInfo = info
@@ -196,6 +222,7 @@ final class RipViewModel: ObservableObject {
                 let totalTitles = titlesToRip.count
                 let titleIndex = idx
                 let titleStart = Date()
+                let expectedSize = info.titles.first(where: { $0.id == tid })?.sizeBytes ?? 0
 
                 // One JobCard per ripped title — covers rip → encode → done for that title.
                 // Only created in full-auto mode (manual mode skips post-rip pipeline).
@@ -208,11 +235,52 @@ final class RipViewModel: ObservableObject {
                     await card?.start("rip")
                 }
 
+                // Tell AppConfig where the partial rip will live so a crash mid-rip
+                // can clean up on next launch.
+                config.inFlightRipPath = outputDir
+                let lastPRGV = LastPRGV()
+
+                // File-size fallback: snapshot existing files in outputDir so we can
+                // identify the file MakeMKV is currently writing for *this* title.
+                // PRGV from MakeMKV is preferred; this kicks in when PRGV is missing.
+                let preexisting: Set<String> = {
+                    let fm = FileManager.default
+                    return Set((try? fm.contentsOfDirectory(atPath: outputDir)) ?? [])
+                }()
+                let sizeMonitor = Task.detached {
+                    let fm = FileManager.default
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(2))
+                        // Skip if PRGV updated within the last 4 seconds — it's authoritative.
+                        if Date().timeIntervalSince(lastPRGV.timestamp) < 4 { continue }
+                        guard expectedSize > 0,
+                              let files = try? fm.contentsOfDirectory(atPath: outputDir) else { continue }
+                        let newFiles = files.filter { !preexisting.contains($0) && $0.hasSuffix(".mkv") }
+                        var sz: Int64 = 0
+                        for f in newFiles {
+                            let p = (outputDir as NSString).appendingPathComponent(f)
+                            if let attrs = try? fm.attributesOfItem(atPath: p),
+                               let s = attrs[.size] as? Int64 { sz += s }
+                        }
+                        let pct = min(Double(sz) / Double(expectedSize), 0.99)
+                        await MainActor.run { [weak self] in
+                            guard let self else { return }
+                            let overall = (Double(titleIndex) + pct) / Double(totalTitles)
+                            // Only apply if we'd actually advance the bar (don't go backwards).
+                            if overall > self.ripProgress {
+                                self.ripProgress = overall
+                                self.statusText = "Ripping title \(tid) (\(titleIndex + 1)/\(totalTitles)) — \(Int(pct * 100))% (size)"
+                            }
+                        }
+                    }
+                }
+
                 do {
                     let file = try await makemkv.ripTitle(
                         titleId: tid,
                         outputDir: outputDir,
                         progressCallback: { [weak self] pct, _ in
+                            lastPRGV.touch()
                             Task { @MainActor in
                                 guard let self else { return }
                                 let overall = (Double(titleIndex) + Double(pct) / 100.0) / Double(totalTitles)
@@ -225,6 +293,8 @@ final class RipViewModel: ObservableObject {
                         }
                     )
                     let titleElapsed = Date().timeIntervalSince(titleStart)
+                    sizeMonitor.cancel()
+                    config.inFlightRipPath = nil
                     // In Full Auto, every successfully-ripped title flows through the
                     // encode → organize → scrape → NAS pipeline as its own queue job.
                     // Manual mode still ends here (rip-only).
@@ -245,6 +315,8 @@ final class RipViewModel: ObservableObject {
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam)
                     }
                 } catch {
+                    sizeMonitor.cancel()
+                    config.inFlightRipPath = nil
                     statusText = "Rip failed: \(error.localizedDescription)"
                     errorMessage = error.localizedDescription
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
@@ -400,5 +472,20 @@ final class RipViewModel: ObservableObject {
         ripProgress = 0
         statusText = "Aborted"
         batchModeEnabled = false  // abort breaks the batch loop
+    }
+}
+
+/// Tracks the last time MakeMKV's PRGV callback fired. Used by the file-size
+/// fallback monitor to back off when PRGV is alive.
+private final class LastPRGV: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _ts: Date = .distantPast
+    var timestamp: Date {
+        lock.lock(); defer { lock.unlock() }
+        return _ts
+    }
+    func touch() {
+        lock.lock(); defer { lock.unlock() }
+        _ts = Date()
     }
 }

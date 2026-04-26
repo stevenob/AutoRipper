@@ -51,6 +51,16 @@ final class AppConfig: ObservableObject {
     @Published var historyRetentionDays: Int {
         didSet { defaults.set(historyRetentionDays, forKey: "historyRetentionDays") }
     }
+    /// Path of a MakeMKV-rip-in-progress. Set just before `ripTitle`, cleared on
+    /// success or caught failure. If the app crashes/exits mid-rip, the next launch
+    /// finds this set and deletes the partial file.
+    var inFlightRipPath: String? {
+        get { defaults.string(forKey: "inFlightRipPath") }
+        set {
+            if let v = newValue { defaults.set(v, forKey: "inFlightRipPath") }
+            else { defaults.removeObject(forKey: "inFlightRipPath") }
+        }
+    }
 
     init() {
         let d = UserDefaults(suiteName: "group.com.autoripper")!

@@ -176,6 +176,34 @@ struct DiscPaneView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
 
+                    if let unknown = ripVM.unidentifiedDiscName {
+                        HStack(spacing: 8) {
+                            Image(systemName: "questionmark.circle.fill")
+                                .foregroundStyle(.yellow)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("TMDb couldn't identify \"\(unknown)\"")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text("Set a per-title search override in the Intent column to identify each movie manually.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button {
+                                ripVM.unidentifiedDiscName = nil
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("Dismiss")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.yellow.opacity(0.15))
+                    }
+
                     let filteredTitles = info.titles.filter { $0.durationSeconds >= config.minDuration }
                     Table(filteredTitles) {
                         TableColumn("") { title in
