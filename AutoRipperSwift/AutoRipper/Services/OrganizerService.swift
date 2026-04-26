@@ -20,16 +20,26 @@ enum OrganizerService {
     }
 
     /// Build a destination path for a movie: `outputDir/Title (Year)/Title (Year).mkv`
-    static func buildMoviePath(outputDir: String, title: String, year: Int? = nil) -> URL {
-        let name: String
+    ///
+    /// When `edition` is supplied, appends Plex/Jellyfin's `{edition-X}` tag to the
+    /// filename while keeping the parent folder shared across editions:
+    ///   `outputDir/Blade Runner (1982)/Blade Runner (1982) {edition-Final Cut}.mkv`
+    static func buildMoviePath(outputDir: String, title: String, year: Int? = nil, edition: String? = nil) -> URL {
+        let base: String
         if let year {
-            name = "\(cleanFilename(title)) (\(year))"
+            base = "\(cleanFilename(title)) (\(year))"
         } else {
-            name = cleanFilename(title)
+            base = cleanFilename(title)
+        }
+        let filename: String
+        if let edition, !edition.isEmpty {
+            filename = "\(base) {edition-\(cleanFilename(edition))}.mkv"
+        } else {
+            filename = "\(base).mkv"
         }
         return URL(fileURLWithPath: outputDir)
-            .appendingPathComponent(name)
-            .appendingPathComponent(name + ".mkv")
+            .appendingPathComponent(base)
+            .appendingPathComponent(filename)
     }
 
     /// Build a destination path for a TV episode.

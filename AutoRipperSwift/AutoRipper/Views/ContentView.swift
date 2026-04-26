@@ -161,6 +161,43 @@ struct ContentView: View {
                             }
                         }
                         .width(60)
+
+                        TableColumn("Intent") { title in
+                            HStack(spacing: 4) {
+                                Picker("", selection: Binding(
+                                    get: { ripVM.intent(for: title.id) },
+                                    set: { ripVM.titleIntents[title.id] = $0 }
+                                )) {
+                                    Text("Movie").tag(JobIntent.movie)
+                                    Text("Episode").tag(JobIntent.episode)
+                                    Text("Edition").tag(JobIntent.edition)
+                                    Text("Extra").tag(JobIntent.extra)
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .controlSize(.small)
+                                .frame(width: 88)
+
+                                if ripVM.intent(for: title.id) == .edition {
+                                    Picker("", selection: Binding(
+                                        get: { ripVM.editionLabel(for: title.id) },
+                                        set: { ripVM.titleEditionLabels[title.id] = $0 }
+                                    )) {
+                                        Text("—").tag("")
+                                        Text("Theatrical").tag("Theatrical")
+                                        Text("Unrated").tag("Unrated")
+                                        Text("Director's Cut").tag("Director's Cut")
+                                        Text("Extended").tag("Extended")
+                                        Text("Final Cut").tag("Final Cut")
+                                    }
+                                    .labelsHidden()
+                                    .pickerStyle(.menu)
+                                    .controlSize(.small)
+                                    .frame(width: 110)
+                                }
+                            }
+                        }
+                        .width(210)
                     }
                     .tableStyle(.inset(alternatesRowBackgrounds: true))
                 }
@@ -360,8 +397,8 @@ struct ContentView: View {
             Text(ripVM.errorMessage ?? "")
         }
         .onAppear {
-            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent in
-                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent)
+            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent, editionLabel in
+                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel)
             }
             NotificationService.shared.requestPermission()
             updateService.checkForUpdates()

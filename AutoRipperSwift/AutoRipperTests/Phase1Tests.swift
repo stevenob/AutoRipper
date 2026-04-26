@@ -22,6 +22,22 @@ final class OrganizerServiceTests: XCTestCase {
         XCTAssertEqual(path.lastPathComponent, "Untitled.mkv")
     }
 
+    func testBuildMoviePathWithEdition() {
+        let path = OrganizerService.buildMoviePath(
+            outputDir: "/output", title: "Blade Runner", year: 1982, edition: "Final Cut"
+        )
+        XCTAssertEqual(path.lastPathComponent, "Blade Runner (1982) {edition-Final Cut}.mkv")
+        // Editions of the same movie share the parent folder so artwork/NFO are shared.
+        XCTAssertEqual(path.deletingLastPathComponent().lastPathComponent, "Blade Runner (1982)")
+    }
+
+    func testBuildMoviePathWithEmptyEditionTreatedAsNone() {
+        let path = OrganizerService.buildMoviePath(
+            outputDir: "/output", title: "The Matrix", year: 1999, edition: ""
+        )
+        XCTAssertEqual(path.lastPathComponent, "The Matrix (1999).mkv")
+    }
+
     func testBuildTvPathBasic() {
         let path = OrganizerService.buildTvPath(
             outputDir: "/output", show: "Breaking Bad", season: 1, episode: 3

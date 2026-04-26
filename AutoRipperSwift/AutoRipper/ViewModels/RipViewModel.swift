@@ -18,14 +18,22 @@ final class RipViewModel: ObservableObject {
     @Published var detectedDiscType: String = ""
     @Published var detectedDiscName: String = ""
 
+    /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
+    @Published var titleIntents: [Int: JobIntent] = [:]
+    /// Per-title edition label (e.g. "Theatrical", "Director's Cut"). Used only when intent == .edition.
+    @Published var titleEditionLabels: [Int: String] = [:]
+
+    func intent(for titleId: Int) -> JobIntent { titleIntents[titleId] ?? .movie }
+    func editionLabel(for titleId: Int) -> String { titleEditionLabels[titleId] ?? "" }
+
     private let config: AppConfig
     private let makemkv: MakeMKVService
     private let discord: DiscordService
     private var runningTask: Task<Void, Never>?
     private var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -216,9 +224,10 @@ final class RipViewModel: ObservableObject {
                         let mins = Int(titleElapsed) / 60
                         let secs = Int(titleElapsed) % 60
                         await card?.finish("rip", detail: "\(mins)m \(secs)s")
-                        // For now every queued title is intent=.movie. Phase 2 adds the
-                        // per-title intent picker for episodes, editions, and extras.
-                        onRipComplete?(info.name, file, titleElapsed, resolution, card, cachedMediaResult, .movie)
+                        let intent = intent(for: tid)
+                        let edition = editionLabel(for: tid)
+                        let editionParam = (intent == .edition && !edition.isEmpty) ? edition : nil
+                        onRipComplete?(info.name, file, titleElapsed, resolution, card, cachedMediaResult, intent, editionParam)
                     }
                 } catch {
                     statusText = "Rip failed: \(error.localizedDescription)"

@@ -20,10 +20,11 @@ final class QueueViewModel: ObservableObject {
         self.discord = DiscordService(config: config)
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel)
         jobs.append(job)
-        FileLogger.shared.info("queue", "added job: \(job.discName) [\(intent.rawValue)] <- \(rippedFile.path)")
+        let extra = editionLabel.map { " {edition-\($0)}" } ?? ""
+        FileLogger.shared.info("queue", "added job: \(job.discName) [\(intent.rawValue)\(extra)] <- \(rippedFile.path)")
         startWorkerIfNeeded()
     }
 
@@ -72,6 +73,22 @@ final class QueueViewModel: ObservableObject {
             await card.finish("rip", detail: formatElapsed(jobs[index].ripElapsed))
         }
 
+        // .extra titles bypass the post-rip pipeline entirely — keep raw rip in place,
+        // mark the job done, fire the notification, and return.
+        if jobs[index].intent == .extra {
+            FileLogger.shared.info("queue", "extra: skipping encode/organize/scrape for \(jobs[index].discName)")
+            jobs[index].status = .done
+            jobs[index].progress = 100
+            jobs[index].progressText = "Extra — kept as raw rip"
+            await card.skip("encode")
+            await card.skip("organize")
+            await card.skip("scrape")
+            await card.skip("nas")
+            await card.complete(footer: "Kept as raw rip (no encode)")
+            NotificationService.shared.notify(title: "Extra Saved", message: jobs[index].discName)
+            return
+        }
+
         // Use cached TMDb result if available, otherwise look up
         let tmdbMedia: MediaResult?
         if let cached = jobs[index].mediaResult {
@@ -118,6 +135,7 @@ final class QueueViewModel: ObservableObject {
         do {
             let source = jobs[index].encodedFile ?? jobs[index].rippedFile
             let dest: URL
+            let edition = jobs[index].editionLabel
             if let media = tmdbMedia {
                 if media.mediaType == "tv" {
                     // For TV, use the TV path builder
@@ -131,13 +149,15 @@ final class QueueViewModel: ObservableObject {
                     dest = OrganizerService.buildMoviePath(
                         outputDir: config.outputDir,
                         title: media.title,
-                        year: media.year
+                        year: media.year,
+                        edition: jobs[index].intent == .edition ? edition : nil
                     )
                 }
             } else {
                 dest = OrganizerService.buildMoviePath(
                     outputDir: config.outputDir,
-                    title: OrganizerService.cleanFilename(jobs[index].discName)
+                    title: OrganizerService.cleanFilename(jobs[index].discName),
+                    edition: jobs[index].intent == .edition ? edition : nil
                 )
             }
             let organized = try OrganizerService.organizeFile(source: source, destination: dest)

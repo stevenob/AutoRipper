@@ -30,9 +30,12 @@ struct Job: Identifiable, Sendable {
     var encodeElapsed: TimeInterval = 0
     var mediaResult: MediaResult?
     var intent: JobIntent = .movie
+    /// For `intent == .edition` only — e.g. "Theatrical", "Director's Cut".
+    /// Becomes the `{edition-...}` tag in the output filename.
+    var editionLabel: String?
     nonisolated(unsafe) var card: JobCard?
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         self.discName = discName
         self.rippedFile = rippedFile
@@ -41,5 +44,6 @@ struct Job: Identifiable, Sendable {
         self.card = card
         self.mediaResult = mediaResult
         self.intent = intent
+        self.editionLabel = editionLabel
     }
 }
