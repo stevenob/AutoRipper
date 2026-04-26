@@ -5,6 +5,41 @@ private let log = Logger(subsystem: "com.autoripper.app", category: "tmdb")
 
 private let baseURL = "https://api.themoviedb.org/3"
 
+/// Process-wide TMDb response cache. Shared across `TMDbService` instances so
+/// repeat scans of the same disc don't re-hit the network.
+private final class TMDbCache: @unchecked Sendable {
+    static let shared = TMDbCache()
+    private let lock = NSLock()
+    private var search: [String: [MediaResult]] = [:]
+    private var movieDetails: [Int: MediaResult] = [:]
+    private var tvDetails: [Int: MediaResult] = [:]
+
+    func cachedSearch(_ query: String) -> [MediaResult]? {
+        lock.lock(); defer { lock.unlock() }
+        return search[query]
+    }
+    func storeSearch(_ query: String, _ results: [MediaResult]) {
+        lock.lock(); defer { lock.unlock() }
+        search[query] = results
+    }
+    func cachedMovie(_ id: Int) -> MediaResult? {
+        lock.lock(); defer { lock.unlock() }
+        return movieDetails[id]
+    }
+    func storeMovie(_ id: Int, _ r: MediaResult) {
+        lock.lock(); defer { lock.unlock() }
+        movieDetails[id] = r
+    }
+    func cachedTv(_ id: Int) -> MediaResult? {
+        lock.lock(); defer { lock.unlock() }
+        return tvDetails[id]
+    }
+    func storeTv(_ id: Int, _ r: MediaResult) {
+        lock.lock(); defer { lock.unlock() }
+        tvDetails[id] = r
+    }
+}
+
 /// TMDb API client for movie/TV metadata lookup.
 struct TMDbService {
     private let session = URLSession.shared
@@ -76,6 +111,9 @@ struct TMDbService {
             log.warning("TMDb API key not configured")
             return []
         }
+        if let cached = TMDbCache.shared.cachedSearch(query) {
+            return cached
+        }
         let (cleaned, discYear) = Self.cleanDiscName(query)
         guard var url = URL(string: "\(baseURL)/search/multi") else { return [] }
         var queryItems = [
@@ -90,7 +128,7 @@ struct TMDbService {
         do {
             let (data, _) = try await session.data(from: url)
             let response = try JSONDecoder().decode(TMDbSearchResponse.self, from: data)
-            return response.results.prefix(10).compactMap { item -> MediaResult? in
+            let results: [MediaResult] = response.results.prefix(10).compactMap { item -> MediaResult? in
                 guard item.mediaType == "movie" || item.mediaType == "tv" else { return nil }
                 let title = item.title ?? item.name ?? ""
                 let dateStr = item.releaseDate ?? item.firstAirDate ?? ""
@@ -101,6 +139,8 @@ struct TMDbService {
                     posterPath: item.posterPath, backdropPath: item.backdropPath
                 )
             }
+            TMDbCache.shared.storeSearch(query, results)
+            return results
         } catch {
             log.error("TMDb search failed: \(error.localizedDescription)")
             return []
@@ -110,16 +150,19 @@ struct TMDbService {
     /// Fetch full movie details by TMDb ID.
     func getMovieDetails(tmdbId: Int) async -> MediaResult? {
         guard !apiKey.isEmpty else { return nil }
+        if let cached = TMDbCache.shared.cachedMovie(tmdbId) { return cached }
         guard let url = URL(string: "\(baseURL)/movie/\(tmdbId)?api_key=\(apiKey)") else { return nil }
         do {
             let (data, _) = try await session.data(from: url)
             let item = try JSONDecoder().decode(TMDbMovieDetail.self, from: data)
             let year = item.releaseDate.flatMap { $0.count >= 4 ? Int($0.prefix(4)) : nil }
-            return MediaResult(
+            let result = MediaResult(
                 title: item.title, year: year, mediaType: "movie",
                 tmdbId: item.id, overview: item.overview ?? "",
                 posterPath: item.posterPath, backdropPath: item.backdropPath
             )
+            TMDbCache.shared.storeMovie(tmdbId, result)
+            return result
         } catch {
             log.error("TMDb movie detail failed: \(error.localizedDescription)")
             return nil
@@ -129,16 +172,19 @@ struct TMDbService {
     /// Fetch TV show details by TMDb ID.
     func getTvDetails(tmdbId: Int) async -> MediaResult? {
         guard !apiKey.isEmpty else { return nil }
+        if let cached = TMDbCache.shared.cachedTv(tmdbId) { return cached }
         guard let url = URL(string: "\(baseURL)/tv/\(tmdbId)?api_key=\(apiKey)") else { return nil }
         do {
             let (data, _) = try await session.data(from: url)
             let item = try JSONDecoder().decode(TMDbTvDetail.self, from: data)
             let year = item.firstAirDate.flatMap { $0.count >= 4 ? Int($0.prefix(4)) : nil }
-            return MediaResult(
+            let result = MediaResult(
                 title: item.name, year: year, mediaType: "tv",
                 tmdbId: item.id, overview: item.overview ?? "",
                 posterPath: item.posterPath, backdropPath: item.backdropPath
             )
+            TMDbCache.shared.storeTv(tmdbId, result)
+            return result
         } catch {
             log.error("TMDb TV detail failed: \(error.localizedDescription)")
             return nil

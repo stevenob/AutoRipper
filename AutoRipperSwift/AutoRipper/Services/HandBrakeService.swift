@@ -132,10 +132,16 @@ actor HandBrakeService {
         var cmd = [hbPath, "-i", inputPath, "-o", outURL.path, "--preset", preset]
         if let audio = audioTracks, !audio.isEmpty {
             cmd += ["--audio", audio.map(String.init).joined(separator: ",")]
+        } else {
+            // No explicit list given — keep every audio track (saves a separate
+            // HandBrake metadata-scan pass that would otherwise enumerate them).
+            cmd += ["--all-audio"]
         }
         if let subs = subtitleTracks, !subs.isEmpty {
             cmd += ["--subtitle", subs.map(String.init).joined(separator: ",")]
             cmd += ["--subtitle-burned=none"]
+        } else {
+            cmd += ["--all-subtitles", "--subtitle-burned=none"]
         }
 
         FileLogger.shared.info("handbrake", "encode start: \(cmd.joined(separator: " "))")

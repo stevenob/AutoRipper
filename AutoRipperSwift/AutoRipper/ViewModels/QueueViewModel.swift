@@ -23,10 +23,13 @@ final class QueueViewModel: ObservableObject {
         self.discord = DiscordService(config: config)
         self.store = store
         loadFromStore()
-        // Persist on every change. Debounced via JobStore's serial queue, so rapid
-        // progress updates don't pile up I/O.
+        // Persist on every change, but throttle to ~1 Hz so rapid encode-progress
+        // ticks (which currently fire every ~100ms via HandBrake's PRGV) don't
+        // generate dozens of full JSON rewrites per second. Trailing-edge ensures
+        // the final state always lands.
         saveCancellable = $jobs
             .dropFirst()
+            .throttle(for: .seconds(1), scheduler: DispatchQueue.main, latest: true)
             .sink { [store] jobs in store.save(jobs) }
     }
 
@@ -314,18 +317,16 @@ final class QueueViewModel: ObservableObject {
         let preset = HandBrakeService.autoPreset(for: jobs[index].resolution)
             ?? "H.265 Apple VideoToolbox 1080p"
 
-        // Scan tracks and select all audio + subtitles
-        let (audio, subs) = try await handbrake.scanTracks(inputPath: input.path)
-        let audioIdxs = audio.isEmpty ? nil : audio.map(\.index)
-        let subIdxs = subs.isEmpty ? nil : subs.map(\.index)
-
+        // Pass nil track lists so HandBrake uses --all-audio / --all-subtitles
+        // and we skip the separate scanTracks pass (which on large MKVs takes
+        // multiple seconds). The result is the same: every track survives.
         let jobId = jobs[index].id
         let result = try await handbrake.encode(
             inputPath: input.path,
             outputPath: outputPath,
             preset: preset,
-            audioTracks: audioIdxs,
-            subtitleTracks: subIdxs,
+            audioTracks: nil,
+            subtitleTracks: nil,
             progressCallback: { [weak self] pct, text in
                 Task { @MainActor in
                     guard let self else { return }
