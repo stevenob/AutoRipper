@@ -377,7 +377,36 @@ final class QueueViewModel: ObservableObject {
         jobs.remove(at: i)
     }
 
-    /// Active jobs (queued + in-flight).
+    /// Re-run TMDb lookup with a user-supplied query for a job that's already in
+    /// the queue/history. Updates `mediaResult` and `discName` so the remaining
+    /// pipeline stages (organize/scrape) use the corrected metadata.
+    ///
+    /// Safe to call from any non-terminal stage — but if organize has already
+    /// moved the file, the user will need to manually move it (we don't reorganize
+    /// completed jobs to avoid overwriting NAS-uploaded files).
+    func reidentify(jobId: String, newQuery: String) async {
+        guard let i = jobs.firstIndex(where: { $0.id == jobId }) else { return }
+        let trimmed = newQuery.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+
+        FileLogger.shared.info("queue", "reidentify \(jobs[i].discName) -> \(trimmed)")
+        let tmdb = TMDbService(config: config)
+        let results = await tmdb.searchMedia(query: trimmed)
+        var match = results.first
+        if var m = match {
+            if m.mediaType == "movie", let d = await tmdb.getMovieDetails(tmdbId: m.tmdbId) { m = d }
+            else if m.mediaType == "tv", let d = await tmdb.getTvDetails(tmdbId: m.tmdbId) { m = d }
+            match = m
+        }
+        guard let i2 = jobs.firstIndex(where: { $0.id == jobId }) else { return }
+        jobs[i2].discName = trimmed
+        jobs[i2].mediaResult = match
+        if let m = match {
+            FileLogger.shared.info("queue", "reidentify: matched \(m.displayTitle)")
+        } else {
+            FileLogger.shared.warn("queue", "reidentify: still no TMDb match for \"\(trimmed)\"")
+        }
+    }
     var activeJobs: [Job] {
         jobs.filter { $0.status != .done && $0.status != .failed }
     }

@@ -17,7 +17,7 @@ enum JobIntent: String, Sendable {
 /// A single ripped file going through the post-rip pipeline.
 struct Job: Identifiable, Sendable, Codable {
     let id: String
-    let discName: String
+    var discName: String
     let rippedFile: URL
     var resolution: String = ""
     var encodedFile: URL?

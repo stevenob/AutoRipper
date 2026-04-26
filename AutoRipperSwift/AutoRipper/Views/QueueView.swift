@@ -129,6 +129,8 @@ private struct JobRow: View {
     let expanded: Bool
     var showActions: Bool = true
     var queueVM: QueueViewModel? = nil
+    @State private var showIdentify = false
+    @State private var identifyQuery: String = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -136,9 +138,15 @@ private struct JobRow: View {
                 statusIcon
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(job.discName)
+                        Text(job.mediaResult?.displayTitle ?? job.discName)
                             .fontWeight(.medium)
                             .lineLimit(1)
+                        if job.mediaResult == nil {
+                            Image(systemName: "questionmark.circle.fill")
+                                .foregroundStyle(.yellow)
+                                .font(.caption)
+                                .help("No TMDb match — click Identify to set a search query")
+                        }
                         if job.intent != .movie {
                             Text(job.intent.rawValue)
                                 .font(.caption2)
@@ -159,6 +167,17 @@ private struct JobRow: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if let queueVM, showActions, canReidentify {
+                    Button("Identify…") {
+                        identifyQuery = job.mediaResult?.displayTitle ?? job.discName
+                        showIdentify = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .popover(isPresented: $showIdentify) {
+                        identifyPopover(queueVM: queueVM)
+                    }
+                }
                 if job.status == .failed, let queueVM, showActions {
                     Button("Retry") { queueVM.retry(jobId: job.id) }
                         .buttonStyle(.bordered)
@@ -214,6 +233,46 @@ private struct JobRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Allow re-identify until the file has been organized (after that, the
+    /// destination path is committed and would need a manual move).
+    private var canReidentify: Bool {
+        switch job.status {
+        case .queued, .encoding: return true
+        case .organizing, .scraping, .uploading, .done, .failed: return false
+        }
+    }
+
+    @ViewBuilder
+    private func identifyPopover(queueVM: QueueViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Search TMDb")
+                .font(.headline)
+            Text("Enter the movie or TV title. The corrected name will be used when this job is organized.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: 320, alignment: .leading)
+            TextField("e.g. Blade Runner 1982", text: $identifyQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 320)
+                .onSubmit { submitIdentify(queueVM: queueVM) }
+            HStack {
+                Spacer()
+                Button("Cancel") { showIdentify = false }
+                Button("Search") { submitIdentify(queueVM: queueVM) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(identifyQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(14)
+    }
+
+    private func submitIdentify(queueVM: QueueViewModel) {
+        let q = identifyQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        showIdentify = false
+        Task { await queueVM.reidentify(jobId: job.id, newQuery: q) }
     }
 
     @ViewBuilder
