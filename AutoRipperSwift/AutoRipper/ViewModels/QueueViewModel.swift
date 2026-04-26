@@ -20,9 +20,10 @@ final class QueueViewModel: ObservableObject {
         self.discord = DiscordService(config: config)
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent)
         jobs.append(job)
+        FileLogger.shared.info("queue", "added job: \(job.discName) [\(intent.rawValue)] <- \(rippedFile.path)")
         startWorkerIfNeeded()
     }
 

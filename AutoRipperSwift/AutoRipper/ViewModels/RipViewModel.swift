@@ -25,7 +25,7 @@ final class RipViewModel: ObservableObject {
     private var cachedMediaResult: MediaResult?
 
     /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?) -> Void)?
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -168,22 +168,9 @@ final class RipViewModel: ObservableObject {
         )
         let outputDir = URL(fileURLWithPath: baseDir)
             .appendingPathComponent(folderName).path
-        // In Full Auto, only queue the largest title for encode
-        let largestId = info.titles
-            .filter { selectedTitles.contains($0.id) }
-            .max(by: { $0.sizeBytes < $1.sizeBytes })?.id
 
         runningTask = Task {
             let start = Date()
-
-            // Create a single JobCard for full-auto mode (covers rip → encode → done)
-            var card: JobCard? = nil
-            if fullAutoEnabled {
-                card = JobCard(discName: folderName,
-                               nasEnabled: config.nasUploadEnabled,
-                               discord: discord)
-                await card?.start("rip")
-            }
 
             NotificationService.shared.notify(title: "Ripping", message: "\(folderName) — \(titlesToRip.count) title(s)")
 
@@ -191,6 +178,18 @@ final class RipViewModel: ObservableObject {
                 statusText = "Ripping title \(tid) (\(idx + 1)/\(titlesToRip.count))…"
                 let totalTitles = titlesToRip.count
                 let titleIndex = idx
+                let titleStart = Date()
+
+                // One JobCard per ripped title — covers rip → encode → done for that title.
+                // Only created in full-auto mode (manual mode skips post-rip pipeline).
+                var card: JobCard? = nil
+                if fullAutoEnabled {
+                    let cardName = totalTitles > 1 ? "\(folderName) — title \(tid)" : folderName
+                    card = JobCard(discName: cardName,
+                                   nasEnabled: config.nasUploadEnabled,
+                                   discord: discord)
+                    await card?.start("rip")
+                }
 
                 do {
                     let file = try await makemkv.ripTitle(
@@ -208,14 +207,18 @@ final class RipViewModel: ObservableObject {
                             Task { @MainActor in self?.logLines.append(line) }
                         }
                     )
-                    let elapsed = Date().timeIntervalSince(start)
-                    // Only queue for encode pipeline when Full Auto is on (largest title only)
-                    if fullAutoEnabled && tid == largestId {
+                    let titleElapsed = Date().timeIntervalSince(titleStart)
+                    // In Full Auto, every successfully-ripped title flows through the
+                    // encode → organize → scrape → NAS pipeline as its own queue job.
+                    // Manual mode still ends here (rip-only).
+                    if fullAutoEnabled {
                         let resolution = info.titles.first(where: { $0.id == tid })?.resolution ?? ""
-                        let mins = Int(elapsed) / 60
-                        let secs = Int(elapsed) % 60
+                        let mins = Int(titleElapsed) / 60
+                        let secs = Int(titleElapsed) % 60
                         await card?.finish("rip", detail: "\(mins)m \(secs)s")
-                        onRipComplete?(info.name, file, elapsed, resolution, card, cachedMediaResult)
+                        // For now every queued title is intent=.movie. Phase 2 adds the
+                        // per-title intent picker for episodes, editions, and extras.
+                        onRipComplete?(info.name, file, titleElapsed, resolution, card, cachedMediaResult, .movie)
                     }
                 } catch {
                     statusText = "Rip failed: \(error.localizedDescription)"
@@ -230,6 +233,7 @@ final class RipViewModel: ObservableObject {
                 }
             }
 
+            _ = start  // overall start kept for potential summary logging
             // Scrape artwork/NFO into the title folder right after rip
             // (skip in full-auto mode — QueueViewModel handles it after organize)
             if !fullAutoEnabled {

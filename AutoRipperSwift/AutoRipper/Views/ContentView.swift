@@ -360,8 +360,8 @@ struct ContentView: View {
             Text(ripVM.errorMessage ?? "")
         }
         .onAppear {
-            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult in
-                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult)
+            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent in
+                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent)
             }
             NotificationService.shared.requestPermission()
             updateService.checkForUpdates()
