@@ -142,6 +142,29 @@ final class RipViewModel: ObservableObject {
         }
     }
 
+    /// Looks up the disc on TMDb, sets `cachedMediaResult` and `info.mediaTitle` on
+    /// success, or `unidentifiedDiscName` (for the banner) on miss. Used by both
+    /// manual scan and Full Auto.
+    private func lookupTMDb(for info: inout DiscInfo) async {
+        let tmdb = TMDbService(config: config)
+        let results = await tmdb.searchMedia(query: info.name)
+        if var match = results.first {
+            if match.mediaType == "movie", let details = await tmdb.getMovieDetails(tmdbId: match.tmdbId) {
+                match = details
+            } else if match.mediaType == "tv", let details = await tmdb.getTvDetails(tmdbId: match.tmdbId) {
+                match = details
+            }
+            info.mediaTitle = match.displayTitle
+            self.cachedMediaResult = match
+            self.unidentifiedDiscName = nil
+        } else {
+            await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
+            NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
+            self.cachedMediaResult = nil
+            self.unidentifiedDiscName = info.name
+        }
+    }
+
     func scanDisc() {
         guard !isScanning else { return }
         isScanning = true
@@ -159,25 +182,7 @@ final class RipViewModel: ObservableObject {
                 // Auto-label titles by duration/size
                 info.autoLabel()
 
-                // TMDb lookup to get the real movie/show name
-                let tmdb = TMDbService(config: config)
-                let results = await tmdb.searchMedia(query: info.name)
-                if var match = results.first {
-                    // Fetch full details for poster/backdrop paths
-                    if match.mediaType == "movie", let details = await tmdb.getMovieDetails(tmdbId: match.tmdbId) {
-                        match = details
-                    } else if match.mediaType == "tv", let details = await tmdb.getTvDetails(tmdbId: match.tmdbId) {
-                        match = details
-                    }
-                    info.mediaTitle = match.displayTitle
-                    self.cachedMediaResult = match
-                    self.unidentifiedDiscName = nil
-                } else {
-                    await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
-                    NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
-                    self.cachedMediaResult = nil
-                    self.unidentifiedDiscName = info.name
-                }
+                await lookupTMDb(for: &info)
 
                 self.discInfo = info
                 // Auto-select titles above min duration
@@ -432,9 +437,11 @@ final class RipViewModel: ObservableObject {
 
         runningTask = Task {
             do {
-                let info = try await makemkv.scanDisc { [weak self] line in
+                var info = try await makemkv.scanDisc { [weak self] line in
                     Task { @MainActor in self?.logLines.append(line) }
                 }
+                info.autoLabel()
+                await lookupTMDb(for: &info)
                 self.discInfo = info
                 isScanning = false
 
