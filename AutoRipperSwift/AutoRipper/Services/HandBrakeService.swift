@@ -133,6 +133,7 @@ actor HandBrakeService {
 
         // Stream and parse progress lines in real time
         let handle = pipe.fileHandleForReading
+        let tail = LineRingBuffer(capacity: 30)
 
         handle.readabilityHandler = { fileHandle in
             let data = fileHandle.availableData
@@ -143,6 +144,7 @@ actor HandBrakeService {
 
                 if !line.hasPrefix("Encoding: task") {
                     logCallback?(line)
+                    tail.append(line)
                 }
 
                 if let groups = HandBrakeService.match(line, pattern: #"(\d+\.\d+)\s*%"#) {
@@ -165,7 +167,9 @@ actor HandBrakeService {
         ProcessTracker.shared.unregister(proc)
 
         guard status == 0 else {
-            throw HandBrakeError.encodeFailed("HandBrakeCLI exited with code \(status)")
+            let recent = tail.snapshot()
+            let suffix = recent.isEmpty ? "" : "\n--- last HandBrakeCLI output ---\n" + recent.joined(separator: "\n")
+            throw HandBrakeError.encodeFailed("HandBrakeCLI exited with code \(status)\(suffix)")
         }
         guard FileManager.default.fileExists(atPath: outURL.path) else {
             throw HandBrakeError.encodeFailed("Encoding completed but output file not found: \(outURL.path)")
@@ -241,4 +245,33 @@ struct SubtitleTrack: Identifiable, Sendable {
     let language: String
     let type: String
     var id: Int { index }
+}
+
+// MARK: - LineRingBuffer
+
+/// Thread-safe fixed-capacity ring buffer for capturing the most recent log lines.
+private final class LineRingBuffer: @unchecked Sendable {
+    private let capacity: Int
+    private var lines: [String] = []
+    private let lock = NSLock()
+
+    init(capacity: Int) {
+        self.capacity = capacity
+        self.lines.reserveCapacity(capacity)
+    }
+
+    func append(_ line: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        if lines.count >= capacity {
+            lines.removeFirst(lines.count - capacity + 1)
+        }
+        lines.append(line)
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return lines
+    }
 }
