@@ -6,7 +6,7 @@ private let log = Logger(subsystem: "com.autoripper.app", category: "update")
 /// Checks GitHub Releases for a newer version of AutoRipper.
 @MainActor
 final class UpdateService: ObservableObject {
-    static let currentVersion = "2.2.0"
+    static let currentVersion = "2.2.1"
     private static let repoAPI = "https://api.github.com/repos/stevenob/AutoRipper/releases/latest"
 
     @Published var updateAvailable: Bool = false

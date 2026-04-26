@@ -319,6 +319,7 @@ final class QueueViewModel: ObservableObject {
         let audioIdxs = audio.isEmpty ? nil : audio.map(\.index)
         let subIdxs = subs.isEmpty ? nil : subs.map(\.index)
 
+        let jobId = jobs[index].id
         let result = try await handbrake.encode(
             inputPath: input.path,
             outputPath: outputPath,
@@ -333,10 +334,57 @@ final class QueueViewModel: ObservableObject {
                         self.jobs[index].progressText = text
                     }
                 }
+            },
+            logCallback: { [weak self] line in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let i = self.jobs.firstIndex(where: { $0.id == jobId }) {
+                        self.jobs[i].appendLog(line)
+                    }
+                }
             }
         )
         currentTask = nil
         return result
+    }
+
+    // MARK: - Public actions for Queue/History views
+
+    /// Retry a failed job — resets it to .queued and lets the worker pick it up.
+    /// Only valid when the source rip file still exists on disk.
+    func retry(jobId: String) {
+        guard let i = jobs.firstIndex(where: { $0.id == jobId }) else { return }
+        guard jobs[i].status == .failed else { return }
+        guard FileManager.default.fileExists(atPath: jobs[i].rippedFile.path) else {
+            jobs[i].error = "Source rip is no longer on disk: \(jobs[i].rippedFile.path)"
+            return
+        }
+        jobs[i].status = .queued
+        jobs[i].error = ""
+        jobs[i].progress = 0
+        jobs[i].progressText = "Queued for retry"
+        jobs[i].finishedAt = nil
+        jobs[i].logLines = []
+        FileLogger.shared.info("queue", "retry: \(jobs[i].discName) (\(jobId))")
+        startWorkerIfNeeded()
+    }
+
+    /// Remove a job from the queue/history (terminal state only).
+    func remove(jobId: String) {
+        guard let i = jobs.firstIndex(where: { $0.id == jobId }) else { return }
+        guard jobs[i].status == .done || jobs[i].status == .failed else { return }
+        jobs.remove(at: i)
+    }
+
+    /// Active jobs (queued + in-flight).
+    var activeJobs: [Job] {
+        jobs.filter { $0.status != .done && $0.status != .failed }
+    }
+
+    /// History (terminal state), newest first.
+    var historyJobs: [Job] {
+        jobs.filter { $0.status == .done || $0.status == .failed }
+            .sorted { ($0.finishedAt ?? $0.createdAt) > ($1.finishedAt ?? $1.createdAt) }
     }
 
     private func pruneFinished() {

@@ -1,11 +1,73 @@
 import SwiftUI
 
+enum AppTab: String, CaseIterable, Identifiable {
+    case disc = "Disc"
+    case queue = "Queue"
+    case history = "History"
+
+    var id: String { rawValue }
+    var systemImage: String {
+        switch self {
+        case .disc: return "opticaldisc"
+        case .queue: return "list.bullet.rectangle"
+        case .history: return "clock.arrow.circlepath"
+        }
+    }
+}
+
 struct ContentView: View {
     @ObservedObject private var config = AppConfig.shared
     @StateObject private var updateService = UpdateService()
     @StateObject private var ripVM = RipViewModel()
     @StateObject private var queueVM = QueueViewModel()
     @State private var showSettings = false
+    @State private var selectedTab: AppTab = .disc
+
+    var body: some View {
+        NavigationSplitView {
+            List(AppTab.allCases, selection: $selectedTab) { tab in
+                Label(tab.rawValue, systemImage: tab.systemImage)
+                    .badge(tab == .queue ? queueVM.activeJobs.count : 0)
+                    .tag(tab)
+            }
+            .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
+        } detail: {
+            switch selectedTab {
+            case .disc:    DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config, showSettings: $showSettings)
+            case .queue:   QueueView(queueVM: queueVM)
+            case .history: HistoryView(queueVM: queueVM)
+            }
+        }
+        .frame(minWidth: 800, minHeight: 500)
+        .sheet(isPresented: $showSettings) {
+            SettingsView(config: AppConfig.shared)
+                .frame(minWidth: 500, minHeight: 400)
+        }
+        .alert("Error", isPresented: Binding(
+            get: { ripVM.errorMessage != nil },
+            set: { if !$0 { ripVM.errorMessage = nil } }
+        )) {
+            Button("OK") { ripVM.errorMessage = nil }
+        } message: {
+            Text(ripVM.errorMessage ?? "")
+        }
+        .onAppear {
+            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent, editionLabel in
+                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel)
+            }
+            NotificationService.shared.requestPermission()
+            updateService.checkForUpdates()
+        }
+    }
+}
+
+/// The original Disc-tab content (scan/rip + log).
+struct DiscPaneView: View {
+    @ObservedObject var ripVM: RipViewModel
+    @ObservedObject var queueVM: QueueViewModel
+    @ObservedObject var updateService: UpdateService
+    @ObservedObject var config: AppConfig
+    @Binding var showSettings: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -272,35 +334,7 @@ struct ContentView: View {
                 .padding(.vertical, 8)
             }
 
-            // Queue status (compact)
-            if !queueVM.jobs.isEmpty {
-                Divider()
-                HStack(spacing: 8) {
-                    Image(systemName: "list.bullet")
-                        .foregroundStyle(.secondary)
-                    ForEach(queueVM.jobs.prefix(3)) { job in
-                        HStack(spacing: 4) {
-                            queueIcon(for: job.status)
-                            Text(job.discName)
-                                .lineLimit(1)
-                                .font(.caption)
-                            if job.status != .done && job.status != .failed && job.status != .queued {
-                                Text("\(job.progress)%")
-                                    .monospacedDigit()
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    Spacer()
-                    Text(queueVM.statusLabel)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .background(.bar.opacity(0.5))
-            }
+            // Queue status (compact) — removed; the sidebar Queue tab now shows full state.
 
             Divider()
 
@@ -391,39 +425,6 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-        }
-        .frame(minWidth: 650, minHeight: 450)
-        .sheet(isPresented: $showSettings) {
-            SettingsView(config: AppConfig.shared)
-                .frame(minWidth: 500, minHeight: 400)
-        }
-        .alert("Error", isPresented: Binding(
-            get: { ripVM.errorMessage != nil },
-            set: { if !$0 { ripVM.errorMessage = nil } }
-        )) {
-            Button("OK") { ripVM.errorMessage = nil }
-        } message: {
-            Text(ripVM.errorMessage ?? "")
-        }
-        .onAppear {
-            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent, editionLabel in
-                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel)
-            }
-            NotificationService.shared.requestPermission()
-            updateService.checkForUpdates()
-        }
-    }
-
-    @ViewBuilder
-    private func queueIcon(for status: JobStatus) -> some View {
-        switch status {
-        case .queued: Image(systemName: "clock").foregroundColor(.secondary).font(.caption2)
-        case .encoding: Image(systemName: "film").foregroundColor(.blue).font(.caption2)
-        case .organizing: Image(systemName: "folder").foregroundColor(.orange).font(.caption2)
-        case .scraping: Image(systemName: "photo").foregroundColor(.purple).font(.caption2)
-        case .uploading: Image(systemName: "icloud.and.arrow.up").foregroundColor(.cyan).font(.caption2)
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundColor(.green).font(.caption2)
-        case .failed: Image(systemName: "xmark.circle.fill").foregroundColor(.red).font(.caption2)
         }
     }
 }
