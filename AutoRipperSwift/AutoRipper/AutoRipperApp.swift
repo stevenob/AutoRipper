@@ -48,7 +48,7 @@ struct AutoRipperApp: App {
     }
 
     init() {
-        FileLogger.shared.info("app", "AutoRipper 3.0.4 starting")
-        log.info("AutoRipper 3.0.4 starting")
+        FileLogger.shared.info("app", "AutoRipper 3.0.5 starting")
+        log.info("AutoRipper 3.0.5 starting")
     }
 }

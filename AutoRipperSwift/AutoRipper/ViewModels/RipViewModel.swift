@@ -25,6 +25,10 @@ final class RipViewModel: ObservableObject {
     /// banner prompting the user to set per-title search overrides. Cleared on dismiss
     /// or new scan.
     @Published var unidentifiedDiscName: String?
+    /// Top TMDb candidates from the disc-level search, so the user can swap the
+    /// auto-picked one for a different match (e.g. when TMDb returned a sequel
+    /// when we wanted the original). Set during scan, cleared on new scan.
+    @Published var discCandidates: [MediaResult] = []
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
@@ -143,11 +147,13 @@ final class RipViewModel: ObservableObject {
     }
 
     /// Looks up the disc on TMDb, sets `cachedMediaResult` and `info.mediaTitle` on
-    /// success, or `unidentifiedDiscName` (for the banner) on miss. Used by both
-    /// manual scan and Full Auto.
+    /// success, or `unidentifiedDiscName` (for the banner) on miss. Also populates
+    /// `discCandidates` with the top results so the user can swap the auto-pick.
+    /// Used by both manual scan and Full Auto.
     private func lookupTMDb(for info: inout DiscInfo) async {
         let tmdb = TMDbService(config: config)
         let results = await tmdb.searchMedia(query: info.name)
+        self.discCandidates = Array(results.prefix(5))
         if var match = results.first {
             if match.mediaType == "movie", let details = await tmdb.getMovieDetails(tmdbId: match.tmdbId) {
                 match = details
@@ -165,6 +171,38 @@ final class RipViewModel: ObservableObject {
         }
     }
 
+    /// Replace the auto-picked TMDb match with one of the alternatives, or with
+    /// a result from a manual search. Updates `discInfo.mediaTitle` so the UI
+    /// header reflects the choice and the rip uses the right folder name.
+    func selectDiscMatch(_ match: MediaResult) {
+        Task {
+            let tmdb = TMDbService(config: config)
+            var enriched = match
+            if match.mediaType == "movie", let d = await tmdb.getMovieDetails(tmdbId: match.tmdbId) {
+                enriched = d
+            } else if match.mediaType == "tv", let d = await tmdb.getTvDetails(tmdbId: match.tmdbId) {
+                enriched = d
+            }
+            cachedMediaResult = enriched
+            unidentifiedDiscName = nil
+            if var info = discInfo {
+                info.mediaTitle = enriched.displayTitle
+                discInfo = info
+            }
+            FileLogger.shared.info("rip-vm", "user picked disc match: \(enriched.displayTitle)")
+        }
+    }
+
+    /// Re-run the TMDb disc search with a user-supplied query (used when the auto
+    /// search returned nothing or wrong results). Populates `discCandidates`.
+    func searchDiscMatches(query: String) {
+        Task {
+            let tmdb = TMDbService(config: config)
+            let results = await tmdb.searchMedia(query: query)
+            discCandidates = Array(results.prefix(5))
+        }
+    }
+
     func scanDisc() {
         guard !isScanning else { return }
         isScanning = true
@@ -172,6 +210,8 @@ final class RipViewModel: ObservableObject {
         logLines = []
         discInfo = nil
         selectedTitles = []
+        discCandidates = []
+        unidentifiedDiscName = nil
 
         runningTask = Task {
             do {
