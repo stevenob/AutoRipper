@@ -147,8 +147,12 @@ struct DiscPaneView: View {
             Divider()
 
             // Main content
-            if let info = ripVM.discInfo {
-                // Scanned — show titles
+            if ripVM.isRipping, let info = ripVM.discInfo {
+                // Hero view while ripping — focused poster + per-title status,
+                // replaces the title table to put the user in flow.
+                RipHeroView(ripVM: ripVM, info: info)
+            } else if let info = ripVM.discInfo {
+                // Scanned but not ripping — show titles + identify panel
                 VStack(spacing: 0) {
                     HStack {
                         Image(systemName: info.type == "bluray" ? "opticaldisc.fill" : "opticaldisc")
@@ -282,55 +286,29 @@ struct DiscPaneView: View {
                     .tableStyle(.inset(alternatesRowBackgrounds: true))
                 }
             } else {
-                // No scan — show big button
-                Spacer()
+                // No scan — hero with last-completed celebration & big scan button.
                 if ripVM.isScanning {
+                    Spacer()
                     VStack(spacing: 12) {
                         ProgressView()
                             .controlSize(.large)
                         Text("Scanning disc…")
                             .foregroundStyle(.secondary)
                     }
+                    Spacer()
                 } else {
-                    Button {
+                    InsertNextDiscHero(ripVM: ripVM) {
                         if ripVM.fullAutoEnabled {
                             ripVM.fullAuto()
                         } else {
                             ripVM.scanDisc()
                         }
-                    } label: {
-                        VStack(spacing: 12) {
-                            Image(systemName: ripVM.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
-                                .font(.system(size: 64))
-                            if ripVM.fullAutoEnabled {
-                                Text("Full Auto")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            } else if !ripVM.detectedDiscType.isEmpty {
-                                Text("Scan \(ripVM.detectedDiscType)")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            } else {
-                                Text("Scan Disc")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            }
-                            if !ripVM.detectedDiscName.isEmpty {
-                                Text(ripVM.detectedDiscName)
-                                    .font(.caption)
-                                    .foregroundStyle(.white.opacity(0.8))
-                            }
-                        }
-                        .frame(width: 220, height: 180)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
                 }
-                Spacer()
             }
 
-            // Progress
-            if ripVM.isRipping || ripVM.ripProgress > 0 {
+            // Progress (only when not on the hero — hero has its own progress bar)
+            if (ripVM.isRipping || ripVM.ripProgress > 0), ripVM.discInfo == nil {
                 Divider()
                 VStack(spacing: 4) {
                     ProgressView(value: ripVM.ripProgress)

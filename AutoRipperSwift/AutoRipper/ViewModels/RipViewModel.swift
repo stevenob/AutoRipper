@@ -29,6 +29,15 @@ final class RipViewModel: ObservableObject {
     /// auto-picked one for a different match (e.g. when TMDb returned a sequel
     /// when we wanted the original). Set during scan, cleared on new scan.
     @Published var discCandidates: [MediaResult] = []
+    /// Per-title rip status, used by the hero "now ripping" view. Keyed by titleId.
+    @Published var titleRipStatuses: [Int: TitleRipStatus] = [:]
+    /// The title currently being ripped (so the hero can highlight the right row).
+    @Published var currentRippingTitleId: Int?
+    /// MediaResult of the most recent successful rip, used to give the
+    /// "Insert next disc" hero a brief celebratory state.
+    @Published var lastCompletedMedia: MediaResult?
+    /// Display name of the disc whose rip just finished (for the "next disc" hero).
+    @Published var lastCompletedDiscName: String?
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
@@ -134,13 +143,20 @@ final class RipViewModel: ObservableObject {
             }
 
             await MainActor.run { [weak self, discType, discName] in
-                self?.detectedDiscType = discType
-                self?.detectedDiscName = discName
+                guard let self else { return }
+                let isNewDisc = !discType.isEmpty && self.detectedDiscType.isEmpty
+                self.detectedDiscType = discType
+                self.detectedDiscName = discName
                 if !discType.isEmpty {
                     let name = discName.isEmpty ? "" : " — \(discName)"
-                    self?.statusText = "\(discType) detected\(name)"
+                    self.statusText = "\(discType) detected\(name)"
+                    if isNewDisc {
+                        // New disc inserted — clear the "just finished" celebration.
+                        self.lastCompletedMedia = nil
+                        self.lastCompletedDiscName = nil
+                    }
                 } else {
-                    self?.statusText = "No disc detected"
+                    self.statusText = "No disc detected"
                 }
             }
         }
@@ -260,10 +276,18 @@ final class RipViewModel: ObservableObject {
         runningTask = Task {
             let start = Date()
 
+            // Initialize per-title status for the hero view: every selected title
+            // starts as .queued, transitions to .ripping/.done/.failed below.
+            var initial: [Int: TitleRipStatus] = [:]
+            for tid in titlesToRip { initial[tid] = .queued }
+            titleRipStatuses = initial
+
             NotificationService.shared.notify(title: "Ripping", message: "\(folderName) — \(titlesToRip.count) title(s)")
 
             for (idx, tid) in titlesToRip.enumerated() {
                 statusText = "Ripping title \(tid) (\(idx + 1)/\(titlesToRip.count))…"
+                currentRippingTitleId = tid
+                titleRipStatuses[tid] = .ripping(percent: 0)
                 let totalTitles = titlesToRip.count
                 let titleIndex = idx
                 let titleStart = Date()
@@ -331,6 +355,7 @@ final class RipViewModel: ObservableObject {
                                 let overall = (Double(titleIndex) + Double(pct) / 100.0) / Double(totalTitles)
                                 self.ripProgress = overall
                                 self.statusText = "Ripping title \(tid) (\(titleIndex + 1)/\(totalTitles)) — \(pct)%"
+                                self.titleRipStatuses[tid] = .ripping(percent: pct)
                             }
                         },
                         logCallback: { [weak self] line in
@@ -340,6 +365,7 @@ final class RipViewModel: ObservableObject {
                     let titleElapsed = Date().timeIntervalSince(titleStart)
                     sizeMonitor.cancel()
                     config.inFlightRipPath = nil
+                    titleRipStatuses[tid] = .done
                     // In Full Auto, every successfully-ripped title flows through the
                     // encode → organize → scrape → NAS pipeline as its own queue job.
                     // Manual mode still ends here (rip-only).
@@ -362,6 +388,7 @@ final class RipViewModel: ObservableObject {
                 } catch {
                     sizeMonitor.cancel()
                     config.inFlightRipPath = nil
+                    titleRipStatuses[tid] = .failed(message: error.localizedDescription)
                     statusText = "Rip failed: \(error.localizedDescription)"
                     errorMessage = error.localizedDescription
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
@@ -397,6 +424,11 @@ final class RipViewModel: ObservableObject {
             ripProgress = 1.0
             statusText = "Rip complete"
             isRipping = false
+            currentRippingTitleId = nil
+            // Stash the just-finished media so the "insert next disc" hero can
+            // celebrate it briefly before fading back to the empty state.
+            lastCompletedMedia = cachedMediaResult
+            lastCompletedDiscName = info.mediaTitle.isEmpty ? info.name : info.mediaTitle
 
             let elapsed = Date().timeIntervalSince(start)
             let mins = Int(elapsed) / 60
@@ -414,6 +446,7 @@ final class RipViewModel: ObservableObject {
             selectedTitles = []
             ripProgress = 0
             logLines = []
+            titleRipStatuses = [:]
             statusText = batchModeEnabled && fullAutoEnabled
                 ? "Batch — insert next disc"
                 : "Ready — insert next disc"
@@ -427,15 +460,41 @@ final class RipViewModel: ObservableObject {
 
     /// Polls drutil until a disc is detected (or the user disables batch mode /
     /// aborts), then kicks off Full Auto. Used by `batch-mode`.
+    ///
+    /// Two-phase wait so we don't trigger on the disc that *just* finished:
+    ///   1. Wait until drutil reports NO disc (eject completed).
+    ///   2. Wait until drutil reports a disc (next one inserted).
     private func waitForNextDiscAndContinue() async {
-        FileLogger.shared.info("rip-vm", "batch: waiting for next disc")
-        // The drive needs a moment after eject before drutil reports an empty tray.
-        try? await Task.sleep(for: .seconds(5))
+        FileLogger.shared.info("rip-vm", "batch: waiting for eject to complete")
+        statusText = "Batch — waiting for eject…"
+        // Phase 1: wait for the drive to be empty.
+        // Bail out after ~60s if drutil never reports empty (some drives lie).
+        var waited = 0
+        while batchModeEnabled && !Task.isCancelled && waited < 60 {
+            let detected = await currentDiscType()
+            if detected.isEmpty { break }
+            try? await Task.sleep(for: .seconds(2))
+            waited += 2
+        }
+        guard batchModeEnabled, !Task.isCancelled else {
+            FileLogger.shared.info("rip-vm", "batch: stopped during eject wait")
+            return
+        }
+
+        FileLogger.shared.info("rip-vm", "batch: drive empty, waiting for next disc")
+        statusText = batchModeEnabled
+            ? "Batch — insert next disc"
+            : "Ready — insert next disc"
+
+        // Phase 2: poll for new disc insertion.
         while batchModeEnabled && !Task.isCancelled {
             let detected = await currentDiscType()
             if !detected.isEmpty {
                 FileLogger.shared.info("rip-vm", "batch: new disc detected (\(detected)), starting Full Auto")
                 statusText = "Batch — \(detected) detected, scanning…"
+                // Give MakeMKV a moment to see the freshly-mounted disc — some drives
+                // report it in drutil before the volume actually mounts.
+                try? await Task.sleep(for: .seconds(3))
                 await MainActor.run { self.fullAuto() }
                 return
             }
@@ -520,6 +579,15 @@ final class RipViewModel: ObservableObject {
         statusText = "Aborted"
         batchModeEnabled = false  // abort breaks the batch loop
     }
+}
+
+/// Per-title rip status used by the RipHeroView. Carries enough info to render
+/// a row without re-querying anything.
+enum TitleRipStatus: Sendable, Equatable {
+    case queued
+    case ripping(percent: Int)
+    case done
+    case failed(message: String)
 }
 
 /// Tracks the last time MakeMKV's PRGV callback fired. Used by the file-size

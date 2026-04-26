@@ -134,14 +134,14 @@ private struct JobRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                statusIcon
+            HStack(spacing: 10) {
+                posterThumb
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(job.mediaResult?.displayTitle ?? job.discName)
                             .fontWeight(.medium)
                             .lineLimit(1)
-                        if job.mediaResult == nil {
+                        if job.mediaResult == nil && job.intent != .extra {
                             Image(systemName: "questionmark.circle.fill")
                                 .foregroundStyle(.yellow)
                                 .font(.caption)
@@ -167,9 +167,9 @@ private struct JobRow: View {
                         .lineLimit(1)
                 }
                 Spacer()
-                if let queueVM, showActions, canReidentify {
+                if let queueVM, showActions, canReidentify, job.mediaResult == nil {
                     Button("Identify…") {
-                        identifyQuery = job.mediaResult?.displayTitle ?? job.discName
+                        identifyQuery = job.discName
                         showIdentify = true
                     }
                     .buttonStyle(.bordered)
@@ -233,6 +233,52 @@ private struct JobRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Small TMDb poster thumb with the job-status icon overlaid in the bottom-right.
+    /// Falls back to a film placeholder when there's no poster (no TMDb match,
+    /// or `.extra` intent which intentionally skips TMDb).
+    @ViewBuilder
+    private var posterThumb: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if let path = job.mediaResult?.posterPath,
+               let url = URL(string: "https://image.tmdb.org/t/p/w154\(path)") {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().aspectRatio(2/3, contentMode: .fill)
+                    default:
+                        posterPlaceholder
+                    }
+                }
+                .frame(width: 36, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+            } else {
+                posterPlaceholder
+                    .frame(width: 36, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+            }
+            // Status indicator overlaid on the poster.
+            statusIcon
+                .font(.caption2)
+                .padding(2)
+                .background(Color(nsColor: .windowBackgroundColor).opacity(0.85))
+                .clipShape(Circle())
+                .padding(2)
+        }
+    }
+
+    @ViewBuilder
+    private var posterPlaceholder: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color.gray.opacity(0.30), Color.gray.opacity(0.12)],
+                startPoint: .top, endPoint: .bottom
+            )
+            Image(systemName: "film")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     /// Allow re-identify until the file has been organized (after that, the
