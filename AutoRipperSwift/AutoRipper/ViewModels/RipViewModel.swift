@@ -17,6 +17,10 @@ final class RipViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var detectedDiscType: String = ""
     @Published var detectedDiscName: String = ""
+    /// When on, after a Full Auto rip ejects the disc, the app polls for the next
+    /// disc and runs Full Auto again automatically. Disables on the next call to
+    /// `abort()` or when the user toggles it off.
+    @Published var batchModeEnabled: Bool = false
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
@@ -293,8 +297,59 @@ final class RipViewModel: ObservableObject {
             selectedTitles = []
             ripProgress = 0
             logLines = []
-            statusText = "Ready — insert next disc"
+            statusText = batchModeEnabled && fullAutoEnabled
+                ? "Batch — insert next disc"
+                : "Ready — insert next disc"
+
+            // Batch mode: wait for the next disc to appear, then auto-Full-Auto.
+            if batchModeEnabled && fullAutoEnabled {
+                await waitForNextDiscAndContinue()
+            }
         }
+    }
+
+    /// Polls drutil until a disc is detected (or the user disables batch mode /
+    /// aborts), then kicks off Full Auto. Used by `batch-mode`.
+    private func waitForNextDiscAndContinue() async {
+        FileLogger.shared.info("rip-vm", "batch: waiting for next disc")
+        // The drive needs a moment after eject before drutil reports an empty tray.
+        try? await Task.sleep(for: .seconds(5))
+        while batchModeEnabled && !Task.isCancelled {
+            let detected = await currentDiscType()
+            if !detected.isEmpty {
+                FileLogger.shared.info("rip-vm", "batch: new disc detected (\(detected)), starting Full Auto")
+                statusText = "Batch — \(detected) detected, scanning…"
+                await MainActor.run { self.fullAuto() }
+                return
+            }
+            try? await Task.sleep(for: .seconds(5))
+        }
+        FileLogger.shared.info("rip-vm", "batch: stopped (batchModeEnabled=\(batchModeEnabled))")
+    }
+
+    /// Synchronous-style query of drutil for current disc type, "" if no disc.
+    private func currentDiscType() async -> String {
+        await Task.detached { () -> String in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/drutil")
+            proc.arguments = ["status"]
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = pipe
+            try? proc.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+            guard let output = String(data: data, encoding: .utf8) else { return "" }
+            for line in output.components(separatedBy: .newlines) {
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if t.hasPrefix("Type:") {
+                    let v = t.replacingOccurrences(of: "Type:", with: "").trimmingCharacters(in: .whitespaces)
+                    if v.lowercased().contains("bd") || v.lowercased().contains("blu") { return "Blu-ray" }
+                    if v.lowercased().contains("dvd") { return "DVD" }
+                }
+            }
+            return ""
+        }.value
     }
 
     func fullAuto() {
@@ -344,5 +399,6 @@ final class RipViewModel: ObservableObject {
         isRipping = false
         ripProgress = 0
         statusText = "Aborted"
+        batchModeEnabled = false  // abort breaks the batch loop
     }
 }

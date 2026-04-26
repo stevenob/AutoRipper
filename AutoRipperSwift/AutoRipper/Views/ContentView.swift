@@ -111,6 +111,13 @@ struct DiscPaneView: View {
                 .toggleStyle(.checkbox)
                 .disabled(ripVM.isScanning || ripVM.isRipping)
 
+                Toggle(isOn: $ripVM.batchModeEnabled) {
+                    Label("Batch", systemImage: "rectangle.stack.fill")
+                }
+                .toggleStyle(.checkbox)
+                .disabled(!ripVM.fullAutoEnabled)
+                .help("After each disc, eject and wait for the next one. Requires Full Auto.")
+
                 Text("Skip under:")
                     .foregroundStyle(.secondary)
                     .font(.caption)

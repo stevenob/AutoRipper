@@ -107,6 +107,18 @@ actor HandBrakeService {
     ) async throws -> URL {
         let hbPath = try getPath()
 
+        // Validate the preset against HandBrakeCLI's --preset-list cache so we fail
+        // with a clear error here rather than after launching the encoder (which
+        // exits with code 3 and no obvious explanation).
+        if let presets = try? await listPresets(), !presets.isEmpty,
+           !presets.contains(preset) {
+            let suggestion = presets.first { $0.lowercased().contains(preset.lowercased()) }
+                ?? presets.prefix(3).joined(separator: ", ")
+            throw HandBrakeError.encodeFailed(
+                "HandBrake preset \"\(preset)\" not found. Did you mean: \(suggestion)?"
+            )
+        }
+
         let outURL = URL(fileURLWithPath: outputPath).deletingPathExtension().appendingPathExtension("mkv")
         try FileManager.default.createDirectory(
             at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true
