@@ -194,10 +194,19 @@ struct ContentView: View {
                                     .pickerStyle(.menu)
                                     .controlSize(.small)
                                     .frame(width: 110)
+                                } else if ripVM.intent(for: title.id) == .movie {
+                                    TextField("Search title (optional)", text: Binding(
+                                        get: { ripVM.nameOverride(for: title.id) },
+                                        set: { ripVM.titleNameOverrides[title.id] = $0 }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .controlSize(.small)
+                                    .frame(width: 180)
+                                    .help("Override TMDb search query for this title — useful for collection discs (e.g. Saw 1+2+3) where each title is a different movie.")
                                 }
                             }
                         }
-                        .width(210)
+                        .width(290)
                     }
                     .tableStyle(.inset(alternatesRowBackgrounds: true))
                 }

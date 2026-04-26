@@ -22,9 +22,14 @@ final class RipViewModel: ObservableObject {
     @Published var titleIntents: [Int: JobIntent] = [:]
     /// Per-title edition label (e.g. "Theatrical", "Director's Cut"). Used only when intent == .edition.
     @Published var titleEditionLabels: [Int: String] = [:]
+    /// Per-title TMDb search override. When set (and intent == .movie), the title is queued
+    /// with this name as the search query instead of the disc name. Used for collection discs
+    /// where each title is a different movie (e.g. Saw 1+2+3 on one disc).
+    @Published var titleNameOverrides: [Int: String] = [:]
 
     func intent(for titleId: Int) -> JobIntent { titleIntents[titleId] ?? .movie }
     func editionLabel(for titleId: Int) -> String { titleEditionLabels[titleId] ?? "" }
+    func nameOverride(for titleId: Int) -> String { titleNameOverrides[titleId] ?? "" }
 
     private let config: AppConfig
     private let makemkv: MakeMKVService
@@ -227,7 +232,13 @@ final class RipViewModel: ObservableObject {
                         let intent = intent(for: tid)
                         let edition = editionLabel(for: tid)
                         let editionParam = (intent == .edition && !edition.isEmpty) ? edition : nil
-                        onRipComplete?(info.name, file, titleElapsed, resolution, card, cachedMediaResult, intent, editionParam)
+                        // If the user set a per-title name override, use that as the search
+                        // query and skip the cached disc-level TMDb result (which was looked
+                        // up against the disc name and won't match the override).
+                        let override = nameOverride(for: tid)
+                        let queryName = override.isEmpty ? info.name : override
+                        let mediaResult = override.isEmpty ? cachedMediaResult : nil
+                        onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam)
                     }
                 } catch {
                     statusText = "Rip failed: \(error.localizedDescription)"
