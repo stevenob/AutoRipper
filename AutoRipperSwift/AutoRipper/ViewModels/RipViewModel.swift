@@ -560,24 +560,53 @@ final class RipViewModel: ObservableObject {
     }
 
     func ejectDisc() {
+        // Reset UI to the empty/insert-next state immediately — visually obvious
+        // feedback that the click did something, even before the drive responds.
+        discInfo = nil
+        selectedTitles = []
+        discCandidates = []
+        unidentifiedDiscName = nil
+        titleRipStatuses = [:]
+        ripProgress = 0
+        statusText = "Ejecting…"
+        detectedDiscType = ""
+        detectedDiscName = ""
+
         Task.detached {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/drutil")
             proc.arguments = ["eject"]
             try? proc.run()
             proc.waitUntilExit()
+            // Re-poll drutil so the toolbar/status reflect the now-empty drive.
+            await MainActor.run { [weak self] in
+                self?.statusText = "Ready — insert a disc"
+                self?.detectDisc()
+            }
         }
     }
 
     func abort() {
         runningTask?.cancel()
         runningTask = nil
-        ProcessTracker.shared.terminateLatest()
+        // Terminate ALL tracked child processes — when ripping multiple titles
+        // (or with HandBrake also running for an earlier title in Full Auto), the
+        // single-process terminateLatest left orphans behind.
+        ProcessTracker.shared.terminateAll()
         isScanning = false
         isRipping = false
         ripProgress = 0
+        currentRippingTitleId = nil
+        // Mark any in-flight title as failed so the UI doesn't show a half-ripped
+        // bar forever.
+        for (id, status) in titleRipStatuses {
+            if case .ripping = status {
+                titleRipStatuses[id] = .failed(message: "Aborted by user")
+            }
+        }
         statusText = "Aborted"
         batchModeEnabled = false  // abort breaks the batch loop
+        config.inFlightRipPath = nil
     }
 }
 
