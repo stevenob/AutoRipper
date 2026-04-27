@@ -349,3 +349,59 @@ final class TMDbCleanDiscNameExtendedTests: XCTestCase {
         XCTAssertTrue(cleaned.query.lowercased().contains("dirty grandpa"))
     }
 }
+
+// MARK: - GenericWebhookService payload tests
+
+final class GenericWebhookPayloadTests: XCTestCase {
+
+    func testCompletePayloadIncludesCoreFields() {
+        var job = Job(discName: "Blade Runner", rippedFile: URL(fileURLWithPath: "/tmp/br.mkv"),
+                      ripElapsed: 60, resolution: "1920x1080", mediaResult: nil, intent: .movie)
+        job.status = .done
+        job.encodeElapsed = 120
+        job.finishedAt = Date()
+
+        let p = GenericWebhookService.payload(event: "job.completed", job: job)
+        XCTAssertEqual(p["event"] as? String, "job.completed")
+        XCTAssertEqual(p["discName"] as? String, "Blade Runner")
+        XCTAssertEqual(p["status"] as? String, "done")
+        XCTAssertEqual(p["intent"] as? String, "movie")
+        XCTAssertEqual(p["ripElapsed"] as? Double, 60)
+        XCTAssertEqual(p["encodeElapsed"] as? Double, 120)
+        XCTAssertEqual(p["resolution"] as? String, "1920x1080")
+        XCTAssertNotNil(p["finishedAt"])
+    }
+
+    func testFailedPayloadIncludesErrorAndOmitsAbsentMedia() {
+        var job = Job(discName: "Bad Disc", rippedFile: URL(fileURLWithPath: "/tmp/x.mkv"))
+        job.status = .failed
+        job.error = "HandBrakeCLI exited with code 4"
+
+        let p = GenericWebhookService.payload(event: "job.failed", job: job)
+        XCTAssertEqual(p["event"] as? String, "job.failed")
+        XCTAssertEqual(p["status"] as? String, "failed")
+        XCTAssertEqual(p["error"] as? String, "HandBrakeCLI exited with code 4")
+        // No mediaResult set, so these keys must be absent.
+        XCTAssertNil(p["title"])
+        XCTAssertNil(p["year"])
+        XCTAssertNil(p["mediaType"])
+    }
+
+    func testEpisodePayloadIncludesSeasonEpisodeFields() {
+        var job = Job(discName: "Show", rippedFile: URL(fileURLWithPath: "/tmp/s.mkv"),
+                      intent: .episode, seasonNumber: 2, episodeNumber: 5, episodeTitle: "The Pilot")
+        job.status = .done
+
+        let p = GenericWebhookService.payload(event: "job.completed", job: job)
+        XCTAssertEqual(p["intent"] as? String, "episode")
+        XCTAssertEqual(p["season"] as? Int, 2)
+        XCTAssertEqual(p["episode"] as? Int, 5)
+        XCTAssertEqual(p["episodeTitle"] as? String, "The Pilot")
+    }
+
+    func testPayloadEncodesAsValidJSON() throws {
+        let job = Job(discName: "X", rippedFile: URL(fileURLWithPath: "/tmp/x.mkv"))
+        let p = GenericWebhookService.payload(event: "job.completed", job: job)
+        XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: p, options: [.sortedKeys]))
+    }
+}

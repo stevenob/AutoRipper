@@ -341,45 +341,85 @@ private struct NASPane: View {
 private struct DiscordPane: View {
     @ObservedObject var config: AppConfig
     @State private var revealWebhook = false
+    @State private var revealGenericWebhook = false
     @State private var stageStatus: [String: String] = [:]
+    @State private var genericTestStatus: String = ""
 
     private let stages = ["rip", "encode", "organize", "scrape", "complete"]
 
     var body: some View {
         Form {
-            HStack {
-                Text("Webhook URL:").frame(width: 130, alignment: .trailing)
-                if revealWebhook {
-                    TextField("", text: $config.discordWebhook).textFieldStyle(.roundedBorder)
-                } else {
-                    SecureField("", text: $config.discordWebhook).textFieldStyle(.roundedBorder)
+            Section {
+                HStack {
+                    Text("Webhook URL:").frame(width: 130, alignment: .trailing)
+                    if revealWebhook {
+                        TextField("", text: $config.discordWebhook).textFieldStyle(.roundedBorder)
+                    } else {
+                        SecureField("", text: $config.discordWebhook).textFieldStyle(.roundedBorder)
+                    }
+                    Button { revealWebhook.toggle() } label: {
+                        Image(systemName: revealWebhook ? "eye.slash" : "eye")
+                    }
                 }
-                Button { revealWebhook.toggle() } label: {
-                    Image(systemName: revealWebhook ? "eye.slash" : "eye")
+
+                HStack {
+                    Spacer().frame(width: 130)
+                    Button("Send Test Embed") { Task { await sendTest() } }
+                        .disabled(config.discordWebhook.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Spacer()
                 }
-            }
 
-            HStack {
-                Spacer().frame(width: 130)
-                Button("Send Test Embed") { Task { await sendTest() } }
-                    .disabled(config.discordWebhook.trimmingCharacters(in: .whitespaces).isEmpty)
-                Spacer()
-            }
-
-            if !stageStatus.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(stages, id: \.self) { stage in
-                        if let st = stageStatus[stage] {
-                            HStack(spacing: 6) {
-                                Spacer().frame(width: 130)
-                                Image(systemName: st == "✓" ? "checkmark.circle.fill" : "circle.dotted")
-                                    .foregroundStyle(st == "✓" ? .green : .secondary)
-                                Text(stage).font(.caption)
-                                Spacer()
+                if !stageStatus.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(stages, id: \.self) { stage in
+                            if let st = stageStatus[stage] {
+                                HStack(spacing: 6) {
+                                    Spacer().frame(width: 130)
+                                    Image(systemName: st == "✓" ? "checkmark.circle.fill" : "circle.dotted")
+                                        .foregroundStyle(st == "✓" ? .green : .secondary)
+                                    Text(stage).font(.caption)
+                                    Spacer()
+                                }
                             }
                         }
                     }
                 }
+            } header: {
+                Text("Discord")
+            }
+
+            Section {
+                HStack {
+                    Text("Webhook URL:").frame(width: 130, alignment: .trailing)
+                    if revealGenericWebhook {
+                        TextField("https://example.com/hook", text: $config.genericWebhookURL)
+                            .textFieldStyle(.roundedBorder)
+                    } else {
+                        SecureField("https://example.com/hook", text: $config.genericWebhookURL)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    Button { revealGenericWebhook.toggle() } label: {
+                        Image(systemName: revealGenericWebhook ? "eye.slash" : "eye")
+                    }
+                }
+                HStack {
+                    Spacer().frame(width: 130)
+                    Text("POSTed JSON on job complete/fail. Works with Home Assistant, n8n, Slack/Mattermost incoming webhooks, custom dashboards.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                HStack {
+                    Spacer().frame(width: 130)
+                    Button("Send Test Payload") { Task { await sendGenericTest() } }
+                        .disabled(config.genericWebhookURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if !genericTestStatus.isEmpty {
+                        Text(genericTestStatus).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            } header: {
+                Text("Generic webhook")
             }
         }
         .formStyle(.grouped)
@@ -401,6 +441,14 @@ private struct DiscordPane: View {
             }
             stageStatus[stage] = "✓"
             try? await Task.sleep(for: .milliseconds(150))
+        }
+    }
+
+    private func sendGenericTest() async {
+        genericTestStatus = "Sending…"
+        switch await GenericWebhookService(config: config).sendTest() {
+        case .success: genericTestStatus = "✓ Delivered"
+        case .failure(let e): genericTestStatus = "✗ \(e.localizedDescription)"
         }
     }
 }

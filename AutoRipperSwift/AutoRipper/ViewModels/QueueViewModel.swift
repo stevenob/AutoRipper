@@ -136,6 +136,7 @@ final class QueueViewModel: ObservableObject {
             await card.skip("nas")
             await card.complete(footer: "Kept as raw rip (no encode)")
             NotificationService.shared.notify(title: "Extra Saved", message: jobs[index].discName)
+            await GenericWebhookService(config: config).notifyComplete(jobs[index])
             return
         }
 
@@ -187,6 +188,7 @@ final class QueueViewModel: ObservableObject {
             FileLogger.shared.error("queue", "encode FAILED: \(jobs[index].discName) — \(error.localizedDescription)")
             await card.fail("encode", detail: error.localizedDescription)
             NotificationService.shared.notify(title: "Encode Failed", message: jobs[index].discName)
+            await GenericWebhookService(config: config).notifyFailed(jobs[index])
             return
         }
 
@@ -289,6 +291,7 @@ final class QueueViewModel: ObservableObject {
                     jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                     await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
                     NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
+                    await GenericWebhookService(config: config).notifyComplete(jobs[index])
                     return
                 }
 
@@ -317,6 +320,7 @@ final class QueueViewModel: ObservableObject {
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.fail("nas", detail: error.localizedDescription)
                 NotificationService.shared.notify(title: "NAS Copy Failed", message: jobs[index].discName)
+                await GenericWebhookService(config: config).notifyFailed(jobs[index])
                 return
             }
         } else {
@@ -336,6 +340,7 @@ final class QueueViewModel: ObservableObject {
         jobs[index].finishedAt = Date()
         await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
         NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
+        await GenericWebhookService(config: config).notifyComplete(jobs[index])
 
         // Disk space may have just been freed (NAS copy + local cleanup). Give any
         // jobs that previously failed with disk-space errors another shot.

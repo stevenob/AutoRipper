@@ -57,6 +57,11 @@ final class AppConfig: ObservableObject {
     @Published var verboseLogging: Bool {
         didSet { defaults.set(verboseLogging, forKey: "verboseLogging") }
     }
+    /// Optional generic outbound webhook URL — called with a JSON payload on
+    /// job completion/failure. Useful for Home Assistant, Slack, n8n, etc.
+    @Published var genericWebhookURL: String {
+        didSet { defaults.set(genericWebhookURL, forKey: "genericWebhookURL") }
+    }
     /// Path of a MakeMKV-rip-in-progress. Set just before `ripTitle`, cleared on
     /// success or caught failure. If the app crashes/exits mid-rip, the next launch
     /// finds this set and deletes the partial file.
@@ -85,5 +90,6 @@ final class AppConfig: ObservableObject {
         self.historyRetentionDays = d.object(forKey: "historyRetentionDays") as? Int ?? 30
         self.preventSleep = d.object(forKey: "preventSleep") as? Bool ?? true
         self.verboseLogging = d.object(forKey: "verboseLogging") as? Bool ?? false
+        self.genericWebhookURL = d.string(forKey: "genericWebhookURL") ?? ""
     }
 }
