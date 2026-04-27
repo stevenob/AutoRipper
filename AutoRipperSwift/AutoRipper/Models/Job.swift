@@ -28,6 +28,9 @@ struct Job: Identifiable, Sendable, Codable {
     var progressText: String = "Queued"
     var ripElapsed: TimeInterval = 0
     var encodeElapsed: TimeInterval = 0
+    var organizeElapsed: TimeInterval = 0
+    var scrapeElapsed: TimeInterval = 0
+    var nasElapsed: TimeInterval = 0
     var mediaResult: MediaResult?
     var intent: JobIntent = .movie
     /// For `intent == .edition` only — e.g. "Theatrical", "Director's Cut".
@@ -52,7 +55,8 @@ struct Job: Identifiable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
-             status, error, progress, progressText, ripElapsed, encodeElapsed,
+             status, error, progress, progressText,
+             ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
              seasonNumber, episodeNumber, episodeTitle,
              logLines, createdAt, finishedAt

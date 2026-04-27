@@ -17,17 +17,27 @@ struct QueueView: View {
             jobs: jobs,
             selectedId: $selectedId,
             queueVM: queueVM,
-            emptyMessage: "Queue is empty"
+            emptyMessage: "Queue is empty",
+            footer: AnyView(DiskSpaceBar(outputDir: AppConfig.shared.outputDir)),
+            groupByDisc: true
         )
     }
 
     private var badgeText: String {
         let inFlight = queueVM.activeJobs.filter { $0.status != .failed }.count
         let failed = queueVM.failedCount
-        if failed > 0 && inFlight > 0 { return "\(inFlight) active · \(failed) failed" }
+        let etaSuffix = queueVM.totalRemainingETA().map { " · ~\(Self.formatETA($0))" } ?? ""
+        if failed > 0 && inFlight > 0 { return "\(inFlight) active · \(failed) failed\(etaSuffix)" }
         if failed > 0 { return "\(failed) failed" }
-        if inFlight > 0 { return queueVM.statusLabel }
+        if inFlight > 0 { return "\(queueVM.statusLabel)\(etaSuffix)" }
         return "Idle"
+    }
+
+    private static func formatETA(_ seconds: TimeInterval) -> String {
+        let s = Int(seconds)
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        return "\(s / 3600)h \((s % 3600) / 60)m"
     }
 }
 
@@ -51,7 +61,9 @@ struct HistoryView: View {
             selectedId: $selectedId,
             queueVM: queueVM,
             emptyMessage: search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"",
-            search: $search
+            search: $search,
+            footer: nil,
+            groupByDisc: false
         )
     }
 }
@@ -66,6 +78,22 @@ private struct SplitJobView: View {
     let queueVM: QueueViewModel
     let emptyMessage: String
     var search: Binding<String>? = nil
+    var footer: AnyView? = nil
+    var groupByDisc: Bool = false
+
+    /// Group jobs by their source disc directory (`rippedFile.deletingLastPathComponent`).
+    /// All titles ripped from the same disc share one folder, so grouping by parent
+    /// path naturally collects "all titles from this disc".
+    private var groupedJobs: [(discFolder: String, jobs: [Job])] {
+        var seen: [String] = []
+        var bucket: [String: [Job]] = [:]
+        for job in jobs {
+            let key = job.rippedFile.deletingLastPathComponent().lastPathComponent
+            if bucket[key] == nil { seen.append(key) }
+            bucket[key, default: []].append(job)
+        }
+        return seen.map { ($0, bucket[$0] ?? []) }
+    }
 
     var body: some View {
         HSplitView {
@@ -96,6 +124,39 @@ private struct SplitJobView: View {
                         Text(emptyMessage).foregroundStyle(.secondary).font(.caption)
                     }
                     Spacer()
+                } else if groupByDisc {
+                    List(selection: $selectedId) {
+                        ForEach(groupedJobs, id: \.discFolder) { group in
+                            if group.jobs.count > 1 {
+                                Section {
+                                    ForEach(group.jobs) { job in
+                                        JobSidebarRow(job: job)
+                                            .tag(job.id)
+                                    }
+                                } header: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "opticaldisc")
+                                            .foregroundStyle(.tertiary)
+                                            .font(.caption2)
+                                        Text(group.discFolder)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("\(group.jobs.count) titles")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                }
+                            } else {
+                                ForEach(group.jobs) { job in
+                                    JobSidebarRow(job: job)
+                                        .tag(job.id)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.sidebar)
                 } else {
                     List(selection: $selectedId) {
                         ForEach(jobs) { job in
@@ -105,6 +166,10 @@ private struct SplitJobView: View {
                     }
                     .listStyle(.sidebar)
                 }
+                if let footer {
+                    Divider()
+                    footer
+                }
             }
             .frame(minWidth: 240, idealWidth: 290, maxWidth: 360)
 
@@ -112,7 +177,6 @@ private struct SplitJobView: View {
             if let id = selectedId, let job = jobs.first(where: { $0.id == id }) {
                 JobDetailView(job: job, queueVM: queueVM)
             } else if let first = jobs.first {
-                // Auto-select the first job if nothing is selected yet.
                 JobDetailView(job: first, queueVM: queueVM)
                     .onAppear { selectedId = first.id }
             } else {
@@ -126,13 +190,86 @@ private struct SplitJobView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        // When jobs change (e.g. completion moves to history), keep selection
-        // valid by clearing if our selected id no longer exists.
         .onChange(of: jobs.map(\.id)) { _, new in
             if let id = selectedId, !new.contains(id) {
                 selectedId = new.first
             }
         }
+    }
+}
+
+// MARK: - DiskSpaceBar
+
+/// Bottom-of-Queue persistent indicator showing free space on the output volume.
+/// Refreshed every 10s (cheap statvfs call). Tinted yellow/red as it fills up.
+struct DiskSpaceBar: View {
+    let outputDir: String
+    @State private var free: Int64 = 0
+    @State private var total: Int64 = 0
+    @State private var refreshTimer: Timer?
+
+    var body: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "internaldrive")
+                    .foregroundStyle(.secondary)
+                    .font(.caption2)
+                Text("Disk")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if total > 0 {
+                    Text("\(Self.format(free)) free of \(Self.format(total))")
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("—").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+            ProgressView(value: usedFraction)
+                .tint(barColor)
+                .frame(height: 4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .onAppear {
+            refresh()
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in refresh() }
+        }
+        .onDisappear { refreshTimer?.invalidate() }
+    }
+
+    private var usedFraction: Double {
+        guard total > 0 else { return 0 }
+        return Double(total - free) / Double(total)
+    }
+
+    private var barColor: Color {
+        let freeGB = Double(free) / 1_073_741_824
+        if freeGB < 5 { return .red }
+        if freeGB < 20 { return .orange }
+        return .accentColor
+    }
+
+    private func refresh() {
+        let path = outputDir
+        DispatchQueue.global().async {
+            let fm = FileManager.default
+            guard let attrs = try? fm.attributesOfFileSystem(forPath: path),
+                  let totalSize = attrs[.systemSize] as? Int64,
+                  let freeSize = attrs[.systemFreeSize] as? Int64 else { return }
+            DispatchQueue.main.async {
+                free = freeSize
+                total = totalSize
+            }
+        }
+    }
+
+    private static func format(_ bytes: Int64) -> String {
+        let gb = Double(bytes) / 1_073_741_824
+        if gb >= 100 { return String(format: "%.0f GB", gb) }
+        return String(format: "%.1f GB", gb)
     }
 }
 
@@ -258,6 +395,10 @@ private struct JobDetailView: View {
                 }
                 Divider()
                 pathsSection
+                if hasAnyTiming {
+                    Divider()
+                    timingsSection
+                }
                 if !job.error.isEmpty {
                     Divider()
                     errorSection
@@ -556,6 +697,56 @@ private struct JobDetailView: View {
                 .textSelection(.enabled)
             Spacer()
         }
+    }
+
+    // MARK: - Timings
+
+    private var hasAnyTiming: Bool {
+        job.ripElapsed > 0 || job.encodeElapsed > 0 || job.organizeElapsed > 0 ||
+            job.scrapeElapsed > 0 || job.nasElapsed > 0
+    }
+
+    @ViewBuilder
+    private var timingsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Stage timings").font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                if job.ripElapsed > 0      { timingRow(label: "Rip",      seconds: job.ripElapsed) }
+                if job.encodeElapsed > 0   { timingRow(label: "Encode",   seconds: job.encodeElapsed) }
+                if job.organizeElapsed > 0 { timingRow(label: "Organize", seconds: job.organizeElapsed) }
+                if job.scrapeElapsed > 0   { timingRow(label: "Scrape",   seconds: job.scrapeElapsed) }
+                if job.nasElapsed > 0      { timingRow(label: "NAS",      seconds: job.nasElapsed) }
+                Divider().padding(.vertical, 1)
+                timingRow(label: "Total", seconds: totalElapsed, bold: true)
+            }
+        }
+    }
+
+    private var totalElapsed: TimeInterval {
+        job.ripElapsed + job.encodeElapsed + job.organizeElapsed + job.scrapeElapsed + job.nasElapsed
+    }
+
+    private func timingRow(label: String, seconds: TimeInterval, bold: Bool = false) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 80, alignment: .trailing)
+            Text(formatTiming(seconds))
+                .font(.system(.caption, design: .monospaced))
+                .fontWeight(bold ? .semibold : .regular)
+            Spacer()
+        }
+    }
+
+    private func formatTiming(_ s: TimeInterval) -> String {
+        let total = Int(s.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let sec = total % 60
+        if h > 0 { return String(format: "%dh %02dm %02ds", h, m, sec) }
+        if m > 0 { return String(format: "%dm %02ds", m, sec) }
+        return String(format: "%ds", sec)
     }
 
     // MARK: - Error / log

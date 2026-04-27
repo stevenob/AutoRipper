@@ -47,10 +47,15 @@ final class RipViewModel: ObservableObject {
     /// with this name as the search query instead of the disc name. Used for collection discs
     /// where each title is a different movie (e.g. Saw 1+2+3 on one disc).
     @Published var titleNameOverrides: [Int: String] = [:]
+    /// Per-title TV episode assignment. Populated by the v3.3.0 episode picker UI;
+    /// `RipViewModel.ripSelected` reads this when calling onRipComplete to set
+    /// `Job.{seasonNumber, episodeNumber, episodeTitle}`. Empty today.
+    @Published var titleEpisodeAssignments: [Int: TitleEpisodeAssignment] = [:]
 
     func intent(for titleId: Int) -> JobIntent { titleIntents[titleId] ?? .movie }
     func editionLabel(for titleId: Int) -> String { titleEditionLabels[titleId] ?? "" }
     func nameOverride(for titleId: Int) -> String { titleNameOverrides[titleId] ?? "" }
+    func episodeAssignment(for titleId: Int) -> TitleEpisodeAssignment? { titleEpisodeAssignments[titleId] }
 
     private let config: AppConfig
     private let makemkv: MakeMKVService
@@ -383,10 +388,11 @@ final class RipViewModel: ObservableObject {
                         let override = nameOverride(for: tid)
                         let queryName = override.isEmpty ? info.name : override
                         let mediaResult = override.isEmpty ? cachedMediaResult : nil
-                        // TV season/episode/title — wired through but nil until v3.1.1
-                        // adds titleEpisodeAssignments and v3.3.0 adds the picker UI.
+                        // TV episode assignment (populated by v3.3.0 picker UI; nil today
+                        // unless the user has manually injected one via titleEpisodeAssignments).
+                        let assignment = episodeAssignment(for: tid)
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
-                                       nil, nil, nil)
+                                       assignment?.season, assignment?.episode, assignment?.title)
                     }
                 } catch {
                     sizeMonitor.cancel()
@@ -622,6 +628,15 @@ enum TitleRipStatus: Sendable, Equatable {
     case ripping(percent: Int)
     case done
     case failed(message: String)
+}
+
+/// TV episode assignment for a single title on a series disc. Set by the
+/// (forthcoming v3.3.0) episode picker UI. Carried through to `Job` via
+/// `RipViewModel.onRipComplete`.
+struct TitleEpisodeAssignment: Sendable, Equatable {
+    let season: Int
+    let episode: Int
+    let title: String
 }
 
 /// Tracks the last time MakeMKV's PRGV callback fired. Used by the file-size

@@ -190,6 +190,7 @@ final class QueueViewModel: ObservableObject {
         jobs[index].status = .organizing
         jobs[index].progressText = "Organizing…"
         await card.start("organize")
+        let organizeStart = Date()
 
         do {
             let source = jobs[index].encodedFile ?? jobs[index].rippedFile
@@ -224,12 +225,14 @@ final class QueueViewModel: ObservableObject {
             }
             let organized = try OrganizerService.organizeFile(source: source, destination: dest)
             jobs[index].organizedFile = organized
+            jobs[index].organizeElapsed = Date().timeIntervalSince(organizeStart)
             await card.finish("organize")
         } catch {
             jobs[index].status = .failed
             jobs[index].error = error.localizedDescription
             jobs[index].progressText = "Organize failed"
             jobs[index].finishedAt = Date()
+            jobs[index].organizeElapsed = Date().timeIntervalSince(organizeStart)
             await card.fail("organize", detail: error.localizedDescription)
             return
         }
@@ -238,6 +241,7 @@ final class QueueViewModel: ObservableObject {
         jobs[index].status = .scraping
         jobs[index].progressText = "Scraping artwork…"
         await card.start("scrape")
+        let scrapeStart = Date()
 
         let destDir = (jobs[index].organizedFile ?? jobs[index].rippedFile)
             .deletingLastPathComponent()
@@ -248,6 +252,7 @@ final class QueueViewModel: ObservableObject {
         } else {
             scraped = await artwork.scrapeAndSave(discName: jobs[index].discName, destDir: destDir)
         }
+        jobs[index].scrapeElapsed = Date().timeIntervalSince(scrapeStart)
         if scraped {
             await card.finish("scrape")
         } else {
@@ -255,6 +260,7 @@ final class QueueViewModel: ObservableObject {
         }
 
         // NAS upload
+        let nasStart = Date()
         if config.nasUploadEnabled {
             jobs[index].status = .uploading
             jobs[index].progressText = "Copying to NAS…"
@@ -276,6 +282,7 @@ final class QueueViewModel: ObservableObject {
                     jobs[index].progress = 100
                     jobs[index].progressText = "Complete (NAS path not configured)"
                     jobs[index].finishedAt = Date()
+                    jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                     await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
                     NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
                     return
@@ -293,15 +300,17 @@ final class QueueViewModel: ObservableObject {
                 try fm.copyItem(at: sourceDir, to: nasDest)
                 jobs[index].progressText = "Copied to NAS: \(nasDest.path)"
 
-                // Clean up local files after successful NAS copy
+                // Clean up local files after successful NAS copy — frees disk space.
                 try? fm.removeItem(at: sourceDir)
 
+                jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.finish("nas", detail: nasDest.path)
             } catch {
                 jobs[index].status = .failed
                 jobs[index].error = "NAS copy failed: \(error.localizedDescription)"
                 jobs[index].progressText = "NAS copy failed"
                 jobs[index].finishedAt = Date()
+                jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.fail("nas", detail: error.localizedDescription)
                 NotificationService.shared.notify(title: "NAS Copy Failed", message: jobs[index].discName)
                 return
@@ -323,6 +332,42 @@ final class QueueViewModel: ObservableObject {
         jobs[index].finishedAt = Date()
         await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
         NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
+
+        // Disk space may have just been freed (NAS copy + local cleanup). Give any
+        // jobs that previously failed with disk-space errors another shot.
+        retryDiskSpaceFailures()
+    }
+
+    /// Walks the queue and re-queues any failed-with-disk-space jobs. Triggered
+    /// after a successful NAS upload (which frees local disk space) and after
+    /// any other operation that meaningfully reclaims storage.
+    func retryDiskSpaceFailures() {
+        let candidates = jobs.enumerated().filter { _, job in
+            job.status == .failed && Self.isDiskSpaceFailure(job)
+        }.map { $0.offset }
+
+        for i in candidates {
+            // Sanity: source must still exist on disk to retry.
+            guard FileManager.default.fileExists(atPath: jobs[i].rippedFile.path) else { continue }
+            FileLogger.shared.info("queue", "auto-retrying disk-space failure: \(jobs[i].discName)")
+            jobs[i].status = .queued
+            jobs[i].error = ""
+            jobs[i].progress = 0
+            jobs[i].progressText = "Re-queued (disk space freed)"
+            jobs[i].finishedAt = nil
+            jobs[i].logLines = []
+        }
+        if !candidates.isEmpty { startWorkerIfNeeded() }
+    }
+
+    /// Heuristic: true if the failure looks like a disk-space problem. Catches
+    /// both the pre-flight check (HandBrakeService.preflightDiskSpace) and the
+    /// HandBrake mid-encode "No space left on device" error.
+    static func isDiskSpaceFailure(_ job: Job) -> Bool {
+        let msg = job.error.lowercased()
+        return msg.contains("not enough free space")
+            || msg.contains("no space left on device")
+            || (msg.contains("exit code 4") && msg.contains("space"))
     }
 
     private func encodeJob(at index: Int) async throws -> URL {
@@ -444,6 +489,45 @@ final class QueueViewModel: ObservableObject {
     var historyJobs: [Job] {
         jobs.filter { $0.status == .done }
             .sorted { ($0.finishedAt ?? $0.createdAt) > ($1.finishedAt ?? $1.createdAt) }
+    }
+
+    /// Heuristic estimated remaining time across active jobs in the queue. Returns
+    /// nil if no in-flight job has enough data to estimate yet.
+    func totalRemainingETA() -> TimeInterval? {
+        var total: TimeInterval = 0
+        var hasEstimate = false
+        for job in jobs where job.status != .done && job.status != .failed {
+            switch job.status {
+            case .encoding:
+                // Use elapsed encode time + remaining %, capped at sensible range.
+                if job.progress > 5 {
+                    let elapsed = (Date().timeIntervalSince(job.createdAt))
+                    let perPct = elapsed / Double(job.progress)
+                    let remaining = perPct * Double(100 - job.progress)
+                    if remaining > 0 && remaining < 86_400 {
+                        total += remaining
+                        hasEstimate = true
+                    }
+                }
+            case .organizing, .scraping, .uploading:
+                total += 30  // typically <1m each; rough bucket
+                hasEstimate = true
+            case .queued:
+                // Use the average completed-job encode time as a rough estimate.
+                let avg = averageEncodeElapsed
+                total += avg
+                hasEstimate = true
+            default: break
+            }
+        }
+        return hasEstimate ? total : nil
+    }
+
+    private var averageEncodeElapsed: TimeInterval {
+        let done = jobs.filter { $0.status == .done && $0.encodeElapsed > 0 }
+        guard !done.isEmpty else { return 1200 }  // 20-min default for first run
+        let sum = done.reduce(0.0) { $0 + $1.encodeElapsed }
+        return sum / Double(done.count)
     }
 
     private func pruneFinished() {
