@@ -94,6 +94,20 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
     <false/>
     <key>NSSupportsSuddenTermination</key>
     <false/>
+
+    <!-- TCC usage descriptions: shown when macOS prompts the user for these
+         capabilities. Without them the prompts can fail silently or repeat —
+         which was breaking unattended Batch Mode. -->
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>AutoRipper reads inserted DVDs and Blu-ray discs to scan and rip them.</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>AutoRipper writes finished rips to your configured NAS share.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>AutoRipper saves ripped and encoded files to the output folder you choose, which defaults to ~/Desktop/Ripped.</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>AutoRipper may save ripped and encoded files to a folder under Documents if you choose one.</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>AutoRipper may save ripped and encoded files to a folder under Downloads if you choose one.</string>
 </dict>
 </plist>
 PLIST
