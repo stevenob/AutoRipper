@@ -22,6 +22,11 @@ enum MakeMKVError: Error, LocalizedError {
 /// Wraps the makemkvcon CLI for disc scanning and ripping.
 actor MakeMKVService {
     private let config: AppConfig
+    /// In-memory scan cache for the app session. Keyed by the disc volume label
+    /// (cheaply available from drutil/diskutil before ripping). Lets re-insertion
+    /// of the same disc skip the slow `info` scan — useful for retry-after-failure
+    /// and batch-mode-same-disc-twice flows.
+    private var cachedScans: [String: DiscInfo] = [:]
 
     init(config: AppConfig = .shared) {
         self.config = config
@@ -36,8 +41,26 @@ actor MakeMKVService {
         return path
     }
 
-    /// Scan the disc and return parsed DiscInfo.
-    func scanDisc(logCallback: (@Sendable (String) -> Void)? = nil) async throws -> DiscInfo {
+    /// Manually clear a cached scan — used when the user explicitly re-scans
+    /// (e.g., a "Refresh" button) or when a disc is replaced under the same label.
+    func invalidateCache(volumeLabel: String? = nil) {
+        if let label = volumeLabel {
+            cachedScans.removeValue(forKey: label)
+        } else {
+            cachedScans.removeAll()
+        }
+    }
+
+    /// Scan the disc and return parsed DiscInfo. Honors the in-session cache:
+    /// if `volumeLabel` is provided and we already scanned a disc with that
+    /// label this session, the cached result is returned immediately (~2 minute
+    /// saving on a Bluray re-scan).
+    func scanDisc(volumeLabel: String? = nil, forceRescan: Bool = false, logCallback: (@Sendable (String) -> Void)? = nil) async throws -> DiscInfo {
+        if !forceRescan, let label = volumeLabel, !label.isEmpty,
+           let cached = cachedScans[label] {
+            logCallback?("Using cached scan for \(label) (re-insert detected)")
+            return cached
+        }
         let mkvPath = try getPath()
         let (output, exitCode) = try await runProcess(
             path: mkvPath, arguments: ["-r", "info", "disc:0"], logCallback: logCallback
@@ -103,7 +126,16 @@ actor MakeMKVService {
         }
 
         log.info("Scanned disc: \(discName) (\(discType)), \(titles.count) titles")
-        return DiscInfo(name: discName, type: discType, titles: titles)
+        let info = DiscInfo(name: discName, type: discType, titles: titles)
+        // Cache by both the volume label hint (if provided) and the discovered
+        // disc name from CINFO. Either lookup hits on re-insert.
+        if let label = volumeLabel, !label.isEmpty {
+            cachedScans[label] = info
+        }
+        if !discName.isEmpty {
+            cachedScans[discName] = info
+        }
+        return info
     }
 
     /// Rip a single title to the output directory. Returns the path to the ripped file.

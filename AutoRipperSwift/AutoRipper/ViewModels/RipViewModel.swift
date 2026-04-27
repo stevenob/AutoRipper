@@ -261,7 +261,7 @@ final class RipViewModel: ObservableObject {
 
         runningTask = Task {
             do {
-                var info = try await makemkv.scanDisc { [weak self] line in
+                var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
                     Task { @MainActor in self?.logLines.append(line) }
                 }
 
@@ -569,7 +569,7 @@ final class RipViewModel: ObservableObject {
 
         runningTask = Task {
             do {
-                var info = try await makemkv.scanDisc { [weak self] line in
+                var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
                     Task { @MainActor in self?.logLines.append(line) }
                 }
                 info.autoLabel()
