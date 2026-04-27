@@ -56,7 +56,9 @@ final class RipViewModel: ObservableObject {
     private let makemkv: MakeMKVService
     private let discord: DiscordService
     private var runningTask: Task<Void, Never>?
-    private var cachedMediaResult: MediaResult?
+    /// TMDb match for the current disc. Published so the rip hero / queue rows can
+    /// observe and update reactively if the user picks a different match mid-rip.
+    @Published private(set) var cachedMediaResult: MediaResult?
 
     /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel)
     var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?) -> Void)?

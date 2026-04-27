@@ -148,8 +148,10 @@ struct DiscPaneView: View {
 
             // Main content
             if ripVM.isRipping, let info = ripVM.discInfo {
-                // Hero view while ripping — focused poster + per-title status,
-                // replaces the title table to put the user in flow.
+                // Identify panel stays above the hero so the user can fix a wrong
+                // (or missing) TMDb match mid-rip — the post-rip pipeline will use
+                // whatever's selected when each title finishes.
+                DiscIdentifyPanel(ripVM: ripVM, discName: info.name)
                 RipHeroView(ripVM: ripVM, info: info)
             } else if let info = ripVM.discInfo {
                 // Scanned but not ripping — show titles + identify panel

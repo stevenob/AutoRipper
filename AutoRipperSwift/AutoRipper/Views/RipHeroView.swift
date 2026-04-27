@@ -7,7 +7,7 @@ struct RipHeroView: View {
     @ObservedObject var ripVM: RipViewModel
     let info: DiscInfo
 
-    private var media: MediaResult? { ripVM.discCandidates.first(where: { $0.displayTitle == info.mediaTitle }) }
+    private var media: MediaResult? { ripVM.cachedMediaResult }
     private var titleName: String { media?.title ?? (info.mediaTitle.isEmpty ? info.name : info.mediaTitle) }
     private var subtitleLine: String {
         var bits: [String] = []
