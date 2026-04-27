@@ -113,9 +113,28 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << PLIST
 PLIST
 echo "   ✅ Info.plist created"
 
-# 7. Code sign (ad-hoc)
-echo "🔏 Code signing (ad-hoc)..."
-codesign --force --deep --sign - "$APP_BUNDLE" 2>&1
+# 7. Code sign — prefer a stable identity so TCC permissions persist across
+#    builds. Falls back to ad-hoc if no usable identity is in the keychain.
+echo "🔏 Code signing..."
+SIGN_IDENTITY=""
+# Prefer Developer ID, then Apple Development, then anything else codesigning-capable.
+# `|| true` because grep returns 1 when there's no match — set -e would otherwise exit.
+for filter in "Developer ID Application" "Apple Development" "Mac Developer"; do
+    FOUND=$(security find-identity -v -p codesigning 2>/dev/null | grep "\"$filter" | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+    if [ -n "$FOUND" ]; then
+        SIGN_IDENTITY="$FOUND"
+        break
+    fi
+done
+
+if [ -n "$SIGN_IDENTITY" ]; then
+    echo "   Using identity: $SIGN_IDENTITY"
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE" 2>&1
+else
+    echo "   ⚠️  No code signing identity found — falling back to ad-hoc"
+    echo "   ⚠️  TCC permissions will reset on every build with ad-hoc signing"
+    codesign --force --deep --sign - "$APP_BUNDLE" 2>&1
+fi
 echo "   ✅ Signed"
 
 # 8. Verify
