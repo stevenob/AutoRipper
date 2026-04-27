@@ -66,4 +66,23 @@ struct DiscInfo: Sendable {
             }
         }
     }
+
+    /// Heuristic: does this disc look like a TV-series season?
+    /// Triggers when there are 3+ titles whose durations cluster within ±15%
+    /// and each is between 18 and 90 minutes (typical episode length).
+    var looksLikeTVSeason: Bool {
+        let candidates = titles.filter { $0.durationSeconds >= 18 * 60 && $0.durationSeconds <= 90 * 60 }
+        guard candidates.count >= 3 else { return false }
+        let durations = candidates.map { Double($0.durationSeconds) }
+        let avg = durations.reduce(0, +) / Double(durations.count)
+        guard avg > 0 else { return false }
+        return durations.allSatisfy { abs($0 - avg) / avg <= 0.15 }
+    }
+
+    /// Title IDs that match the TV-episode heuristic — useful for auto-selecting.
+    var tvEpisodeCandidateIds: [Int] {
+        titles
+            .filter { $0.durationSeconds >= 18 * 60 && $0.durationSeconds <= 90 * 60 }
+            .map { $0.id }
+    }
 }

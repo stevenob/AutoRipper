@@ -291,6 +291,20 @@ struct DiscPaneView: View {
 
                     DiscIdentifyPanel(ripVM: ripVM, discName: info.name)
 
+                    // TV detection banner — shown when the disc looks like a season
+                    // and the user hasn't already classified any title as Episode.
+                    if info.looksLikeTVSeason && !ripVM.titleIntents.values.contains(.episode) {
+                        TVDetectBanner(ripVM: ripVM)
+                    }
+
+                    // Episode picker — shown when at least one selected title is
+                    // classified as Episode AND we have a TV TMDb match to enumerate
+                    // episode names for.
+                    if ripVM.selectedTitles.contains(where: { ripVM.intent(for: $0) == .episode }),
+                       ripVM.cachedMediaResult?.mediaType == "tv" {
+                        TVEpisodePicker(ripVM: ripVM)
+                    }
+
                     let filteredTitles = info.titles.filter { $0.durationSeconds >= config.minDuration }
                     Table(filteredTitles) {
                         TableColumn("") { title in

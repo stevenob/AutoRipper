@@ -93,6 +93,43 @@ final class DiscInfoTests: XCTestCase {
         let t = TitleInfo(id: 0, name: "Title", duration: "0:10:00", sizeBytes: 1_073_741_824, chapters: 1, fileOutput: "")
         XCTAssertTrue(t.humanSize.contains("GB") || t.humanSize.contains("1"))
     }
+
+    func testLooksLikeTVSeasonDetectsSimilarRuntimes() {
+        // 6 titles around 42 min — typical hour-long TV episodes minus ads.
+        let titles: [TitleInfo] = (1...6).map { i in
+            var t = TitleInfo(id: i, name: "Title \(i)", duration: "0:42:00",
+                              sizeBytes: 4_000_000_000, chapters: 5, fileOutput: "")
+            // mild jitter
+            _ = i
+            return t
+        }
+        let info = DiscInfo(name: "BREAKING_BAD_S1_D1", type: "dvd", titles: titles)
+        XCTAssertTrue(info.looksLikeTVSeason)
+        XCTAssertEqual(info.tvEpisodeCandidateIds.count, 6)
+    }
+
+    func testLooksLikeTVSeasonRejectsMovieDisc() {
+        // One 2-hour main feature + a few short extras.
+        let titles: [TitleInfo] = [
+            TitleInfo(id: 1, name: "Main", duration: "2:00:00", sizeBytes: 30_000_000_000, chapters: 16, fileOutput: ""),
+            TitleInfo(id: 2, name: "Trailer", duration: "0:02:00", sizeBytes: 100_000_000, chapters: 1, fileOutput: ""),
+            TitleInfo(id: 3, name: "Extra", duration: "0:08:00", sizeBytes: 500_000_000, chapters: 1, fileOutput: ""),
+        ]
+        let info = DiscInfo(name: "BLADE_RUNNER", type: "bluray", titles: titles)
+        XCTAssertFalse(info.looksLikeTVSeason)
+    }
+
+    func testLooksLikeTVSeasonRejectsCollectionDisc() {
+        // Three full-length movies (varying durations) — looks like a collection.
+        let titles: [TitleInfo] = [
+            TitleInfo(id: 1, name: "Saw 1",  duration: "1:43:00", sizeBytes: 25_000_000_000, chapters: 18, fileOutput: ""),
+            TitleInfo(id: 2, name: "Saw 2",  duration: "1:35:00", sizeBytes: 24_000_000_000, chapters: 16, fileOutput: ""),
+            TitleInfo(id: 3, name: "Saw 3",  duration: "1:48:00", sizeBytes: 26_000_000_000, chapters: 17, fileOutput: ""),
+        ]
+        let info = DiscInfo(name: "SAW_TRILOGY", type: "bluray", titles: titles)
+        // Each is over 90 min → fails the 18-90 min episode-length filter.
+        XCTAssertFalse(info.looksLikeTVSeason)
+    }
 }
 
 final class JobTests: XCTestCase {

@@ -253,7 +253,19 @@ final class QueueViewModel: ObservableObject {
             .deletingLastPathComponent()
         let artwork = ArtworkService()
         let scraped: Bool
-        if let media = tmdbMedia {
+        // For TV episodes, write per-episode NFO + show-level artwork. The
+        // organize step landed the file in Show/Season XX/Show - SXXEXX.mkv,
+        // so destDir here is the season folder. ArtworkService writes the
+        // show-level files to its parent (handled internally).
+        if jobs[index].intent == .episode || tmdbMedia?.mediaType == "tv" {
+            scraped = await artwork.scrapeAndSaveEpisode(
+                discName: tmdbMedia?.title ?? jobs[index].discName,
+                destDir: destDir,
+                season: jobs[index].seasonNumber ?? 1,
+                episode: jobs[index].episodeNumber ?? 1,
+                episodeName: jobs[index].episodeTitle ?? ""
+            )
+        } else if let media = tmdbMedia {
             scraped = await artwork.scrapeAndSave(media: media, destDir: destDir)
         } else {
             scraped = await artwork.scrapeAndSave(discName: jobs[index].discName, destDir: destDir)
