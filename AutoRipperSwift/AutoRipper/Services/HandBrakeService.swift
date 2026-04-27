@@ -61,6 +61,24 @@ actor HandBrakeService {
         return presets
     }
 
+    /// Scan a file's resolution (e.g. "1920x1080") via HandBrakeCLI's --scan.
+    /// Used for imported MKVs where we don't already know the resolution from
+    /// MakeMKV's disc scan. Returns "" if the scan fails or no size line is found.
+    func scanResolution(inputPath: String) async -> String {
+        let hbPath: String
+        do { hbPath = try getPath() } catch { return "" }
+        guard let output = try? await runAndCapture(path: hbPath, arguments: ["--scan", "--input", inputPath]) else {
+            return ""
+        }
+        // HandBrake's --scan emits something like "  + size: 1920x1080, pixel aspect: 1/1, ..."
+        for line in output.components(separatedBy: .newlines) {
+            if let groups = Self.match(line, pattern: #"size:\s*(\d+x\d+)"#) {
+                return groups[1]
+            }
+        }
+        return ""
+    }
+
     /// Scan a file for audio and subtitle tracks.
     func scanTracks(inputPath: String) async throws -> (audio: [AudioTrack], subtitles: [SubtitleTrack]) {
         let hbPath = try getPath()

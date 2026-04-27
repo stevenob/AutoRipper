@@ -393,9 +393,22 @@ final class QueueViewModel: ObservableObject {
             // This is just a container for cancellation
         }
 
+        // If the job has no resolution (typically because it was imported via drag-
+        // and-drop rather than ripped from a disc), scan the source so autoPreset
+        // can pick the right preset. Otherwise a 4K MKV would be downscaled to
+        // the 1080p fallback preset.
+        if jobs[index].resolution.isEmpty {
+            let detected = await handbrake.scanResolution(inputPath: input.path)
+            if !detected.isEmpty {
+                jobs[index].resolution = detected
+                FileLogger.shared.info("queue", "scanned resolution for \(input.lastPathComponent): \(detected)")
+            }
+        }
+
         // Pick preset by resolution, fallback to 1080p
         let preset = HandBrakeService.autoPreset(for: jobs[index].resolution)
             ?? "H.265 Apple VideoToolbox 1080p"
+        FileLogger.shared.info("queue", "encode preset: \(preset) (resolution=\(jobs[index].resolution.isEmpty ? "unknown" : jobs[index].resolution))")
 
         // Pass nil track lists so HandBrake uses --all-audio / --all-subtitles
         // and we skip the separate scanTracks pass (which on large MKVs takes
