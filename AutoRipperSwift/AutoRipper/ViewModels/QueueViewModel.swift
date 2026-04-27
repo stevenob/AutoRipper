@@ -144,6 +144,8 @@ final class QueueViewModel: ObservableObject {
         jobs[index].progressText = "Encoding…"
         await card.start("encode")
         let encodeStart = Date()
+        if config.preventSleep { SleepAssertion.shared.acquire(reason: "AutoRipper encode in progress") }
+        defer { if config.preventSleep { SleepAssertion.shared.release() } }
 
         FileLogger.shared.info("queue", "encode start: \(jobs[index].discName) <- \(jobs[index].rippedFile.path)")
         do {

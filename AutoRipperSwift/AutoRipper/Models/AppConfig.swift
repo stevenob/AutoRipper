@@ -51,6 +51,12 @@ final class AppConfig: ObservableObject {
     @Published var historyRetentionDays: Int {
         didSet { defaults.set(historyRetentionDays, forKey: "historyRetentionDays") }
     }
+    @Published var preventSleep: Bool {
+        didSet { defaults.set(preventSleep, forKey: "preventSleep") }
+    }
+    @Published var verboseLogging: Bool {
+        didSet { defaults.set(verboseLogging, forKey: "verboseLogging") }
+    }
     /// Path of a MakeMKV-rip-in-progress. Set just before `ripTitle`, cleared on
     /// success or caught failure. If the app crashes/exits mid-rip, the next launch
     /// finds this set and deletes the partial file.
@@ -77,6 +83,7 @@ final class AppConfig: ObservableObject {
         self.nasTvPath = d.string(forKey: "nasTvPath") ?? ""
         self.nasUploadEnabled = d.object(forKey: "nasUploadEnabled") as? Bool ?? false
         self.historyRetentionDays = d.object(forKey: "historyRetentionDays") as? Int ?? 30
+        self.preventSleep = d.object(forKey: "preventSleep") as? Bool ?? true
+        self.verboseLogging = d.object(forKey: "verboseLogging") as? Bool ?? false
     }
-
 }

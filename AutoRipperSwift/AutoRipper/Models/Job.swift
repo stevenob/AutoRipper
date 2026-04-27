@@ -33,6 +33,11 @@ struct Job: Identifiable, Sendable, Codable {
     /// For `intent == .edition` only — e.g. "Theatrical", "Director's Cut".
     /// Becomes the `{edition-...}` tag in the output filename.
     var editionLabel: String?
+    /// TV episode metadata — populated when `intent == .episode`. v3.3.0 picker UI
+    /// will set these; today they're optional and `processJob` falls back to S01E01.
+    var seasonNumber: Int?
+    var episodeNumber: Int?
+    var episodeTitle: String?
     /// Streaming log lines from HandBrake/MakeMKV captured during processing.
     /// Capped at 200 lines to keep persisted JSON small.
     var logLines: [String] = []
@@ -48,10 +53,12 @@ struct Job: Identifiable, Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
              status, error, progress, progressText, ripElapsed, encodeElapsed,
-             mediaResult, intent, editionLabel, logLines, createdAt, finishedAt
+             mediaResult, intent, editionLabel,
+             seasonNumber, episodeNumber, episodeTitle,
+             logLines, createdAt, finishedAt
     }
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         self.discName = discName
         self.rippedFile = rippedFile
@@ -61,6 +68,9 @@ struct Job: Identifiable, Sendable, Codable {
         self.mediaResult = mediaResult
         self.intent = intent
         self.editionLabel = editionLabel
+        self.seasonNumber = seasonNumber
+        self.episodeNumber = episodeNumber
+        self.episodeTitle = episodeTitle
     }
 
     /// Append a streaming log line (capped at 200 to keep JSON small).

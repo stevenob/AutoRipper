@@ -263,6 +263,7 @@ final class RipViewModel: ObservableObject {
     func ripSelected() {
         guard !selectedTitles.isEmpty, !isRipping, let info = discInfo else { return }
         isRipping = true
+        if config.preventSleep { SleepAssertion.shared.acquire(reason: "AutoRipper rip in progress") }
         ripProgress = 0
         statusText = "Ripping…"
 
@@ -426,6 +427,7 @@ final class RipViewModel: ObservableObject {
             ripProgress = 1.0
             statusText = "Rip complete"
             isRipping = false
+            if config.preventSleep { SleepAssertion.shared.release() }
             currentRippingTitleId = nil
             // Stash the just-finished media so the "insert next disc" hero can
             // celebrate it briefly before fading back to the empty state.
@@ -595,6 +597,7 @@ final class RipViewModel: ObservableObject {
         // (or with HandBrake also running for an earlier title in Full Auto), the
         // single-process terminateLatest left orphans behind.
         ProcessTracker.shared.terminateAll()
+        if isRipping && config.preventSleep { SleepAssertion.shared.release() }
         isScanning = false
         isRipping = false
         ripProgress = 0
