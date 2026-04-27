@@ -546,6 +546,22 @@ final class QueueViewModel: ObservableObject {
         FileLogger.shared.info("queue", "reordered \(job.discName) to position \(clampedTarget) of queued jobs")
     }
 
+    /// Drag-and-drop reorder helper: moves `droppedId` to immediately before
+    /// `targetId`. Both must be queued (in-flight/failed/done are no-ops).
+    /// Returns true if a reorder happened.
+    @discardableResult
+    func reorder(droppedId: String, beforeTargetId targetId: String) -> Bool {
+        guard droppedId != targetId else { return false }
+        guard let from = jobs.firstIndex(where: { $0.id == droppedId }) else { return false }
+        guard let to = jobs.firstIndex(where: { $0.id == targetId }) else { return false }
+        guard jobs[from].status == .queued, jobs[to].status == .queued else { return false }
+        let job = jobs.remove(at: from)
+        let insertAt = from < to ? to - 1 : to
+        jobs.insert(job, at: insertAt)
+        FileLogger.shared.info("queue", "reorder: moved \(job.discName) into position \(insertAt)")
+        return true
+    }
+
     /// Bulk Retry — applied to any failed jobs in the supplied id set.
     func retryAll(jobIds: Set<String>) {
         for id in jobIds { retry(jobId: id) }

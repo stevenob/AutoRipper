@@ -318,7 +318,7 @@ private struct SplitJobView: View {
                 ForEach(groupedJobs, id: \.discFolder) { group in
                     Section {
                         ForEach(group.jobs) { job in
-                            JobSidebarRow(job: job)
+                            JobSidebarRow(job: job, onReorder: reorderHandler(for: job))
                                 .tag(job.id)
                         }
                     } header: {
@@ -346,11 +346,24 @@ private struct SplitJobView: View {
         } else {
             List(selection: $selection) {
                 ForEach(jobs) { job in
-                    JobSidebarRow(job: job)
+                    JobSidebarRow(job: job, onReorder: reorderHandler(for: job))
                         .tag(job.id)
                 }
             }
             .listStyle(.sidebar)
+        }
+    }
+
+    /// Returns a closure for `JobSidebarRow.onReorder` only when reordering is
+    /// allowed (Queue tab) AND this row is itself a valid drop target (queued).
+    /// History tab passes `allowReorder: false` so the closure is nil and rows
+    /// don't accept reorder drops.
+    private func reorderHandler(for target: Job) -> ((String) -> Void)? {
+        guard allowReorder, target.status == .queued else { return nil }
+        let queueVM = self.queueVM
+        let targetId = target.id
+        return { droppedId in
+            queueVM.reorder(droppedId: droppedId, beforeTargetId: targetId)
         }
     }
 
@@ -452,6 +465,22 @@ struct FPSSparkline: View {
     }
 }
 
+/// Conditional `.draggable` — only queued jobs can be reordered. Non-queued
+/// rows just behave normally (no drag handle). Wrapped as a ViewModifier so
+/// the conditional doesn't fork the view tree.
+private struct QueuedDragModifier: ViewModifier {
+    let jobId: String
+    let isQueued: Bool
+
+    func body(content: Content) -> some View {
+        if isQueued {
+            content.draggable(jobId)
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - DiskSpaceBar
 
 /// Bottom-of-Queue persistent indicator showing free space on the output volume.
@@ -531,7 +560,9 @@ struct DiskSpaceBar: View {
 
 private struct JobSidebarRow: View {
     let job: Job
+    var onReorder: ((String) -> Void)? = nil
     @State private var celebrate = false
+    @State private var dropTargeted = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -554,8 +585,11 @@ private struct JobSidebarRow: View {
             }
         }
         .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        // A little visual hint when something is being dragged over a queued row.
+        .background(dropTargeted && job.status == .queued ? Color.accentColor.opacity(0.15) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
         .scaleEffect(celebrate ? 1.04 : 1.0)
-        // Brief celebration when a job hits .done — scale + status icon pulse.
         .onChange(of: job.status) { _, new in
             if new == .done {
                 withAnimation(.easeOut(duration: 0.18)) { celebrate = true }
@@ -564,6 +598,15 @@ private struct JobSidebarRow: View {
                 }
             }
         }
+        // Drag source — only queued jobs can be reordered.
+        .modifier(QueuedDragModifier(jobId: job.id, isQueued: job.status == .queued))
+        // Drop target — only queued jobs accept drops, and only the reorder handler
+        // is wired (other drops fall through to the window-wide MKV drop handler).
+        .dropDestination(for: String.self) { items, _ in
+            guard job.status == .queued, let droppedId = items.first, let onReorder else { return false }
+            onReorder(droppedId)
+            return true
+        } isTargeted: { dropTargeted = $0 }
     }
 
     /// 5-dot pipeline indicator: rip, encode, organize, scrape, NAS.
