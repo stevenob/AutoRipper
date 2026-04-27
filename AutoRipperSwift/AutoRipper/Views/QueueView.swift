@@ -6,7 +6,7 @@ import SwiftUI
 /// Failed jobs stay here (with red ✗) so the user can Retry without digging through History.
 struct QueueView: View {
     @ObservedObject var queueVM: QueueViewModel
-    @State private var selectedId: String?
+    @State private var selection: Set<String> = []
 
     private var jobs: [Job] { queueVM.activeJobs }
 
@@ -15,11 +15,12 @@ struct QueueView: View {
             title: "Queue",
             badge: badgeText,
             jobs: jobs,
-            selectedId: $selectedId,
+            selection: $selection,
             queueVM: queueVM,
             emptyMessage: "Queue is empty",
             footer: AnyView(DiskSpaceBar(outputDir: AppConfig.shared.outputDir)),
-            groupByDisc: true
+            groupByDisc: true,
+            allowReorder: true
         )
     }
 
@@ -47,7 +48,7 @@ struct QueueView: View {
 struct HistoryView: View {
     @ObservedObject var queueVM: QueueViewModel
     @State private var search: String = ""
-    @State private var selectedId: String?
+    @State private var selection: Set<String> = []
 
     private var jobs: [Job] {
         queueVM.historyJobs.filter { search.isEmpty || $0.discName.localizedCaseInsensitiveContains(search) || ($0.mediaResult?.displayTitle ?? "").localizedCaseInsensitiveContains(search) }
@@ -58,12 +59,13 @@ struct HistoryView: View {
             title: "History",
             badge: "\(queueVM.historyJobs.count) completed",
             jobs: jobs,
-            selectedId: $selectedId,
+            selection: $selection,
             queueVM: queueVM,
             emptyMessage: search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"",
             search: $search,
             footer: nil,
-            groupByDisc: false
+            groupByDisc: false,
+            allowReorder: false
         )
     }
 }
@@ -74,16 +76,15 @@ private struct SplitJobView: View {
     let title: String
     let badge: String
     let jobs: [Job]
-    @Binding var selectedId: String?
+    @Binding var selection: Set<String>
     let queueVM: QueueViewModel
     let emptyMessage: String
     var search: Binding<String>? = nil
     var footer: AnyView? = nil
     var groupByDisc: Bool = false
+    var allowReorder: Bool = false
 
     /// Group jobs by their source disc directory (`rippedFile.deletingLastPathComponent`).
-    /// All titles ripped from the same disc share one folder, so grouping by parent
-    /// path naturally collects "all titles from this disc".
     private var groupedJobs: [(discFolder: String, jobs: [Job])] {
         var seen: [String] = []
         var bucket: [String: [Job]] = [:]
@@ -93,6 +94,13 @@ private struct SplitJobView: View {
             bucket[key, default: []].append(job)
         }
         return seen.map { ($0, bucket[$0] ?? []) }
+    }
+
+    private var detailJob: Job? {
+        if selection.count == 1, let id = selection.first {
+            return jobs.first(where: { $0.id == id })
+        }
+        return jobs.first
     }
 
     var body: some View {
@@ -115,6 +123,7 @@ private struct SplitJobView: View {
                         .padding(.bottom, 6)
                 }
                 Divider()
+
                 if jobs.isEmpty {
                     Spacer()
                     VStack(spacing: 8) {
@@ -124,48 +133,15 @@ private struct SplitJobView: View {
                         Text(emptyMessage).foregroundStyle(.secondary).font(.caption)
                     }
                     Spacer()
-                } else if groupByDisc {
-                    List(selection: $selectedId) {
-                        ForEach(groupedJobs, id: \.discFolder) { group in
-                            if group.jobs.count > 1 {
-                                Section {
-                                    ForEach(group.jobs) { job in
-                                        JobSidebarRow(job: job)
-                                            .tag(job.id)
-                                    }
-                                } header: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "opticaldisc")
-                                            .foregroundStyle(.tertiary)
-                                            .font(.caption2)
-                                        Text(group.discFolder)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                        Spacer()
-                                        Text("\(group.jobs.count) titles")
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                            } else {
-                                ForEach(group.jobs) { job in
-                                    JobSidebarRow(job: job)
-                                        .tag(job.id)
-                                }
-                            }
-                        }
-                    }
-                    .listStyle(.sidebar)
                 } else {
-                    List(selection: $selectedId) {
-                        ForEach(jobs) { job in
-                            JobSidebarRow(job: job)
-                                .tag(job.id)
-                        }
-                    }
-                    .listStyle(.sidebar)
+                    listBody
                 }
+
+                if selection.count > 1 {
+                    Divider()
+                    bulkActionsBar
+                }
+
                 if let footer {
                     Divider()
                     footer
@@ -173,12 +149,11 @@ private struct SplitJobView: View {
             }
             .frame(minWidth: 240, idealWidth: 290, maxWidth: 360)
 
-            // Right pane: detail.
-            if let id = selectedId, let job = jobs.first(where: { $0.id == id }) {
+            // Right pane.
+            if selection.count > 1 {
+                multiSelectInfoView
+            } else if let job = detailJob {
                 JobDetailView(job: job, queueVM: queueVM)
-            } else if let first = jobs.first {
-                JobDetailView(job: first, queueVM: queueVM)
-                    .onAppear { selectedId = first.id }
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "rectangle.split.2x1")
@@ -191,8 +166,149 @@ private struct SplitJobView: View {
             }
         }
         .onChange(of: jobs.map(\.id)) { _, new in
-            if let id = selectedId, !new.contains(id) {
-                selectedId = new.first
+            // Drop selected ids that no longer exist (job moved to history, etc).
+            selection = selection.intersection(Set(new))
+        }
+    }
+
+    // MARK: - List body (grouped or flat, with optional reorder)
+
+    @ViewBuilder
+    private var listBody: some View {
+        if groupByDisc {
+            List(selection: $selection) {
+                ForEach(groupedJobs, id: \.discFolder) { group in
+                    Section {
+                        ForEach(group.jobs) { job in
+                            JobSidebarRow(job: job)
+                                .tag(job.id)
+                        }
+                    } header: {
+                        if group.jobs.count > 1 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "opticaldisc")
+                                    .foregroundStyle(.tertiary)
+                                    .font(.caption2)
+                                Text(group.discFolder)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text("\(group.jobs.count) titles")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        } else {
+                            EmptyView()
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+        } else {
+            List(selection: $selection) {
+                ForEach(jobs) { job in
+                    JobSidebarRow(job: job)
+                        .tag(job.id)
+                }
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    // MARK: - Bulk actions bar (visible when 2+ selected)
+
+    @ViewBuilder
+    private var bulkActionsBar: some View {
+        let selected = jobs.filter { selection.contains($0.id) }
+        let failedCount = selected.filter { $0.status == .failed }.count
+        let removableCount = selected.filter { $0.status == .done || $0.status == .failed }.count
+        let cancellableCount = selected.filter {
+            $0.status == .queued || $0.status == .encoding || $0.status == .organizing
+                || $0.status == .scraping || $0.status == .uploading
+        }.count
+
+        VStack(spacing: 4) {
+            Text("\(selection.count) selected")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if failedCount > 0 {
+                    Button("Retry \(failedCount)") { queueVM.retryAll(jobIds: selection) }
+                        .controlSize(.small)
+                }
+                if cancellableCount > 0 {
+                    Button("Cancel \(cancellableCount)") { queueVM.cancelAll(jobIds: selection) }
+                        .controlSize(.small)
+                }
+                if removableCount > 0 {
+                    Button("Remove \(removableCount)") { queueVM.removeAll(jobIds: selection) }
+                        .controlSize(.small)
+                        .foregroundStyle(.red)
+                }
+                Spacer()
+                Button("Clear") { selection = [] }
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.accentColor.opacity(0.08))
+    }
+
+    @ViewBuilder
+    private var multiSelectInfoView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.stack.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.tertiary)
+            Text("\(selection.count) jobs selected")
+                .font(.title3)
+            Text("Use the toolbar to retry, cancel, or remove. Pick a single job to see details.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - FPSSparkline
+
+/// Tiny inline sparkline showing the rolling FPS history of an active encode.
+/// Helps spot stable vs fluctuating vs throttling encodes.
+struct FPSSparkline: View {
+    let samples: [Double]
+
+    var body: some View {
+        if samples.count < 2 {
+            EmptyView()
+        } else {
+            HStack(spacing: 4) {
+                Canvas { ctx, size in
+                    guard samples.count >= 2 else { return }
+                    let lo = samples.min() ?? 0
+                    let hi = samples.max() ?? 1
+                    let range = max(hi - lo, 1)
+                    let dx = size.width / CGFloat(samples.count - 1)
+                    var path = Path()
+                    for (i, v) in samples.enumerated() {
+                        let x = CGFloat(i) * dx
+                        let y = size.height - CGFloat((v - lo) / range) * size.height
+                        if i == 0 { path.move(to: .init(x: x, y: y)) }
+                        else { path.addLine(to: .init(x: x, y: y)) }
+                    }
+                    ctx.stroke(path, with: .color(.accentColor), lineWidth: 1)
+                }
+                .frame(width: 80, height: 16)
+
+                if let last = samples.last {
+                    Text(String(format: "%.0f fps", last))
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -588,9 +704,16 @@ private struct JobDetailView: View {
                     .progressViewStyle(.linear)
                     .padding(.top, 4)
             }
-            Text(job.progressText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text(job.progressText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if job.status == .encoding {
+                    FPSSparkline(samples: queueVM.fpsHistory[job.id] ?? [])
+                }
+            }
         }
     }
 

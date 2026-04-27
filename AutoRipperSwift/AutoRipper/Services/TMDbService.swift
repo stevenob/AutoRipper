@@ -13,6 +13,7 @@ private final class TMDbCache: @unchecked Sendable {
     private var search: [String: [MediaResult]] = [:]
     private var movieDetails: [Int: MediaResult] = [:]
     private var tvDetails: [Int: MediaResult] = [:]
+    private var episodes: [String: [EpisodeInfo]] = [:]  // key: "<tvId>:<season>"
 
     func cachedSearch(_ query: String) -> [MediaResult]? {
         lock.lock(); defer { lock.unlock() }
@@ -37,6 +38,14 @@ private final class TMDbCache: @unchecked Sendable {
     func storeTv(_ id: Int, _ r: MediaResult) {
         lock.lock(); defer { lock.unlock() }
         tvDetails[id] = r
+    }
+    func cachedEpisodes(tvId: Int, season: Int) -> [EpisodeInfo]? {
+        lock.lock(); defer { lock.unlock() }
+        return episodes["\(tvId):\(season)"]
+    }
+    func storeEpisodes(tvId: Int, season: Int, _ eps: [EpisodeInfo]) {
+        lock.lock(); defer { lock.unlock() }
+        episodes["\(tvId):\(season)"] = eps
     }
 }
 
@@ -194,17 +203,20 @@ struct TMDbService {
     /// Fetch episode list for a specific season of a TV show.
     func getSeasonEpisodes(tvId: Int, season: Int) async -> [EpisodeInfo] {
         guard !apiKey.isEmpty else { return [] }
+        if let cached = TMDbCache.shared.cachedEpisodes(tvId: tvId, season: season) { return cached }
         guard let url = URL(string: "\(baseURL)/tv/\(tvId)/season/\(season)?api_key=\(apiKey)") else { return [] }
         do {
             let (data, _) = try await session.data(from: url)
             let response = try JSONDecoder().decode(TMDbSeasonResponse.self, from: data)
-            return response.episodes.map { ep in
+            let eps = response.episodes.map { ep in
                 EpisodeInfo(
                     seasonNumber: ep.seasonNumber ?? season,
                     episodeNumber: ep.episodeNumber ?? 0,
                     name: ep.name ?? ""
                 )
             }
+            TMDbCache.shared.storeEpisodes(tvId: tvId, season: season, eps)
+            return eps
         } catch {
             log.error("TMDb season fetch failed: \(error.localizedDescription)")
             return []

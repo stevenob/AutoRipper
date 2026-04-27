@@ -16,6 +16,10 @@ final class QueueViewModel: ObservableObject {
     private var workerTask: Task<Void, Never>?
     private var currentTask: Task<Void, Never>?
     private var saveCancellable: AnyCancellable?
+    /// In-memory ring buffer of recent fps samples per active encode job. Capped
+    /// at 60 samples (~1 minute of HandBrake's progress callbacks at ~1Hz).
+    @Published private(set) var fpsHistory: [String: [Double]] = [:]
+    private static let fpsHistoryCap = 60
 
     init(config: AppConfig = .shared, store: JobStore = .shared) {
         self.config = config
@@ -370,6 +374,17 @@ final class QueueViewModel: ObservableObject {
             || (msg.contains("exit code 4") && msg.contains("space"))
     }
 
+    /// Extract an FPS reading like "62.4 fps" from a HandBrake progress line.
+    static func extractFPS(from text: String) -> Double? {
+        // Match "<float> fps" — HandBrake's PRGV-derived status line typically
+        // contains something like "Encoding: 43% — ETA 14m32s (62.4 fps)".
+        guard let regex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)\s*fps"#) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let m = regex.firstMatch(in: text, range: range),
+              let r = Range(m.range(at: 1), in: text) else { return nil }
+        return Double(text[r])
+    }
+
     private func encodeJob(at index: Int) async throws -> URL {
         let input = jobs[index].rippedFile
         let outputPath = input.deletingPathExtension().path + "_encoded.mkv"
@@ -398,6 +413,16 @@ final class QueueViewModel: ObservableObject {
                     if index < self.jobs.count {
                         self.jobs[index].progress = pct
                         self.jobs[index].progressText = text
+                        // Parse "(62.4 fps)" out of the progress text and append
+                        // to the rolling fps history for this job.
+                        if let fps = Self.extractFPS(from: text) {
+                            var hist = self.fpsHistory[jobId] ?? []
+                            hist.append(fps)
+                            if hist.count > Self.fpsHistoryCap {
+                                hist.removeFirst(hist.count - Self.fpsHistoryCap)
+                            }
+                            self.fpsHistory[jobId] = hist
+                        }
                     }
                 }
             },
@@ -471,6 +496,52 @@ final class QueueViewModel: ObservableObject {
             FileLogger.shared.info("queue", "reidentify: matched \(m.displayTitle)")
         } else {
             FileLogger.shared.warn("queue", "reidentify: still no TMDb match for \"\(trimmed)\"")
+        }
+    }
+
+    /// Reorder a queued job to a different position. Only operates on `.queued`
+    /// jobs — in-flight, failed, and completed jobs keep their relative position
+    /// so the worker's "find next queued" semantics aren't disturbed.
+    func reorder(jobId: String, to newQueuedIndex: Int) {
+        guard let from = jobs.firstIndex(where: { $0.id == jobId }) else { return }
+        guard jobs[from].status == .queued else { return }
+        let queuedIndices = jobs.enumerated().filter { $0.element.status == .queued }.map { $0.offset }
+        guard !queuedIndices.isEmpty else { return }
+        let clampedTarget = max(0, min(newQueuedIndex, queuedIndices.count - 1))
+        let targetIdx = queuedIndices[clampedTarget]
+        guard from != targetIdx else { return }
+        let job = jobs.remove(at: from)
+        let insertAt = from < targetIdx ? targetIdx : targetIdx
+        jobs.insert(job, at: insertAt)
+        FileLogger.shared.info("queue", "reordered \(job.discName) to position \(clampedTarget) of queued jobs")
+    }
+
+    /// Bulk Retry — applied to any failed jobs in the supplied id set.
+    func retryAll(jobIds: Set<String>) {
+        for id in jobIds { retry(jobId: id) }
+    }
+
+    /// Bulk Remove — only valid for terminal jobs (.done or .failed).
+    func removeAll(jobIds: Set<String>) {
+        for id in jobIds { remove(jobId: id) }
+    }
+
+    /// Bulk Cancel — abort the in-flight job (if its id is in the set) and mark
+    /// any queued jobs in the set as failed-by-user.
+    func cancelAll(jobIds: Set<String>) {
+        for id in jobIds {
+            guard let i = jobs.firstIndex(where: { $0.id == id }) else { continue }
+            switch jobs[i].status {
+            case .queued:
+                jobs[i].status = .failed
+                jobs[i].error = "Cancelled by user"
+                jobs[i].progressText = "Cancelled"
+                jobs[i].finishedAt = Date()
+            case .encoding, .organizing, .scraping, .uploading:
+                abortCurrent()
+            default:
+                break
+            }
         }
     }
     /// Active jobs: queued, in-flight, AND failed (failures stay in queue so the
