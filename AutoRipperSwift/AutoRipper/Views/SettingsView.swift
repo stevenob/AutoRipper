@@ -5,7 +5,6 @@ private let log = Logger(subsystem: "com.autoripper.app", category: "settings")
 
 struct SettingsView: View {
     @ObservedObject var config: AppConfig
-    @Environment(\.dismiss) private var dismiss
     @State private var statusText: String = ""
 
     var body: some View {
@@ -97,9 +96,6 @@ struct SettingsView: View {
                 Text("All changes save instantly")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

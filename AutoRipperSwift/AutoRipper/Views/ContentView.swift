@@ -4,6 +4,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case disc = "Disc"
     case queue = "Queue"
     case history = "History"
+    case settings = "Settings"
 
     var id: String { rawValue }
     var systemImage: String {
@@ -11,6 +12,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .disc: return "opticaldisc"
         case .queue: return "list.bullet.rectangle"
         case .history: return "clock.arrow.circlepath"
+        case .settings: return "gearshape"
         }
     }
 }
@@ -20,29 +22,36 @@ struct ContentView: View {
     @StateObject private var updateService = UpdateService()
     @StateObject private var ripVM = RipViewModel()
     @StateObject private var queueVM = QueueViewModel()
-    @State private var showSettings = false
     @State private var selectedTab: AppTab = .disc
 
     var body: some View {
         NavigationSplitView {
-            List(AppTab.allCases, selection: $selectedTab) { tab in
-                Label(tab.rawValue, systemImage: tab.systemImage)
-                    .badge(tab == .queue ? queueVM.activeJobs.count : 0)
-                    .tag(tab)
+            List(selection: $selectedTab) {
+                Section {
+                    ForEach([AppTab.disc, .queue, .history], id: \.self) { tab in
+                        Label(tab.rawValue, systemImage: tab.systemImage)
+                            .badge(tab == .queue ? queueVM.activeJobs.count : 0)
+                            .tag(tab)
+                    }
+                }
+                Spacer()
+                // Settings pinned to the bottom of the sidebar — distinct visual
+                // grouping from the primary nav above.
+                Section {
+                    Label(AppTab.settings.rawValue, systemImage: AppTab.settings.systemImage)
+                        .tag(AppTab.settings)
+                }
             }
             .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
         } detail: {
             switch selectedTab {
-            case .disc:    DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config, showSettings: $showSettings)
-            case .queue:   QueueView(queueVM: queueVM)
-            case .history: HistoryView(queueVM: queueVM)
+            case .disc:     DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config)
+            case .queue:    QueueView(queueVM: queueVM)
+            case .history:  HistoryView(queueVM: queueVM)
+            case .settings: SettingsView(config: AppConfig.shared)
             }
         }
         .frame(minWidth: 800, minHeight: 500)
-        .sheet(isPresented: $showSettings) {
-            SettingsView(config: AppConfig.shared)
-                .frame(minWidth: 500, minHeight: 400)
-        }
         .alert("Error", isPresented: Binding(
             get: { ripVM.errorMessage != nil },
             set: { if !$0 { ripVM.errorMessage = nil } }
@@ -67,7 +76,6 @@ struct DiscPaneView: View {
     @ObservedObject var queueVM: QueueViewModel
     @ObservedObject var updateService: UpdateService
     @ObservedObject var config: AppConfig
-    @Binding var showSettings: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -368,11 +376,6 @@ struct DiscPaneView: View {
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut("r", modifiers: .command)
                 }
-
-                Button { showSettings = true } label: {
-                    Image(systemName: "gear")
-                }
-                .keyboardShortcut(",", modifiers: .command)
 
                 Button {
                     let path = config.outputDir
