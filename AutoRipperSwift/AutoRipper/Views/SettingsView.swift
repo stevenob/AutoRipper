@@ -1,6 +1,7 @@
 import SwiftUI
 import os
 import AppKit
+import UniformTypeIdentifiers
 
 private let log = Logger(subsystem: "com.autoripper.app", category: "settings")
 
@@ -263,9 +264,8 @@ private struct TMDbPane: View {
 
 private struct NASPane: View {
     @ObservedObject var config: AppConfig
-    @State private var moviesReachable: PathStatus = PathStatus(state: .empty, message: "")
-    @State private var tvReachable: PathStatus = PathStatus(state: .empty, message: "")
-    @State private var lastChecked = Date()
+    @State private var moviesStatus: String = ""
+    @State private var tvStatus: String = ""
 
     var body: some View {
         Form {
@@ -283,13 +283,56 @@ private struct NASPane: View {
 
             HStack {
                 Spacer().frame(width: 130)
-                Text("Reachability checked when path field loses focus.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                Button("Check reachability") { Task { await checkBoth() } }
+                    .disabled(!config.nasUploadEnabled)
+                if !moviesStatus.isEmpty || !tvStatus.isEmpty {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !moviesStatus.isEmpty { Text("Movies: \(moviesStatus)").font(.caption2) }
+                        if !tvStatus.isEmpty { Text("TV: \(tvStatus)").font(.caption2) }
+                    }
+                    .foregroundStyle(.secondary)
+                }
                 Spacer()
             }
         }
         .formStyle(.grouped)
+        .task {
+            // Auto-check once when the pane opens.
+            if config.nasUploadEnabled { await checkBoth() }
+        }
+    }
+
+    private func checkBoth() async {
+        async let m = checkPath(config.nasMoviesPath)
+        async let t = checkPath(config.nasTvPath)
+        let (mr, tr) = await (m, t)
+        moviesStatus = mr
+        tvStatus = tr
+    }
+
+    /// Verifies the path is mounted, reachable, and we can stat the underlying
+    /// filesystem. Times out at 3s to avoid hanging if the NAS is offline.
+    private func checkPath(_ path: String) async -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return "(not set)" }
+        return await withCheckedContinuation { cont in
+            DispatchQueue.global().async {
+                let fm = FileManager.default
+                guard fm.fileExists(atPath: trimmed) else {
+                    cont.resume(returning: "✗ unreachable")
+                    return
+                }
+                guard let attrs = try? fm.attributesOfFileSystem(forPath: trimmed),
+                      let total = attrs[.systemSize] as? Int64,
+                      let free = attrs[.systemFreeSize] as? Int64 else {
+                    cont.resume(returning: "⚠ cannot stat")
+                    return
+                }
+                let totalGB = Double(total) / 1_073_741_824
+                let freeGB = Double(free) / 1_073_741_824
+                cont.resume(returning: String(format: "✓ mounted — %.0f GB free of %.0f GB", freeGB, totalGB))
+            }
+        }
     }
 }
 
@@ -415,6 +458,7 @@ private struct HistoryPane: View {
 private struct AdvancedPane: View {
     @ObservedObject var config: AppConfig
     @State private var resetConfirm = false
+    @State private var includeSecretsInExport = false
 
     var body: some View {
         Form {
@@ -453,6 +497,21 @@ private struct AdvancedPane: View {
                 Spacer()
             }
 
+            Divider()
+
+            // Export / Import
+            Toggle(isOn: $includeSecretsInExport) {
+                Text("Include API keys & webhooks in export").font(.caption)
+            }
+            HStack {
+                Spacer().frame(width: 130)
+                Button("Export settings…") { exportSettings() }
+                Button("Import settings…") { importSettings() }
+                Spacer()
+            }
+
+            Divider()
+
             HStack {
                 Spacer().frame(width: 130)
                 Button("Reset all settings to defaults…") { resetConfirm = true }
@@ -480,12 +539,84 @@ private struct AdvancedPane: View {
                 let d = UserDefaults(suiteName: "group.com.autoripper")!
                 for key in d.dictionaryRepresentation().keys { d.removeObject(forKey: key) }
                 FileLogger.shared.warn("settings", "user reset all settings to defaults")
-                // App needs restart for AppConfig fields to re-read defaults.
                 NSApp.terminate(nil)
             }
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Restores every setting to its default. The app will quit; relaunch it to continue. Queue and history are NOT cleared.")
         }
+    }
+
+    // MARK: - Export / Import
+
+    private func exportSettings() {
+        var dict: [String: Any] = [
+            "outputDir": config.outputDir,
+            "makemkvPath": config.makemkvPath,
+            "handbrakePath": config.handbrakePath,
+            "minDuration": config.minDuration,
+            "autoEject": config.autoEject,
+            "defaultPreset": config.defaultPreset,
+            "defaultMediaType": config.defaultMediaType,
+            "nasMoviesPath": config.nasMoviesPath,
+            "nasTvPath": config.nasTvPath,
+            "nasUploadEnabled": config.nasUploadEnabled,
+            "historyRetentionDays": config.historyRetentionDays,
+            "preventSleep": config.preventSleep,
+            "verboseLogging": config.verboseLogging,
+        ]
+        if includeSecretsInExport {
+            dict["tmdbApiKey"] = config.tmdbApiKey
+            dict["discordWebhook"] = config.discordWebhook
+        }
+
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "autoripper-settings.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: url)
+            FileLogger.shared.info("settings", "exported settings to \(url.path) (secrets: \(includeSecretsInExport))")
+        } catch {
+            FileLogger.shared.error("settings", "export failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func importSettings() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            applyImported(dict)
+            FileLogger.shared.info("settings", "imported settings from \(url.path)")
+        } catch {
+            FileLogger.shared.error("settings", "import failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func applyImported(_ dict: [String: Any]) {
+        if let v = dict["outputDir"]            as? String { config.outputDir = v }
+        if let v = dict["makemkvPath"]          as? String { config.makemkvPath = v }
+        if let v = dict["handbrakePath"]        as? String { config.handbrakePath = v }
+        if let v = dict["minDuration"]          as? Int    { config.minDuration = v }
+        if let v = dict["autoEject"]            as? Bool   { config.autoEject = v }
+        if let v = dict["defaultPreset"]        as? String { config.defaultPreset = v }
+        if let v = dict["defaultMediaType"]     as? String { config.defaultMediaType = v }
+        if let v = dict["nasMoviesPath"]        as? String { config.nasMoviesPath = v }
+        if let v = dict["nasTvPath"]            as? String { config.nasTvPath = v }
+        if let v = dict["nasUploadEnabled"]     as? Bool   { config.nasUploadEnabled = v }
+        if let v = dict["historyRetentionDays"] as? Int    { config.historyRetentionDays = v }
+        if let v = dict["preventSleep"]         as? Bool   { config.preventSleep = v }
+        if let v = dict["verboseLogging"]       as? Bool   { config.verboseLogging = v }
+        if let v = dict["tmdbApiKey"]           as? String { config.tmdbApiKey = v }
+        if let v = dict["discordWebhook"]       as? String { config.discordWebhook = v }
     }
 }
