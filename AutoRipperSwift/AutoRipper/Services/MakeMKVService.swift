@@ -117,6 +117,22 @@ actor MakeMKVService {
         let fm = FileManager.default
         try fm.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
 
+        // MakeMKV in robot mode can't answer prompts. If any prior rip left a file
+        // matching this title's name pattern, MakeMKV would emit
+        //   MSG:5001,776,1,"File … already exist. Do you want to overwrite it?"
+        // and hang forever waiting for a yes/no. Delete the stale files first.
+        // MakeMKV's filename pattern is "<media-title>_tNN.mkv" — we don't know the
+        // media title here, so we match by the "_tNN.mkv" suffix.
+        let suffix = String(format: "_t%02d.mkv", titleId)
+        if let names = try? fm.contentsOfDirectory(atPath: outputDir) {
+            for name in names where name.hasSuffix(suffix) {
+                let stale = (outputDir as NSString).appendingPathComponent(name)
+                try? fm.removeItem(atPath: stale)
+                log.info("Removed stale MakeMKV output before re-rip: \(stale)")
+                logCallback?("Removed stale output: \(name)")
+            }
+        }
+
         let startTime = ContinuousClock.now
         nonisolated(unsafe) var outputFile = ""
 
