@@ -50,20 +50,25 @@ final class QueueViewModel: ObservableObject {
         let retention = TimeInterval(max(1, config.historyRetentionDays) * 86_400)
         let cutoff = Date().addingTimeInterval(-retention)
         let beforePrune = loaded.count
-        loaded.removeAll { job in
+        let prunedIds = loaded.filter { job in
             (job.status == .done || job.status == .failed)
                 && (job.finishedAt ?? job.createdAt) < cutoff
-        }
+        }.map(\.id)
+        for id in prunedIds { ThumbnailExtractor.shared.remove(jobId: id) }
+        loaded.removeAll { prunedIds.contains($0.id) }
         let pruned = beforePrune - loaded.count
         jobs = loaded
         FileLogger.shared.info("queue", "loaded \(loaded.count) jobs (interrupted: \(rescued), pruned: \(pruned))")
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle)
         jobs.append(job)
         let extra = editionLabel.map { " {edition-\($0)}" } ?? ""
-        FileLogger.shared.info("queue", "added job: \(job.discName) [\(intent.rawValue)\(extra)] <- \(rippedFile.path)")
+        let ep = (seasonNumber != nil || episodeNumber != nil)
+            ? " S\(seasonNumber ?? 0)E\(episodeNumber ?? 0)"
+            : ""
+        FileLogger.shared.info("queue", "added job: \(job.discName) [\(intent.rawValue)\(extra)\(ep)] <- \(rippedFile.path)")
         startWorkerIfNeeded()
     }
 
@@ -155,6 +160,16 @@ final class QueueViewModel: ObservableObject {
             jobs[index].encodedFile = encoded
             FileLogger.shared.info("queue", "encode done: \(jobs[index].discName) in \(formatElapsed(encodeElapsed)) -> \(encoded.path)")
             await card.finish("encode", detail: formatElapsed(encodeElapsed))
+
+            // Extract preview thumbnails (best-effort — silent failure is fine).
+            // Captured async so the rest of the pipeline doesn't block on HandBrake.
+            let jobId = jobs[index].id
+            let hbPath = config.handbrakePath
+            let encodedPath = encoded.path
+            Task.detached(priority: .utility) {
+                await ThumbnailExtractor.shared.extract(jobId: jobId, inputPath: encodedPath, count: 6, handbrakePath: hbPath)
+            }
+
             // Delete original rip to save space
             let rippedPath = jobs[index].rippedFile.path
             if rippedPath != encoded.path, FileManager.default.fileExists(atPath: rippedPath) {
@@ -181,13 +196,16 @@ final class QueueViewModel: ObservableObject {
             let dest: URL
             let edition = jobs[index].editionLabel
             if let media = tmdbMedia {
-                if media.mediaType == "tv" {
-                    // For TV, use the TV path builder
+                if media.mediaType == "tv" || jobs[index].intent == .episode {
+                    // TV — use job's season/episode/title fields if set, else
+                    // fall back to S01E01 placeholder. v3.3.0's picker UI
+                    // populates the fields; today they're typically nil.
                     dest = OrganizerService.buildTvPath(
                         outputDir: config.outputDir,
                         show: media.title,
-                        season: 1,
-                        episode: 1
+                        season: jobs[index].seasonNumber ?? 1,
+                        episode: jobs[index].episodeNumber ?? 1,
+                        episodeName: jobs[index].episodeTitle ?? ""
                     )
                 } else {
                     dest = OrganizerService.buildMoviePath(
@@ -376,6 +394,7 @@ final class QueueViewModel: ObservableObject {
     func remove(jobId: String) {
         guard let i = jobs.firstIndex(where: { $0.id == jobId }) else { return }
         guard jobs[i].status == .done || jobs[i].status == .failed else { return }
+        ThumbnailExtractor.shared.remove(jobId: jobId)
         jobs.remove(at: i)
     }
 
@@ -409,13 +428,21 @@ final class QueueViewModel: ObservableObject {
             FileLogger.shared.warn("queue", "reidentify: still no TMDb match for \"\(trimmed)\"")
         }
     }
+    /// Active jobs: queued, in-flight, AND failed (failures stay in queue so the
+    /// user can Retry without digging through history). Only completed jobs leave.
     var activeJobs: [Job] {
-        jobs.filter { $0.status != .done && $0.status != .failed }
+        jobs.filter { $0.status != .done }
     }
 
-    /// History (terminal state), newest first.
+    /// Number of failed jobs in the queue — used by the sidebar badge to surface
+    /// attention-needed counts separately from in-flight progress.
+    var failedCount: Int {
+        jobs.filter { $0.status == .failed }.count
+    }
+
+    /// History (completed only), newest first.
     var historyJobs: [Job] {
-        jobs.filter { $0.status == .done || $0.status == .failed }
+        jobs.filter { $0.status == .done }
             .sorted { ($0.finishedAt ?? $0.createdAt) > ($1.finishedAt ?? $1.createdAt) }
     }
 

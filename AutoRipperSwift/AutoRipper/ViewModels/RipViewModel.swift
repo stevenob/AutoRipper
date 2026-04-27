@@ -60,8 +60,8 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -380,13 +380,13 @@ final class RipViewModel: ObservableObject {
                         let intent = intent(for: tid)
                         let edition = editionLabel(for: tid)
                         let editionParam = (intent == .edition && !edition.isEmpty) ? edition : nil
-                        // If the user set a per-title name override, use that as the search
-                        // query and skip the cached disc-level TMDb result (which was looked
-                        // up against the disc name and won't match the override).
                         let override = nameOverride(for: tid)
                         let queryName = override.isEmpty ? info.name : override
                         let mediaResult = override.isEmpty ? cachedMediaResult : nil
-                        onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam)
+                        // TV season/episode/title — wired through but nil until v3.1.1
+                        // adds titleEpisodeAssignments and v3.3.0 adds the picker UI.
+                        onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
+                                       nil, nil, nil)
                     }
                 } catch {
                     sizeMonitor.cancel()

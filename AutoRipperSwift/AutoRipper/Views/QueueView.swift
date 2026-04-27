@@ -1,324 +1,223 @@
 import SwiftUI
 
-/// Live queue view: shows in-flight + queued jobs with progress, log expansion,
-/// and per-row actions.
+// MARK: - QueueView (split-view)
+
+/// Split-pane Queue: compact JobSidebarRow on the left, JobDetailView on the right.
+/// Failed jobs stay here (with red ✗) so the user can Retry without digging through History.
 struct QueueView: View {
     @ObservedObject var queueVM: QueueViewModel
-    @State private var expandedJobLog: String?
+    @State private var selectedId: String?
+
+    private var jobs: [Job] { queueVM.activeJobs }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "list.bullet.rectangle")
-                    .foregroundStyle(.secondary)
-                Text("Queue")
-                    .font(.headline)
-                Spacer()
-                Text(queueVM.statusLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-            Divider()
+        SplitJobView(
+            title: "Queue",
+            badge: badgeText,
+            jobs: jobs,
+            selectedId: $selectedId,
+            queueVM: queueVM,
+            emptyMessage: "Queue is empty"
+        )
+    }
 
-            if queueVM.activeJobs.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image(systemName: "tray")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.tertiary)
-                    Text("Queue is empty")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-            } else {
-                List {
-                    ForEach(queueVM.activeJobs) { job in
-                        JobRow(job: job, expanded: expandedJobLog == job.id)
-                            .onTapGesture {
-                                expandedJobLog = expandedJobLog == job.id ? nil : job.id
-                            }
-                    }
-                }
-                .listStyle(.inset)
-            }
-        }
+    private var badgeText: String {
+        let inFlight = queueVM.activeJobs.filter { $0.status != .failed }.count
+        let failed = queueVM.failedCount
+        if failed > 0 && inFlight > 0 { return "\(inFlight) active · \(failed) failed" }
+        if failed > 0 { return "\(failed) failed" }
+        if inFlight > 0 { return queueVM.statusLabel }
+        return "Idle"
     }
 }
 
-/// History view: terminal-state jobs, searchable, filterable.
+// MARK: - HistoryView (split-view)
+
+/// Split-pane History: completed jobs only. Searchable.
 struct HistoryView: View {
     @ObservedObject var queueVM: QueueViewModel
     @State private var search: String = ""
-    @State private var filter: HistoryFilter = .all
-    @State private var expandedJobLog: String?
+    @State private var selectedId: String?
 
-    enum HistoryFilter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case done = "Completed"
-        case failed = "Failed"
-        var id: String { rawValue }
-    }
-
-    private var filteredJobs: [Job] {
-        queueVM.historyJobs.filter { job in
-            let matchesFilter: Bool = {
-                switch filter {
-                case .all:    return true
-                case .done:   return job.status == .done
-                case .failed: return job.status == .failed
-                }
-            }()
-            let matchesSearch = search.isEmpty || job.discName.localizedCaseInsensitiveContains(search)
-            return matchesFilter && matchesSearch
-        }
+    private var jobs: [Job] {
+        queueVM.historyJobs.filter { search.isEmpty || $0.discName.localizedCaseInsensitiveContains(search) || ($0.mediaResult?.displayTitle ?? "").localizedCaseInsensitiveContains(search) }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "clock.arrow.circlepath")
-                    .foregroundStyle(.secondary)
-                Text("History")
-                    .font(.headline)
-                Spacer()
-                TextField("Search…", text: $search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
-                Picker("", selection: $filter) {
-                    ForEach(HistoryFilter.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .labelsHidden()
-                .frame(width: 110)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-            Divider()
+        SplitJobView(
+            title: "History",
+            badge: "\(queueVM.historyJobs.count) completed",
+            jobs: jobs,
+            selectedId: $selectedId,
+            queueVM: queueVM,
+            emptyMessage: search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"",
+            search: $search
+        )
+    }
+}
 
-            if filteredJobs.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image(systemName: "archivebox")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.tertiary)
-                    Text(search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"")
+// MARK: - Shared split layout
+
+private struct SplitJobView: View {
+    let title: String
+    let badge: String
+    let jobs: [Job]
+    @Binding var selectedId: String?
+    let queueVM: QueueViewModel
+    let emptyMessage: String
+    var search: Binding<String>? = nil
+
+    var body: some View {
+        HSplitView {
+            // Left pane: list of jobs.
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(title).font(.headline)
+                    Spacer()
+                    Text(badge)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
-            } else {
-                List {
-                    ForEach(filteredJobs) { job in
-                        JobRow(job: job, expanded: expandedJobLog == job.id, showActions: true, queueVM: queueVM)
-                            .onTapGesture {
-                                expandedJobLog = expandedJobLog == job.id ? nil : job.id
-                            }
-                    }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                if let search {
+                    TextField("Search…", text: search)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 6)
                 }
-                .listStyle(.inset)
+                Divider()
+                if jobs.isEmpty {
+                    Spacer()
+                    VStack(spacing: 8) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.tertiary)
+                        Text(emptyMessage).foregroundStyle(.secondary).font(.caption)
+                    }
+                    Spacer()
+                } else {
+                    List(selection: $selectedId) {
+                        ForEach(jobs) { job in
+                            JobSidebarRow(job: job)
+                                .tag(job.id)
+                        }
+                    }
+                    .listStyle(.sidebar)
+                }
+            }
+            .frame(minWidth: 240, idealWidth: 290, maxWidth: 360)
+
+            // Right pane: detail.
+            if let id = selectedId, let job = jobs.first(where: { $0.id == id }) {
+                JobDetailView(job: job, queueVM: queueVM)
+            } else if let first = jobs.first {
+                // Auto-select the first job if nothing is selected yet.
+                JobDetailView(job: first, queueVM: queueVM)
+                    .onAppear { selectedId = first.id }
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.tertiary)
+                    Text("Select a job from the list")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        // When jobs change (e.g. completion moves to history), keep selection
+        // valid by clearing if our selected id no longer exists.
+        .onChange(of: jobs.map(\.id)) { _, new in
+            if let id = selectedId, !new.contains(id) {
+                selectedId = new.first
             }
         }
     }
 }
 
-/// Single job row used by both QueueView and HistoryView.
-private struct JobRow: View {
+// MARK: - JobSidebarRow (compact list-row form)
+
+private struct JobSidebarRow: View {
     let job: Job
-    let expanded: Bool
-    var showActions: Bool = true
-    var queueVM: QueueViewModel? = nil
-    @State private var showIdentify = false
-    @State private var identifyQuery: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                posterThumb
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(job.mediaResult?.displayTitle ?? job.discName)
-                            .fontWeight(.medium)
-                            .lineLimit(1)
-                        if job.mediaResult == nil && job.intent != .extra {
-                            Image(systemName: "questionmark.circle.fill")
-                                .foregroundStyle(.yellow)
-                                .font(.caption)
-                                .help("No TMDb match — click Identify to set a search query")
-                        }
-                        if job.intent != .movie {
-                            Text(job.intent.rawValue)
-                                .font(.caption2)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(.quaternary)
-                                .clipShape(Capsule())
-                        }
-                        if let edition = job.editionLabel, !edition.isEmpty {
-                            Text("{\(edition)}")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    Text(job.progressText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                if let queueVM, showActions, canReidentify, job.mediaResult == nil {
-                    Button("Identify…") {
-                        identifyQuery = job.discName
-                        showIdentify = true
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .popover(isPresented: $showIdentify) {
-                        identifyPopover(queueVM: queueVM)
-                    }
-                }
-                if job.status == .failed, let queueVM, showActions {
-                    Button("Retry") { queueVM.retry(jobId: job.id) }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(!FileManager.default.fileExists(atPath: job.rippedFile.path))
-                }
-                if (job.status == .done || job.status == .failed), let queueVM, showActions {
-                    Button {
-                        let target = job.organizedFile ?? job.encodedFile ?? job.rippedFile
-                        NSWorkspace.shared.activateFileViewerSelecting([target])
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Reveal in Finder")
-                    Button {
-                        queueVM.remove(jobId: job.id)
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Remove from history")
-                }
-            }
-            if job.status != .queued && job.status != .done && job.status != .failed {
-                ProgressView(value: Double(job.progress), total: 100)
-                    .progressViewStyle(.linear)
-            }
-            if !job.error.isEmpty {
-                Text(job.error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(expanded ? nil : 2)
-                    .textSelection(.enabled)
-            }
-            if expanded && !job.logLines.isEmpty {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(Array(job.logLines.enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(.caption2, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(6)
-                }
-                .frame(maxHeight: 180)
-                .background(Color(nsColor: .textBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    /// Small TMDb poster thumb with the job-status icon overlaid in the bottom-right.
-    /// Falls back to a film placeholder when there's no poster (no TMDb match,
-    /// or `.extra` intent which intentionally skips TMDb).
-    @ViewBuilder
-    private var posterThumb: some View {
-        ZStack(alignment: .bottomTrailing) {
-            if let path = job.mediaResult?.posterPath,
-               let url = URL(string: "https://image.tmdb.org/t/p/w154\(path)") {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().aspectRatio(2/3, contentMode: .fill)
-                    default:
-                        posterPlaceholder
-                    }
-                }
-                .frame(width: 36, height: 54)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            } else {
-                posterPlaceholder
-                    .frame(width: 36, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-            // Status indicator overlaid on the poster.
+        HStack(spacing: 8) {
             statusIcon
-                .font(.caption2)
-                .padding(2)
-                .background(Color(nsColor: .windowBackgroundColor).opacity(0.85))
-                .clipShape(Circle())
-                .padding(2)
-        }
-    }
-
-    @ViewBuilder
-    private var posterPlaceholder: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color.gray.opacity(0.30), Color.gray.opacity(0.12)],
-                startPoint: .top, endPoint: .bottom
-            )
-            Image(systemName: "film")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    /// Allow re-identify until the file has been organized (after that, the
-    /// destination path is committed and would need a manual move).
-    private var canReidentify: Bool {
-        switch job.status {
-        case .queued, .encoding: return true
-        case .organizing, .scraping, .uploading, .done, .failed: return false
-        }
-    }
-
-    @ViewBuilder
-    private func identifyPopover(queueVM: QueueViewModel) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Search TMDb")
-                .font(.headline)
-            Text("Enter the movie or TV title. The corrected name will be used when this job is organized.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 320, alignment: .leading)
-            TextField("e.g. Blade Runner 1982", text: $identifyQuery)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 320)
-                .onSubmit { submitIdentify(queueVM: queueVM) }
-            HStack {
-                Spacer()
-                Button("Cancel") { showIdentify = false }
-                Button("Search") { submitIdentify(queueVM: queueVM) }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(identifyQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(job.mediaResult?.displayTitle ?? job.discName)
+                    .font(.callout)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                pipelineDots
+            }
+            Spacer()
+            if job.status != .queued && job.status != .done && job.status != .failed {
+                Text("\(job.progress)%")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
+        .padding(.vertical, 2)
     }
 
-    private func submitIdentify(queueVM: QueueViewModel) {
-        let q = identifyQuery.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
-        showIdentify = false
-        Task { await queueVM.reidentify(jobId: job.id, newQuery: q) }
+    /// 5-dot pipeline indicator: rip, encode, organize, scrape, NAS.
+    @ViewBuilder
+    private var pipelineDots: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(stages.enumerated()), id: \.offset) { _, stage in
+                Circle()
+                    .fill(color(for: stage))
+                    .frame(width: 5, height: 5)
+            }
+        }
+    }
+
+    private enum Stage { case rip, encode, organize, scrape, nas }
+    private let stages: [Stage] = [.rip, .encode, .organize, .scrape, .nas]
+
+    /// Map a job's current status to per-stage color: green = done, blue = active,
+    /// red = failed at this stage, gray = pending.
+    private func color(for stage: Stage) -> Color {
+        let s = job.status
+        // Rip is implicitly done by the time we have a Job in the queue.
+        if stage == .rip { return .green }
+        switch (stage, s) {
+        case (.encode, .encoding):       return .blue
+        case (.encode, .organizing),
+             (.encode, .scraping),
+             (.encode, .uploading),
+             (.encode, .done):           return .green
+        case (.organize, .organizing):   return .blue
+        case (.organize, .scraping),
+             (.organize, .uploading),
+             (.organize, .done):         return .green
+        case (.scrape, .scraping):       return .blue
+        case (.scrape, .uploading),
+             (.scrape, .done):           return .green
+        case (.nas, .uploading):         return .blue
+        case (.nas, .done):              return .green
+        case (_, .failed):
+            // Mark the first not-yet-done stage red.
+            return color(forFailureAtCurrent: stage)
+        default:                         return Color.gray.opacity(0.3)
+        }
+    }
+
+    private func color(forFailureAtCurrent stage: Stage) -> Color {
+        // Heuristic: if encodedFile exists, encode succeeded → fail at organize.
+        // If organizedFile exists, fail at scrape. Etc. Otherwise fail at encode.
+        let encoded = job.encodedFile != nil
+        let organized = job.organizedFile != nil
+        switch stage {
+        case .rip:      return .green
+        case .encode:   return encoded ? .green : .red
+        case .organize: return organized ? .green : (encoded ? .red : Color.gray.opacity(0.3))
+        case .scrape:   return organized ? .red : Color.gray.opacity(0.3)
+        case .nas:      return Color.gray.opacity(0.3)
+        }
     }
 
     @ViewBuilder
@@ -331,6 +230,372 @@ private struct JobRow: View {
         case .uploading:  Image(systemName: "icloud.and.arrow.up").foregroundColor(.cyan)
         case .done:       Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
         case .failed:     Image(systemName: "xmark.circle.fill").foregroundColor(.red)
+        }
+    }
+}
+
+// MARK: - JobDetailView (right pane content, used by both Queue + History)
+
+private struct JobDetailView: View {
+    let job: Job
+    let queueVM: QueueViewModel
+    @State private var showIdentify = false
+    @State private var identifyQuery: String = ""
+    @State private var thumbs: [URL] = []
+    @State private var thumbsRefreshTimer: Timer?
+
+    private var media: MediaResult? { job.mediaResult }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                Divider()
+                progressSection
+                if !thumbs.isEmpty {
+                    Divider()
+                    thumbnailsSection
+                }
+                Divider()
+                pathsSection
+                if !job.error.isEmpty {
+                    Divider()
+                    errorSection
+                }
+                if !job.logLines.isEmpty {
+                    Divider()
+                    logSection
+                }
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            refreshThumbs()
+            // Periodic refresh while the encode is running (mid-encode partial thumbs).
+            if job.status == .encoding {
+                thumbsRefreshTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+                    refreshThumbs()
+                }
+            }
+        }
+        .onDisappear { thumbsRefreshTimer?.invalidate() }
+        .onChange(of: job.id) { _, _ in
+            thumbsRefreshTimer?.invalidate()
+            refreshThumbs()
+        }
+    }
+
+    // MARK: - Header
+
+    @ViewBuilder
+    private var header: some View {
+        HStack(alignment: .top, spacing: 16) {
+            poster
+            VStack(alignment: .leading, spacing: 4) {
+                Text(media?.displayTitle ?? job.discName)
+                    .font(.title)
+                    .fontWeight(.semibold)
+                    .lineLimit(2)
+                if let media {
+                    Text("\(media.mediaType == "tv" ? "TV" : "Movie")\(media.year.map { " · \($0)" } ?? "")")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if job.intent != .movie {
+                    Text(job.intent.rawValue.capitalized)
+                        .font(.caption)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(.quaternary).clipShape(Capsule())
+                }
+                if let edition = job.editionLabel, !edition.isEmpty {
+                    Text("Edition: \(edition)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                actions
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var poster: some View {
+        Group {
+            if let path = media?.posterPath,
+               let url = URL(string: "https://image.tmdb.org/t/p/w342\(path)") {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().aspectRatio(2/3, contentMode: .fill)
+                    default: posterPlaceholder
+                    }
+                }
+            } else {
+                posterPlaceholder
+            }
+        }
+        .frame(width: 120, height: 180)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .shadow(radius: 4, y: 2)
+    }
+
+    @ViewBuilder
+    private var posterPlaceholder: some View {
+        ZStack {
+            LinearGradient(colors: [Color.gray.opacity(0.3), Color.gray.opacity(0.1)],
+                           startPoint: .top, endPoint: .bottom)
+            Image(systemName: "film.fill")
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        HStack(spacing: 6) {
+            if canReidentify {
+                Button("Identify…") {
+                    identifyQuery = job.discName
+                    showIdentify = true
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .popover(isPresented: $showIdentify) { identifyPopover }
+            }
+            if job.status == .failed {
+                Button {
+                    queueVM.retry(jobId: job.id)
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!FileManager.default.fileExists(atPath: job.rippedFile.path))
+            }
+            if job.status == .done || job.status == .failed {
+                Button {
+                    let target = job.organizedFile ?? job.encodedFile ?? job.rippedFile
+                    NSWorkspace.shared.activateFileViewerSelecting([target])
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button {
+                    queueVM.remove(jobId: job.id)
+                } label: {
+                    Label("Remove", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private var canReidentify: Bool {
+        switch job.status {
+        case .queued, .encoding: return true
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private var identifyPopover: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Re-identify with TMDb").font(.headline)
+            TextField("Search query", text: $identifyQuery)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 320)
+                .onSubmit { submitIdentify() }
+            HStack {
+                Spacer()
+                Button("Cancel") { showIdentify = false }
+                Button("Search") { submitIdentify() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(identifyQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(14)
+    }
+
+    private func submitIdentify() {
+        let q = identifyQuery.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        showIdentify = false
+        Task { await queueVM.reidentify(jobId: job.id, newQuery: q) }
+    }
+
+    // MARK: - Progress
+
+    @ViewBuilder
+    private var progressSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Pipeline").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                pipelineSegment(label: "Rip", color: .green)
+                pipelineConnector
+                pipelineSegment(label: "Encode", color: encodeColor)
+                pipelineConnector
+                pipelineSegment(label: "Organize", color: organizeColor)
+                pipelineConnector
+                pipelineSegment(label: "Scrape", color: scrapeColor)
+                pipelineConnector
+                pipelineSegment(label: "NAS", color: nasColor)
+            }
+            if job.status != .queued && job.status != .done && job.status != .failed {
+                ProgressView(value: Double(job.progress), total: 100)
+                    .progressViewStyle(.linear)
+                    .padding(.top, 4)
+            }
+            Text(job.progressText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var encodeColor: Color {
+        switch job.status {
+        case .encoding:                                                return .blue
+        case .organizing, .scraping, .uploading, .done:                return .green
+        case .failed where job.encodedFile != nil:                     return .green
+        case .failed:                                                  return .red
+        default:                                                       return .gray.opacity(0.3)
+        }
+    }
+    private var organizeColor: Color {
+        switch job.status {
+        case .organizing:                                              return .blue
+        case .scraping, .uploading, .done:                             return .green
+        case .failed where job.organizedFile != nil:                   return .green
+        case .failed where job.encodedFile != nil:                     return .red
+        default:                                                       return .gray.opacity(0.3)
+        }
+    }
+    private var scrapeColor: Color {
+        switch job.status {
+        case .scraping:                                                return .blue
+        case .uploading, .done:                                        return .green
+        default:                                                       return .gray.opacity(0.3)
+        }
+    }
+    private var nasColor: Color {
+        switch job.status {
+        case .uploading:                                               return .blue
+        case .done:                                                    return .green
+        default:                                                       return .gray.opacity(0.3)
+        }
+    }
+
+    private func pipelineSegment(label: String, color: Color) -> some View {
+        VStack(spacing: 2) {
+            Circle().fill(color).frame(width: 12, height: 12)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+    private var pipelineConnector: some View {
+        Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1).frame(maxWidth: 30)
+    }
+
+    // MARK: - Thumbnails
+
+    private func refreshThumbs() {
+        thumbs = ThumbnailExtractor.shared.thumbnails(for: job.id)
+    }
+
+    @ViewBuilder
+    private var thumbnailsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Encode preview").font(.caption).foregroundStyle(.secondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(thumbs, id: \.path) { url in
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img.resizable().aspectRatio(16/9, contentMode: .fill)
+                            default:
+                                Color.gray.opacity(0.2)
+                            }
+                        }
+                        .frame(width: 120, height: 67)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Paths / preset
+
+    @ViewBuilder
+    private var pathsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Files").font(.caption).foregroundStyle(.secondary)
+            pathRow(label: "Source",   value: job.rippedFile.path)
+            if let e = job.encodedFile { pathRow(label: "Encoded",  value: e.path) }
+            if let o = job.organizedFile { pathRow(label: "Final", value: o.path) }
+            if !job.resolution.isEmpty {
+                pathRow(label: "Source res", value: job.resolution)
+            }
+            if let preset = HandBrakeService.autoPreset(for: job.resolution) {
+                pathRow(label: "Preset", value: preset)
+            }
+        }
+    }
+
+    private func pathRow(label: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 80, alignment: .trailing)
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+            Spacer()
+        }
+    }
+
+    // MARK: - Error / log
+
+    @ViewBuilder
+    private var errorSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Error").font(.caption).foregroundStyle(.red)
+            Text(job.error)
+                .font(.caption)
+                .textSelection(.enabled)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+        }
+    }
+
+    @ViewBuilder
+    private var logSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Log").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(job.logLines.count) lines").font(.caption2).foregroundStyle(.tertiary)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    ForEach(Array(job.logLines.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(.caption2, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(6)
+            }
+            .frame(maxHeight: 200)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
         }
     }
 }

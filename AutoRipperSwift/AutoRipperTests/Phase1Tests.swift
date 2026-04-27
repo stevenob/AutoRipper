@@ -52,6 +52,28 @@ final class OrganizerServiceTests: XCTestCase {
         )
         XCTAssertEqual(path.lastPathComponent, "Show - S02E05 - Pilot.mkv")
     }
+
+    func testBuildTvPathDoubleDigitSeasonAndEpisode() {
+        // Sanity: padding works for S/E ≥ 10. Verifies the format matches Plex/Jellyfin
+        // expectations even for long-running shows.
+        let path = OrganizerService.buildTvPath(
+            outputDir: "/output", show: "The Long Show", season: 12, episode: 24,
+            episodeName: "Series Finale"
+        )
+        XCTAssertEqual(path.lastPathComponent, "The Long Show - S12E24 - Series Finale.mkv")
+        XCTAssertEqual(path.deletingLastPathComponent().lastPathComponent, "Season 12")
+        XCTAssertEqual(path.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent, "The Long Show")
+    }
+
+    func testBuildTvPathStripsIllegalCharsFromShowAndEpisode() {
+        // Defensive: TMDb episode titles can contain colons, slashes, etc. that
+        // break filenames. Verifies cleanFilename is applied to both show and ep.
+        let path = OrganizerService.buildTvPath(
+            outputDir: "/output", show: "Star Wars: Andor", season: 1, episode: 5,
+            episodeName: "The Axe Forgets"
+        )
+        XCTAssertEqual(path.lastPathComponent, "Star Wars Andor - S01E05 - The Axe Forgets.mkv")
+    }
 }
 
 final class DiscInfoTests: XCTestCase {
