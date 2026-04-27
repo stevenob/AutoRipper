@@ -329,20 +329,21 @@ struct DiscPaneView: View {
 
             // Bottom bar
             HStack(spacing: 12) {
-                if let info = ripVM.discInfo {
-                    let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
+                // Title-table selection helpers (only when scanned and not ripping;
+                // ripping has its own hero with Abort).
+                if ripVM.discInfo != nil && !ripVM.isRipping {
+                    let filtered = (ripVM.discInfo?.titles ?? []).filter { $0.durationSeconds >= config.minDuration }
                     Button("Select All") {
                         ripVM.selectedTitles = Set(filtered.map(\.id))
                     }
-                    .disabled(ripVM.isRipping)
-
                     Button("Deselect All") {
                         ripVM.selectedTitles = []
                     }
-                    .disabled(ripVM.isRipping)
                 }
 
-                if !ripVM.isRipping {
+                // Status text (idle + scan-complete states; the hero shows its own
+                // status while ripping, and scanning shows its own spinner).
+                if !ripVM.isRipping && !ripVM.isScanning {
                     Text(ripVM.statusText)
                         .foregroundStyle(.secondary)
                         .font(.caption)
@@ -351,16 +352,19 @@ struct DiscPaneView: View {
 
                 Spacer()
 
-                if ripVM.isScanning || ripVM.isRipping {
+                // Abort lives in the hero while ripping (avoid duplication).
+                // The footer only shows Abort during *scanning*.
+                if ripVM.isScanning {
                     Button("Abort") { ripVM.abort() }
                         .keyboardShortcut(".", modifiers: .command)
                 }
 
-                if ripVM.discInfo != nil {
+                // Rip button only when scanned and not already ripping/scanning.
+                if ripVM.discInfo != nil && !ripVM.isRipping && !ripVM.isScanning {
                     Button(ripVM.fullAutoEnabled ? "Rip & Encode" : "Rip") {
                         ripVM.ripSelected()
                     }
-                    .disabled(ripVM.selectedTitles.isEmpty || ripVM.isRipping || ripVM.isScanning)
+                    .disabled(ripVM.selectedTitles.isEmpty)
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut("r", modifiers: .command)
                 }
