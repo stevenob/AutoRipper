@@ -53,6 +53,13 @@ struct DiscIdentifyPanel: View {
                     Text("Identified as \(current.displayTitle)")
                         .font(.caption)
                         .fontWeight(.medium)
+                    if current.mediaType == "tv" {
+                        Text("📺 TV")
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.purple.opacity(0.18))
+                            .clipShape(Capsule())
+                    }
                 }
                 Text("Disc label: \(discName)")
                     .font(.caption2)

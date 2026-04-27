@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum AppTab: String, CaseIterable, Identifiable {
     case disc = "Disc"
@@ -23,6 +24,8 @@ struct ContentView: View {
     @StateObject private var ripVM = RipViewModel()
     @StateObject private var queueVM = QueueViewModel()
     @State private var selectedTab: AppTab = .disc
+    @State private var droppedFiles: [URL] = []
+    @State private var showImportSheet = false
 
     var body: some View {
         NavigationSplitView {
@@ -35,8 +38,6 @@ struct ContentView: View {
                     }
                 }
                 Spacer()
-                // Settings pinned to the bottom of the sidebar — distinct visual
-                // grouping from the primary nav above.
                 Section {
                     Label(AppTab.settings.rawValue, systemImage: AppTab.settings.systemImage)
                         .tag(AppTab.settings)
@@ -44,14 +45,34 @@ struct ContentView: View {
             }
             .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
         } detail: {
-            switch selectedTab {
-            case .disc:     DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config)
-            case .queue:    QueueView(queueVM: queueVM)
-            case .history:  HistoryView(queueVM: queueVM)
-            case .settings: SettingsView(config: AppConfig.shared)
+            VStack(spacing: 0) {
+                NowRippingRibbon(ripVM: ripVM, queueVM: queueVM, selectedTab: $selectedTab)
+                Group {
+                    switch selectedTab {
+                    case .disc:     DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config)
+                    case .queue:    QueueView(queueVM: queueVM)
+                    case .history:  HistoryView(queueVM: queueVM)
+                    case .settings: SettingsView(config: AppConfig.shared)
+                    }
+                }
+                .transition(.opacity)
             }
+            .animation(.easeInOut(duration: 0.2), value: selectedTab)
         }
         .frame(minWidth: 800, minHeight: 500)
+        // Window-wide drop target: drag in MKVs (or other video files) to add
+        // them to the queue without ripping. Routes any drop to the Queue tab
+        // and opens the import sheet.
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handleDrop(providers)
+        }
+        .sheet(isPresented: $showImportSheet) {
+            DragDropImportSheet(files: droppedFiles, queueVM: queueVM) {
+                showImportSheet = false
+                droppedFiles = []
+                selectedTab = .queue
+            }
+        }
         .alert("Error", isPresented: Binding(
             get: { ripVM.errorMessage != nil },
             set: { if !$0 { ripVM.errorMessage = nil } }
@@ -67,6 +88,29 @@ struct ContentView: View {
             NotificationService.shared.requestPermission()
             updateService.checkForUpdates()
         }
+    }
+
+    /// Accept dropped video files and stage them for the import sheet.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var collected: [URL] = []
+        let group = DispatchGroup()
+        for p in providers {
+            guard p.canLoadObject(ofClass: URL.self) else { continue }
+            group.enter()
+            _ = p.loadObject(ofClass: URL.self) { url, _ in
+                defer { group.leave() }
+                guard let url else { return }
+                let ext = url.pathExtension.lowercased()
+                guard ["mkv", "mp4", "m4v", "mov"].contains(ext) else { return }
+                collected.append(url)
+            }
+        }
+        group.notify(queue: .main) {
+            guard !collected.isEmpty else { return }
+            droppedFiles = collected
+            showImportSheet = true
+        }
+        return true
     }
 }
 

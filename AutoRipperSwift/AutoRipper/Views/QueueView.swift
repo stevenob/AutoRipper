@@ -44,29 +44,167 @@ struct QueueView: View {
 
 // MARK: - HistoryView (split-view)
 
-/// Split-pane History: completed jobs only. Searchable.
+/// Split-pane History: completed jobs only. Searchable. List or poster-wall mode.
 struct HistoryView: View {
     @ObservedObject var queueVM: QueueViewModel
     @State private var search: String = ""
     @State private var selection: Set<String> = []
+    @State private var posterWall: Bool = false
 
     private var jobs: [Job] {
         queueVM.historyJobs.filter { search.isEmpty || $0.discName.localizedCaseInsensitiveContains(search) || ($0.mediaResult?.displayTitle ?? "").localizedCaseInsensitiveContains(search) }
     }
 
     var body: some View {
-        SplitJobView(
-            title: "History",
-            badge: "\(queueVM.historyJobs.count) completed",
-            jobs: jobs,
-            selection: $selection,
-            queueVM: queueVM,
-            emptyMessage: search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"",
-            search: $search,
-            footer: nil,
-            groupByDisc: false,
-            allowReorder: false
-        )
+        if posterWall {
+            PosterWallView(jobs: jobs, search: $search, posterWall: $posterWall, queueVM: queueVM)
+        } else {
+            SplitJobView(
+                title: "History",
+                badge: "\(queueVM.historyJobs.count) completed",
+                jobs: jobs,
+                selection: $selection,
+                queueVM: queueVM,
+                emptyMessage: search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"",
+                search: $search,
+                footer: AnyView(viewModeToggle),
+                groupByDisc: false,
+                allowReorder: false
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var viewModeToggle: some View {
+        HStack {
+            Spacer()
+            Button { posterWall = true } label: {
+                Label("Poster wall", systemImage: "square.grid.3x3")
+            }
+            .buttonStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+/// Plex-style poster wall for completed jobs. Toggleable from HistoryView.
+private struct PosterWallView: View {
+    let jobs: [Job]
+    @Binding var search: String
+    @Binding var posterWall: Bool
+    let queueVM: QueueViewModel
+    @State private var selectedId: String?
+
+    private let columns = [GridItem(.adaptive(minimum: 130), spacing: 12)]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Text("History").font(.headline)
+                Text("\(jobs.count) completed").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                TextField("Search…", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                Button { posterWall = false } label: {
+                    Label("List", systemImage: "list.bullet")
+                }
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            Divider()
+
+            if jobs.isEmpty {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "archivebox").font(.system(size: 48)).foregroundStyle(.tertiary)
+                    Text(search.isEmpty ? "No history yet" : "No jobs match \"\(search)\"")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 16) {
+                        ForEach(jobs) { job in
+                            posterCard(job: job)
+                                .onTapGesture {
+                                    selectedId = selectedId == job.id ? nil : job.id
+                                }
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+        }
+        .sheet(item: Binding(
+            get: { selectedId.flatMap { id in jobs.first(where: { $0.id == id }) } },
+            set: { _ in selectedId = nil }
+        )) { job in
+            // Quick detail sheet on tap.
+            VStack(spacing: 0) {
+                HStack {
+                    Text(job.mediaResult?.displayTitle ?? job.discName).font(.headline)
+                    Spacer()
+                    Button("Done") { selectedId = nil }
+                        .keyboardShortcut(.defaultAction)
+                }
+                .padding(16)
+                Divider()
+                ScrollView {
+                    JobDetailQuickView(job: job, queueVM: queueVM)
+                        .padding(16)
+                }
+            }
+            .frame(minWidth: 600, minHeight: 500)
+        }
+    }
+
+    @ViewBuilder
+    private func posterCard(job: Job) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ZStack(alignment: .bottomTrailing) {
+                if let path = job.mediaResult?.posterPath,
+                   let url = URL(string: "https://image.tmdb.org/t/p/w342\(path)") {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img): img.resizable().aspectRatio(2/3, contentMode: .fill)
+                        default: ZStack { Color.gray.opacity(0.2); Image(systemName: "film").foregroundStyle(.tertiary) }
+                        }
+                    }
+                } else {
+                    ZStack { Color.gray.opacity(0.2); Image(systemName: "film").font(.title).foregroundStyle(.tertiary) }
+                }
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+                    .padding(3)
+                    .background(Color.black.opacity(0.6))
+                    .clipShape(Circle())
+                    .padding(4)
+            }
+            .frame(width: 130, height: 195)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            Text(job.mediaResult?.title ?? job.discName)
+                .font(.caption)
+                .lineLimit(2)
+                .frame(width: 130, alignment: .leading)
+            if let y = job.mediaResult?.year {
+                Text(String(y)).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Lightweight detail view used inside the PosterWall's sheet. Wraps the existing
+/// JobDetailView body without the surrounding HSplitView chrome.
+private struct JobDetailQuickView: View {
+    let job: Job
+    let queueVM: QueueViewModel
+    var body: some View {
+        JobDetailView(job: job, queueVM: queueVM)
     }
 }
 
