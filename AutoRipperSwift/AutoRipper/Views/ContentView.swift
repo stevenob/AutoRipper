@@ -247,14 +247,10 @@ struct DiscPaneView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if ripVM.isRipping, let info = ripVM.discInfo {
-            // During rip: keep the existing hero. Identify panel stays accessible.
-            VStack(spacing: 0) {
-                DiscIdentifyPanel(ripVM: ripVM, discName: info.name)
-                RipHeroView(ripVM: ripVM, info: info)
-            }
-        } else if let info = ripVM.discInfo {
-            // Scanned: two-column layout.
+        if let info = ripVM.discInfo {
+            // Scanned (and possibly ripping) — same two-column layout. The disc
+            // info column adapts (shows a Ripping block) and the titles table
+            // shows per-title rip status when ripping.
             HSplitView {
                 DiscInfoColumn(ripVM: ripVM, config: config, info: info)
                 titlesAndLogColumn(info: info)
@@ -262,7 +258,6 @@ struct DiscPaneView: View {
         } else if ripVM.isScanning {
             scanningView
         } else if let unknown = ripVM.unidentifiedDiscName, !ripVM.detectedDiscType.isEmpty, ripVM.discInfo == nil {
-            // We tried to scan and failed — show diagnosis.
             failureView(headline: "Couldn't read this disc",
                         body: "MakeMKV reported errors scanning \(unknown). Try cleaning the disc, re-inserting it, or using a different drive.")
         } else {
@@ -292,10 +287,12 @@ struct DiscPaneView: View {
             Text("\(filtered.count) of \(info.titles.count) · \(ripVM.selectedTitles.count) selected")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Button("Select All") { ripVM.selectedTitles = Set(filtered.map(\.id)) }
-                .controlSize(.small)
-            Button("Deselect All") { ripVM.selectedTitles = [] }
-                .controlSize(.small)
+            if !ripVM.isRipping {
+                Button("Select All") { ripVM.selectedTitles = Set(filtered.map(\.id)) }
+                    .controlSize(.small)
+                Button("Deselect All") { ripVM.selectedTitles = [] }
+                    .controlSize(.small)
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
     }
@@ -364,11 +361,42 @@ struct DiscPaneView: View {
                 .width(60)
 
                 TableColumn("Intent") { title in
-                    intentControls(for: title)
+                    if ripVM.isRipping {
+                        ripStatusCell(for: title)
+                    } else {
+                        intentControls(for: title)
+                    }
                 }
                 .width(220)
             }
             .tableStyle(.inset(alternatesRowBackgrounds: true))
+        }
+    }
+
+    /// Per-title status row used during ripping. Reads from
+    /// `ripVM.titleRipStatuses` to show queued/ripping%/done/failed glyphs.
+    @ViewBuilder
+    private func ripStatusCell(for title: TitleInfo) -> some View {
+        let status = ripVM.titleRipStatuses[title.id]
+        HStack(spacing: 6) {
+            switch status {
+            case .ripping(let pct):
+                Circle().fill(.red).frame(width: 8, height: 8)
+                Text("Ripping \(pct)%").font(.caption).monospacedDigit()
+            case .done:
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("Done").font(.caption)
+            case .failed(let msg):
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                Text(msg).font(.caption2).foregroundStyle(.red).lineLimit(1)
+            case .queued:
+                Image(systemName: "clock").foregroundStyle(.secondary)
+                Text("Queued").font(.caption).foregroundStyle(.secondary)
+            case .none:
+                Text(ripVM.selectedTitles.contains(title.id) ? "" : "—")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            Spacer()
         }
     }
 

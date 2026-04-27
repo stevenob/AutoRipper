@@ -29,6 +29,9 @@ struct DiscInfoColumn: View {
                     TVEpisodePicker(ripVM: ripVM)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                if ripVM.isRipping {
+                    section("Ripping now") { rippingBlock }
+                }
                 section("Preset") { presetBlock }
                 section("Selected (\(selectedCount) of \(info.titles.count))") { selectedBlock }
                 section("Storage") { storageBlock }
@@ -149,6 +152,25 @@ struct DiscInfoColumn: View {
     private var identifyBlock: some View {
         DiscIdentifyPanel(ripVM: ripVM, discName: info.name)
             .background(.clear)
+    }
+
+    // MARK: - Ripping now (active only)
+
+    @ViewBuilder
+    private var rippingBlock: some View {
+        let currentTitle = ripVM.currentRippingTitleId.flatMap { tid in
+            info.titles.first(where: { $0.id == tid })
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Circle().fill(.red).frame(width: 8, height: 8)
+                Text(currentTitle.map { "Title \($0.id) — \($0.duration)" } ?? "Working…")
+                    .font(.caption).fontWeight(.medium)
+            }
+            ProgressView(value: ripVM.ripProgress).progressViewStyle(.linear)
+            Text(ripVM.statusText)
+                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
     }
 
     // MARK: - Preset
