@@ -186,6 +186,10 @@ final class RipViewModel: ObservableObject {
             info.mediaTitle = match.displayTitle
             self.cachedMediaResult = match
             self.unidentifiedDiscName = nil
+            // Auto-classify titles when the disc resolves to a TV series — saves
+            // the user clicking "Episode" N times for a season disc. v3.3.0's
+            // picker UI will then populate season/episode/title per row.
+            applyAutoIntent(for: match)
         } else {
             await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
             NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
@@ -208,12 +212,31 @@ final class RipViewModel: ObservableObject {
             }
             cachedMediaResult = enriched
             unidentifiedDiscName = nil
+            applyAutoIntent(for: enriched)
             if var info = discInfo {
                 info.mediaTitle = enriched.displayTitle
                 discInfo = info
             }
             FileLogger.shared.info("rip-vm", "user picked disc match: \(enriched.displayTitle)")
         }
+    }
+
+    /// When a TV match is selected, default every selected (or scanned-eligible)
+    /// title's intent to `.episode`. When a movie match is selected, switch any
+    /// previously-classified episode intents back to `.movie`. Doesn't override
+    /// .extra or .edition — user choices stick.
+    private func applyAutoIntent(for match: MediaResult) {
+        guard let info = discInfo else { return }
+        let target: JobIntent = match.mediaType == "tv" ? .episode : .movie
+        let opposite: JobIntent = match.mediaType == "tv" ? .movie : .episode
+        for title in info.titles {
+            let current = titleIntents[title.id] ?? .movie
+            // Only flip the auto-defaulted side; preserve .extra and .edition.
+            if current == opposite || titleIntents[title.id] == nil {
+                titleIntents[title.id] = target
+            }
+        }
+        FileLogger.shared.info("rip-vm", "auto-classified titles as \(target.rawValue) for \(match.mediaType) match")
     }
 
     /// Re-run the TMDb disc search with a user-supplied query (used when the auto

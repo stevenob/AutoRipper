@@ -166,14 +166,34 @@ struct DiscPaneView: View {
                     Text("AutoRipper \(updateService.latestVersion) is available")
                         .fontWeight(.medium)
                         .foregroundStyle(.white)
-                    Spacer()
-                    Button("View Release") {
-                        if let url = URL(string: updateService.releaseURL) {
-                            NSWorkspace.shared.open(url)
-                        }
+                    if let err = updateService.installError {
+                        Text("· \(err)")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
                     }
-                    .buttonStyle(.bordered)
-                    .tint(.white)
+                    Spacer()
+                    if updateService.installing {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                        Text("Installing…")
+                            .font(.caption)
+                            .foregroundStyle(.white)
+                    } else {
+                        Button("View Release") {
+                            if let url = URL(string: updateService.releaseURL) {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.white)
+
+                        Button("Install Now") { updateService.downloadAndInstall() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.white)
+                            .foregroundStyle(Color.accentColor)
+                            .disabled(updateService.dmgURL.isEmpty)
+                    }
                     Button {
                         updateService.updateAvailable = false
                     } label: {
