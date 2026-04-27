@@ -32,8 +32,7 @@ struct ContentView: View {
             List(selection: $selectedTab) {
                 Section {
                     ForEach([AppTab.disc, .queue, .history], id: \.self) { tab in
-                        Label(tab.rawValue, systemImage: tab.systemImage)
-                            .badge(tab == .queue ? queueVM.activeJobs.count : 0)
+                        sidebarLabel(tab: tab)
                             .tag(tab)
                     }
                 }
@@ -61,10 +60,12 @@ struct ContentView: View {
         }
         .frame(minWidth: 800, minHeight: 500)
         // Window-wide drop target: drag in MKVs (or other video files) to add
-        // them to the queue without ripping. Routes any drop to the Queue tab
-        // and opens the import sheet.
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            handleDrop(providers)
+        // them to the queue without ripping. The modern dropDestination handles
+        // file URL loading correctly across macOS versions (the old onDrop +
+        // canLoadObject path silently failed for file URLs).
+        .dropDestination(for: URL.self) { urls, _ in
+            handleDroppedURLs(urls)
+            return !urls.isEmpty
         }
         .sheet(isPresented: $showImportSheet) {
             DragDropImportSheet(files: droppedFiles, queueVM: queueVM) {
@@ -90,27 +91,61 @@ struct ContentView: View {
         }
     }
 
-    /// Accept dropped video files and stage them for the import sheet.
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var collected: [URL] = []
-        let group = DispatchGroup()
-        for p in providers {
-            guard p.canLoadObject(ofClass: URL.self) else { continue }
-            group.enter()
-            _ = p.loadObject(ofClass: URL.self) { url, _ in
-                defer { group.leave() }
-                guard let url else { return }
-                let ext = url.pathExtension.lowercased()
-                guard ["mkv", "mp4", "m4v", "mov"].contains(ext) else { return }
-                collected.append(url)
+    /// Sidebar row for one tab. The Queue tab gets a tiny circular poster badge
+    /// of the currently-encoding job (if any) instead of a plain count, so users
+    /// glance at the sidebar and see *what* is running, not just how many.
+    @ViewBuilder
+    private func sidebarLabel(tab: AppTab) -> some View {
+        if tab == .queue {
+            HStack(spacing: 6) {
+                Label(tab.rawValue, systemImage: tab.systemImage)
+                Spacer()
+                if let activeJob = currentlyEncodingJob,
+                   let path = activeJob.mediaResult?.posterPath,
+                   let url = URL(string: "https://image.tmdb.org/t/p/w92\(path)") {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().aspectRatio(contentMode: .fill)
+                        default:
+                            Color.gray.opacity(0.3)
+                        }
+                    }
+                    .frame(width: 16, height: 16)
+                    .clipShape(Circle())
+                } else if queueVM.activeJobs.count > 0 {
+                    Text("\(queueVM.activeJobs.count)")
+                        .font(.caption2)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.gray.opacity(0.25))
+                        .clipShape(Capsule())
+                }
             }
+        } else {
+            Label(tab.rawValue, systemImage: tab.systemImage)
         }
-        group.notify(queue: .main) {
-            guard !collected.isEmpty else { return }
-            droppedFiles = collected
-            showImportSheet = true
+    }
+
+    private var currentlyEncodingJob: Job? {
+        queueVM.activeJobs.first {
+            $0.status == .encoding || $0.status == .organizing
+                || $0.status == .scraping || $0.status == .uploading
         }
-        return true
+    }
+
+    /// Accept dropped video files and stage them for the import sheet.
+    /// Filters by extension; non-video files are silently skipped.
+    private func handleDroppedURLs(_ urls: [URL]) {
+        let videos = urls.filter { url in
+            ["mkv", "mp4", "m4v", "mov"].contains(url.pathExtension.lowercased())
+        }
+        guard !videos.isEmpty else {
+            FileLogger.shared.warn("import", "drop ignored — no .mkv/.mp4/.m4v/.mov files")
+            return
+        }
+        FileLogger.shared.info("import", "drop received \(videos.count) file(s)")
+        droppedFiles = videos
+        showImportSheet = true
     }
 }
 

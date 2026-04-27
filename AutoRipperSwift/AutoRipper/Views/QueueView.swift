@@ -531,11 +531,13 @@ struct DiskSpaceBar: View {
 
 private struct JobSidebarRow: View {
     let job: Job
+    @State private var celebrate = false
 
     var body: some View {
         HStack(spacing: 8) {
             statusIcon
                 .font(.caption)
+                .scaleEffect(celebrate ? 1.4 : 1.0)
             VStack(alignment: .leading, spacing: 1) {
                 Text(job.mediaResult?.displayTitle ?? job.discName)
                     .font(.callout)
@@ -552,6 +554,16 @@ private struct JobSidebarRow: View {
             }
         }
         .padding(.vertical, 2)
+        .scaleEffect(celebrate ? 1.04 : 1.0)
+        // Brief celebration when a job hits .done — scale + status icon pulse.
+        .onChange(of: job.status) { _, new in
+            if new == .done {
+                withAnimation(.easeOut(duration: 0.18)) { celebrate = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    withAnimation(.easeIn(duration: 0.22)) { celebrate = false }
+                }
+            }
+        }
     }
 
     /// 5-dot pipeline indicator: rip, encode, organize, scrape, NAS.
