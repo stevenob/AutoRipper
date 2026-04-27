@@ -10,7 +10,7 @@ private let log = Logger(subsystem: "com.autoripper.app", category: "update")
 /// flow is sufficient — no need for Sparkle's signature verification overhead.
 @MainActor
 final class UpdateService: ObservableObject {
-    static let currentVersion = "3.3.2"
+    static let currentVersion = "3.4.0"
     private static let repoAPI = "https://api.github.com/repos/stevenob/AutoRipper/releases/latest"
 
     @Published var updateAvailable: Bool = false

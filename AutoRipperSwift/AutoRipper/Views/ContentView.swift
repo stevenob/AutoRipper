@@ -149,7 +149,10 @@ struct ContentView: View {
     }
 }
 
-/// The original Disc-tab content (scan/rip + log).
+
+/// Disc tab — two-column shell shared with Queue/History for visual consistency.
+/// Left column: disc info (poster, identify, format, preset, selected, storage).
+/// Right column: titles table + streaming log. Bottom bar: Eject + Rip.
 struct DiscPaneView: View {
     @ObservedObject var ripVM: RipViewModel
     @ObservedObject var queueVM: QueueViewModel
@@ -158,382 +161,435 @@ struct DiscPaneView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Update banner
-            if updateService.updateAvailable {
-                HStack {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .foregroundStyle(.white)
-                    Text("AutoRipper \(updateService.latestVersion) is available")
-                        .fontWeight(.medium)
-                        .foregroundStyle(.white)
-                    if let err = updateService.installError {
-                        Text("· \(err)")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.85))
-                    }
-                    Spacer()
-                    if updateService.installing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.white)
-                        Text("Installing…")
-                            .font(.caption)
-                            .foregroundStyle(.white)
-                    } else {
-                        Button("View Release") {
-                            if let url = URL(string: updateService.releaseURL) {
-                                NSWorkspace.shared.open(url)
-                            }
+            updateBanner
+            topToolbar
+            Divider()
+            mainContent
+            Divider()
+            bottomActionBar
+        }
+    }
+
+    // MARK: - Update banner (unchanged)
+
+    @ViewBuilder
+    private var updateBanner: some View {
+        if updateService.updateAvailable {
+            HStack {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(.white)
+                Text("AutoRipper \(updateService.latestVersion) is available")
+                    .fontWeight(.medium).foregroundStyle(.white)
+                if let err = updateService.installError {
+                    Text("· \(err)").font(.caption).foregroundStyle(.white.opacity(0.85))
+                }
+                Spacer()
+                if updateService.installing {
+                    ProgressView().controlSize(.small).tint(.white)
+                    Text("Installing…").font(.caption).foregroundStyle(.white)
+                } else {
+                    Button("View Release") {
+                        if let url = URL(string: updateService.releaseURL) {
+                            NSWorkspace.shared.open(url)
                         }
-                        .buttonStyle(.bordered)
-                        .tint(.white)
-
-                        Button("Install Now") { updateService.downloadAndInstall() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.white)
-                            .foregroundStyle(Color.accentColor)
-                            .disabled(updateService.dmgURL.isEmpty)
                     }
-                    Button {
-                        updateService.updateAvailable = false
-                    } label: {
-                        Image(systemName: "xmark")
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.bordered).tint(.white)
+                    Button("Install Now") { updateService.downloadAndInstall() }
+                        .buttonStyle(.borderedProminent).tint(.white)
+                        .foregroundStyle(Color.accentColor)
+                        .disabled(updateService.dmgURL.isEmpty)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(Color.accentColor)
+                Button { updateService.updateAvailable = false } label: {
+                    Image(systemName: "xmark").foregroundStyle(.white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .background(Color.accentColor)
+        }
+    }
 
-            // Toolbar
-            HStack(spacing: 12) {
-                Toggle(isOn: Binding(
-                    get: { ripVM.fullAutoEnabled },
-                    set: { ripVM.fullAutoEnabled = $0 }
-                )) {
-                    Label("Full Auto", systemImage: "bolt.fill")
-                }
+    // MARK: - Top toolbar (mode toggles only — Eject moved to bottom bar)
+
+    @ViewBuilder
+    private var topToolbar: some View {
+        HStack(spacing: 12) {
+            Toggle(isOn: Binding(
+                get: { ripVM.fullAutoEnabled },
+                set: { ripVM.fullAutoEnabled = $0 }
+            )) { Label("Full Auto", systemImage: "bolt.fill") }
                 .toggleStyle(.checkbox)
                 .disabled(ripVM.isScanning || ripVM.isRipping)
 
-                Toggle(isOn: $ripVM.batchModeEnabled) {
-                    Label("Batch", systemImage: "rectangle.stack.fill")
-                }
-                .toggleStyle(.checkbox)
-                .disabled(!ripVM.fullAutoEnabled)
-                .help("After each disc, eject and wait for the next one. Requires Full Auto.")
-
-                Text("Skip under:")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-                Stepper(value: $config.minDuration, in: 0...7200, step: 60) {
-                    Text("\(config.minDuration / 60) min")
-                        .monospacedDigit()
-                        .font(.caption)
-                        .frame(width: 45)
-                }
-                .controlSize(.small)
-
-                Spacer()
-
-                Toggle("Auto-Eject", isOn: $config.autoEject)
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
-
-                Button { ripVM.ejectDisc() } label: {
-                    Label("Eject", systemImage: "eject.fill")
-                }
-                .keyboardShortcut("d", modifiers: .command)
+            Toggle(isOn: $ripVM.batchModeEnabled) {
+                Label("Batch", systemImage: "rectangle.stack.fill")
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
+            .toggleStyle(.checkbox)
+            .disabled(!ripVM.fullAutoEnabled)
+            .help("After each disc, eject and wait for the next one. Requires Full Auto.")
 
-            Divider()
+            Text("Skip under:").foregroundStyle(.secondary).font(.caption)
+            Stepper(value: $config.minDuration, in: 0...7200, step: 60) {
+                Text("\(config.minDuration / 60) min")
+                    .monospacedDigit().font(.caption).frame(width: 45)
+            }
+            .controlSize(.small)
 
-            // Main content
-            if ripVM.isRipping, let info = ripVM.discInfo {
-                // Identify panel stays above the hero so the user can fix a wrong
-                // (or missing) TMDb match mid-rip — the post-rip pipeline will use
-                // whatever's selected when each title finishes.
+            Spacer()
+
+            Toggle("Auto-Eject", isOn: $config.autoEject)
+                .toggleStyle(.checkbox).font(.caption)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    // MARK: - Main content (state-dependent)
+
+    @ViewBuilder
+    private var mainContent: some View {
+        if ripVM.isRipping, let info = ripVM.discInfo {
+            // During rip: keep the existing hero. Identify panel stays accessible.
+            VStack(spacing: 0) {
                 DiscIdentifyPanel(ripVM: ripVM, discName: info.name)
                 RipHeroView(ripVM: ripVM, info: info)
-            } else if let info = ripVM.discInfo {
-                // Scanned but not ripping — show titles + identify panel
-                VStack(spacing: 0) {
-                    HStack {
-                        Image(systemName: info.type == "bluray" ? "opticaldisc.fill" : "opticaldisc")
-                            .foregroundStyle(.secondary)
-                        if !info.mediaTitle.isEmpty {
-                            Text(info.mediaTitle)
-                                .font(.headline)
-                            Text("·")
-                                .foregroundStyle(.tertiary)
-                            Text(info.name)
-                                .font(.subheadline)
-                                .foregroundStyle(.tertiary)
-                        } else {
-                            Text(info.name)
-                                .font(.headline)
-                        }
-                        let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
-                        Text("·")
-                            .foregroundStyle(.tertiary)
-                        Text("\(filtered.count) of \(info.titles.count) titles")
-                            .foregroundStyle(.secondary)
-                            .font(.subheadline)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-
-                    DiscIdentifyPanel(ripVM: ripVM, discName: info.name)
-
-                    // TV detection banner — shown when the disc looks like a season
-                    // and the user hasn't already classified any title as Episode.
-                    if info.looksLikeTVSeason && !ripVM.titleIntents.values.contains(.episode) {
-                        TVDetectBanner(ripVM: ripVM)
-                    }
-
-                    // Episode picker — shown when at least one selected title is
-                    // classified as Episode AND we have a TV TMDb match to enumerate
-                    // episode names for.
-                    if ripVM.selectedTitles.contains(where: { ripVM.intent(for: $0) == .episode }),
-                       ripVM.cachedMediaResult?.mediaType == "tv" {
-                        TVEpisodePicker(ripVM: ripVM)
-                    }
-
-                    let filteredTitles = info.titles.filter { $0.durationSeconds >= config.minDuration }
-                    Table(filteredTitles) {
-                        TableColumn("") { title in
-                            Button {
-                                if ripVM.selectedTitles.contains(title.id) {
-                                    ripVM.selectedTitles.remove(title.id)
-                                } else {
-                                    ripVM.selectedTitles.insert(title.id)
-                                }
-                            } label: {
-                                Image(systemName: ripVM.selectedTitles.contains(title.id) ? "checkmark.circle.fill" : "circle")
-                                    .foregroundColor(ripVM.selectedTitles.contains(title.id) ? .accentColor : .gray)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .width(28)
-
-                        TableColumn("Type") { title in
-                            if !title.label.isEmpty {
-                                Text(title.label)
-                                    .font(.caption)
-                            }
-                        }
-                        .width(110)
-
-                        TableColumn("Title") { title in
-                            Text(title.name)
-                                .fontWeight(.medium)
-                        }
-
-                        TableColumn("Duration") { title in
-                            Text(title.duration)
-                                .monospacedDigit()
-                        }
-                        .width(70)
-
-                        TableColumn("Size") { title in
-                            Text(title.humanSize)
-                                .monospacedDigit()
-                                .foregroundStyle(.secondary)
-                        }
-                        .width(80)
-
-                        TableColumn("Res") { title in
-                            if !title.resolutionLabel.isEmpty {
-                                Text(title.resolutionLabel)
-                                    .font(.caption)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(.quaternary)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        .width(60)
-
-                        TableColumn("Intent") { title in
-                            HStack(spacing: 4) {
-                                Picker("", selection: Binding(
-                                    get: { ripVM.intent(for: title.id) },
-                                    set: { ripVM.titleIntents[title.id] = $0 }
-                                )) {
-                                    Text("Movie").tag(JobIntent.movie)
-                                    Text("Episode").tag(JobIntent.episode)
-                                    Text("Edition").tag(JobIntent.edition)
-                                    Text("Extra").tag(JobIntent.extra)
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .controlSize(.small)
-                                .frame(width: 88)
-
-                                if ripVM.intent(for: title.id) == .edition {
-                                    Picker("", selection: Binding(
-                                        get: { ripVM.editionLabel(for: title.id) },
-                                        set: { ripVM.titleEditionLabels[title.id] = $0 }
-                                    )) {
-                                        Text("—").tag("")
-                                        Text("Theatrical").tag("Theatrical")
-                                        Text("Unrated").tag("Unrated")
-                                        Text("Director's Cut").tag("Director's Cut")
-                                        Text("Extended").tag("Extended")
-                                        Text("Final Cut").tag("Final Cut")
-                                    }
-                                    .labelsHidden()
-                                    .pickerStyle(.menu)
-                                    .controlSize(.small)
-                                    .frame(width: 110)
-                                } else if ripVM.intent(for: title.id) == .movie {
-                                    TextField("Search title (optional)", text: Binding(
-                                        get: { ripVM.nameOverride(for: title.id) },
-                                        set: { ripVM.titleNameOverrides[title.id] = $0 }
-                                    ))
-                                    .textFieldStyle(.roundedBorder)
-                                    .controlSize(.small)
-                                    .frame(width: 180)
-                                    .help("Override TMDb search query for this title — useful for collection discs (e.g. Saw 1+2+3) where each title is a different movie.")
-                                }
-                            }
-                        }
-                        .width(290)
-                    }
-                    .tableStyle(.inset(alternatesRowBackgrounds: true))
-                }
-            } else {
-                // No scan — hero with last-completed celebration & big scan button.
-                if ripVM.isScanning {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .controlSize(.large)
-                        Text("Scanning disc…")
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                } else {
-                    InsertNextDiscHero(ripVM: ripVM) {
-                        if ripVM.fullAutoEnabled {
-                            ripVM.fullAuto()
-                        } else {
-                            ripVM.scanDisc()
-                        }
-                    }
-                }
             }
-
-            // Progress (only when not on the hero — hero has its own progress bar)
-            if (ripVM.isRipping || ripVM.ripProgress > 0), ripVM.discInfo == nil {
-                Divider()
-                VStack(spacing: 4) {
-                    ProgressView(value: ripVM.ripProgress)
-                    Text(ripVM.statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+        } else if let info = ripVM.discInfo {
+            // Scanned: two-column layout.
+            HSplitView {
+                DiscInfoColumn(ripVM: ripVM, config: config, info: info)
+                titlesAndLogColumn(info: info)
             }
-
-            // Queue status (compact) — removed; the sidebar Queue tab now shows full state.
-
-            Divider()
-
-            // Bottom bar
-            HStack(spacing: 12) {
-                // Title-table selection helpers (only when scanned and not ripping;
-                // ripping has its own hero with Abort).
-                if ripVM.discInfo != nil && !ripVM.isRipping {
-                    let filtered = (ripVM.discInfo?.titles ?? []).filter { $0.durationSeconds >= config.minDuration }
-                    Button("Select All") {
-                        ripVM.selectedTitles = Set(filtered.map(\.id))
-                    }
-                    Button("Deselect All") {
-                        ripVM.selectedTitles = []
-                    }
-                }
-
-                // Status text (idle + scan-complete states; the hero shows its own
-                // status while ripping, and scanning shows its own spinner).
-                if !ripVM.isRipping && !ripVM.isScanning {
-                    Text(ripVM.statusText)
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                // Abort lives in the hero while ripping (avoid duplication).
-                // The footer only shows Abort during *scanning*.
-                if ripVM.isScanning {
-                    Button("Abort") { ripVM.abort() }
-                        .keyboardShortcut(".", modifiers: .command)
-                }
-
-                // Rip button only when scanned and not already ripping/scanning.
-                if ripVM.discInfo != nil && !ripVM.isRipping && !ripVM.isScanning {
-                    Button(ripVM.fullAutoEnabled ? "Rip & Encode" : "Rip") {
-                        ripVM.ripSelected()
-                    }
-                    .disabled(ripVM.selectedTitles.isEmpty)
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("r", modifiers: .command)
-                }
-
-                Button {
-                    let path = config.outputDir
-                    let url = URL(fileURLWithPath: path)
-                    if !FileManager.default.fileExists(atPath: path) {
-                        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-                    }
-                    NSWorkspace.shared.open(url)
-                } label: {
-                    Image(systemName: "folder")
-                }
-                .help("Open Ripped Folder (\(config.outputDir))")
-                .keyboardShortcut("o", modifiers: [.command, .shift])
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.bar)
-
-            // Log
-            DisclosureGroup("Log") {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(ripVM.logLines.enumerated()), id: \.offset) { idx, line in
-                                Text(line)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .textSelection(.enabled)
-                                    .id(idx)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(6)
-                    }
-                    .frame(height: 100)
-                    .background(Color(nsColor: .textBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .onChange(of: ripVM.logLines.count) {
-                        if let last = ripVM.logLines.indices.last {
-                            proxy.scrollTo(last, anchor: .bottom)
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+        } else if ripVM.isScanning {
+            scanningView
+        } else if let unknown = ripVM.unidentifiedDiscName, !ripVM.detectedDiscType.isEmpty, ripVM.discInfo == nil {
+            // We tried to scan and failed — show diagnosis.
+            failureView(headline: "Couldn't read this disc",
+                        body: "MakeMKV reported errors scanning \(unknown). Try cleaning the disc, re-inserting it, or using a different drive.")
+        } else {
+            emptyView
         }
+    }
+
+    // MARK: - Right column: titles + log
+
+    @ViewBuilder
+    private func titlesAndLogColumn(info: DiscInfo) -> some View {
+        VStack(spacing: 0) {
+            titlesHeader(info: info)
+            Divider()
+            titlesTable(info: info)
+            Divider()
+            logPane
+        }
+        .frame(minWidth: 480)
+    }
+
+    @ViewBuilder
+    private func titlesHeader(info: DiscInfo) -> some View {
+        let filtered = info.titles.filter { $0.durationSeconds >= config.minDuration }
+        HStack(spacing: 8) {
+            Text("Titles").font(.headline)
+            Text("\(filtered.count) of \(info.titles.count) · \(ripVM.selectedTitles.count) selected")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Select All") { ripVM.selectedTitles = Set(filtered.map(\.id)) }
+                .controlSize(.small)
+            Button("Deselect All") { ripVM.selectedTitles = [] }
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func titlesTable(info: DiscInfo) -> some View {
+        let filteredTitles = info.titles.filter { $0.durationSeconds >= config.minDuration }
+        if filteredTitles.isEmpty {
+            // Filter-too-strict mini-state inside the table area.
+            VStack(spacing: 8) {
+                Image(systemName: "ruler").font(.title).foregroundStyle(.tertiary)
+                Text("No titles match your filter").font(.caption).foregroundStyle(.secondary)
+                Text("Found \(info.titles.count) titles, but none ≥ \(config.minDuration / 60) min.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                Button("Lower to 30 sec") { config.minDuration = 30 }
+                    .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            Table(filteredTitles) {
+                TableColumn("") { title in
+                    Button {
+                        if ripVM.selectedTitles.contains(title.id) {
+                            ripVM.selectedTitles.remove(title.id)
+                        } else {
+                            ripVM.selectedTitles.insert(title.id)
+                        }
+                    } label: {
+                        Image(systemName: ripVM.selectedTitles.contains(title.id) ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(ripVM.selectedTitles.contains(title.id) ? .accentColor : .gray)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .width(28)
+
+                TableColumn("Type") { title in
+                    if !title.label.isEmpty {
+                        Text(title.label).font(.caption)
+                    }
+                }
+                .width(110)
+
+                TableColumn("Title") { title in
+                    Text(title.name).fontWeight(.medium)
+                }
+
+                TableColumn("Duration") { title in
+                    Text(title.duration).monospacedDigit()
+                }
+                .width(70)
+
+                TableColumn("Size") { title in
+                    Text(title.humanSize).monospacedDigit().foregroundStyle(.secondary)
+                }
+                .width(80)
+
+                TableColumn("Res") { title in
+                    if !title.resolutionLabel.isEmpty {
+                        Text(title.resolutionLabel)
+                            .font(.caption)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.quaternary)
+                            .clipShape(Capsule())
+                    }
+                }
+                .width(60)
+
+                TableColumn("Intent") { title in
+                    intentControls(for: title)
+                }
+                .width(220)
+            }
+            .tableStyle(.inset(alternatesRowBackgrounds: true))
+        }
+    }
+
+    @ViewBuilder
+    private func intentControls(for title: TitleInfo) -> some View {
+        HStack(spacing: 4) {
+            Picker("", selection: Binding(
+                get: { ripVM.intent(for: title.id) },
+                set: { ripVM.titleIntents[title.id] = $0 }
+            )) {
+                Text("Movie").tag(JobIntent.movie)
+                Text("Episode").tag(JobIntent.episode)
+                Text("Edition").tag(JobIntent.edition)
+                Text("Extra").tag(JobIntent.extra)
+            }
+            .labelsHidden().pickerStyle(.menu).controlSize(.small)
+            .frame(width: 88)
+
+            switch ripVM.intent(for: title.id) {
+            case .edition:
+                Picker("", selection: Binding(
+                    get: { ripVM.editionLabel(for: title.id) },
+                    set: { ripVM.titleEditionLabels[title.id] = $0 }
+                )) {
+                    Text("—").tag("")
+                    Text("Theatrical").tag("Theatrical")
+                    Text("Unrated").tag("Unrated")
+                    Text("Director's Cut").tag("Director's Cut")
+                    Text("Extended").tag("Extended")
+                    Text("Final Cut").tag("Final Cut")
+                }
+                .labelsHidden().pickerStyle(.menu).controlSize(.small)
+                .frame(width: 110)
+            case .movie:
+                TextField("Override (optional)", text: Binding(
+                    get: { ripVM.nameOverride(for: title.id) },
+                    set: { ripVM.titleNameOverrides[title.id] = $0 }
+                ))
+                .textFieldStyle(.roundedBorder).controlSize(.small)
+                .frame(width: 120)
+            default: EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var logPane: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Log").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(ripVM.logLines.count) lines")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(ripVM.logLines.enumerated()), id: \.offset) { idx, line in
+                            Text(line)
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .id(idx)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8).padding(.bottom, 6)
+                }
+                .frame(maxHeight: .infinity)
+                .onChange(of: ripVM.logLines.count) {
+                    if let last = ripVM.logLines.indices.last {
+                        proxy.scrollTo(last, anchor: .bottom)
+                    }
+                }
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    // MARK: - State views
+
+    @ViewBuilder
+    private var scanningView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            ProgressView().controlSize(.large)
+            Text("Scanning disc…")
+                .font(.headline)
+            Text("This can take 1–2 minutes for a Blu-ray.")
+                .font(.caption).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var emptyView: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 16) {
+                Spacer()
+                Button {
+                    if ripVM.fullAutoEnabled { ripVM.fullAuto() } else { ripVM.scanDisc() }
+                } label: {
+                    VStack(spacing: 12) {
+                        Image(systemName: ripVM.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
+                            .font(.system(size: 64))
+                        if !ripVM.detectedDiscType.isEmpty {
+                            Text(ripVM.fullAutoEnabled ? "Full Auto · \(ripVM.detectedDiscType)" : "Scan \(ripVM.detectedDiscType)")
+                                .font(.title2).fontWeight(.semibold)
+                        } else {
+                            Text("Insert a disc")
+                                .font(.title2).fontWeight(.semibold)
+                        }
+                        if !ripVM.detectedDiscName.isEmpty {
+                            Text(ripVM.detectedDiscName).font(.caption)
+                                .foregroundStyle(.white.opacity(0.85))
+                        }
+                    }
+                    .frame(width: 240, height: 200)
+                }
+                .buttonStyle(.borderedProminent).controlSize(.large)
+                .disabled(ripVM.detectedDiscType.isEmpty)
+
+                if ripVM.detectedDiscType.isEmpty {
+                    Text("Insert a DVD or Blu-ray to begin.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Or drag an .mkv anywhere to queue it for encode/organize/scrape/NAS.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 320)
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            Divider()
+            logPane.frame(width: 360)
+        }
+    }
+
+    @ViewBuilder
+    private func failureView(headline: String, body: String) -> some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 16) {
+                Spacer()
+                Image(systemName: "questionmark.circle.fill")
+                    .font(.system(size: 64))
+                    .foregroundStyle(.orange)
+                Text(headline).font(.title2).fontWeight(.semibold)
+                Text(body)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+                HStack {
+                    Button("Try Again") { ripVM.scanDisc() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Eject") { ripVM.ejectDisc() }
+                }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            Divider()
+            logPane.frame(width: 360)
+        }
+    }
+
+    // MARK: - Bottom action bar (Eject + Rip)
+
+    @ViewBuilder
+    private var bottomActionBar: some View {
+        HStack(spacing: 12) {
+            Button { ripVM.ejectDisc() } label: {
+                Label("Eject", systemImage: "eject.fill")
+            }
+            .keyboardShortcut("d", modifiers: .command)
+
+            Spacer()
+
+            // Concise summary in the middle
+            if ripVM.isRipping {
+                Text(ripVM.statusText)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            } else if let info = ripVM.discInfo, !ripVM.selectedTitles.isEmpty {
+                let selected = info.titles.filter { ripVM.selectedTitles.contains($0.id) }
+                let runtime = selected.reduce(0) { $0 + $1.durationSeconds } / 60
+                Text("\(selected.count) selected · ~\(runtime) min source")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !ripVM.statusText.isEmpty && !ripVM.isScanning {
+                Text(ripVM.statusText).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                let path = config.outputDir
+                let url = URL(fileURLWithPath: path)
+                if !FileManager.default.fileExists(atPath: path) {
+                    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                }
+                NSWorkspace.shared.open(url)
+            } label: {
+                Image(systemName: "folder")
+            }
+            .help("Open Ripped Folder")
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+
+            if ripVM.isScanning || ripVM.isRipping {
+                Button("Abort") { ripVM.abort() }
+                    .keyboardShortcut(".", modifiers: .command)
+            }
+
+            if ripVM.discInfo != nil && !ripVM.isRipping && !ripVM.isScanning {
+                Button(ripVM.fullAutoEnabled ? "Rip & Encode" : "Rip") {
+                    ripVM.ripSelected()
+                }
+                .disabled(ripVM.selectedTitles.isEmpty)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut("r", modifiers: .command)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.bar)
     }
 }
