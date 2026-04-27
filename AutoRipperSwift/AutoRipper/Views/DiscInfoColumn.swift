@@ -17,6 +17,12 @@ struct DiscInfoColumn: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                // Big visual cue at the very top while ripping — accent background,
+                // current title + progress + ETA. Makes the transition from
+                // "scanned" to "ripping" unmistakable.
+                if ripVM.isRipping {
+                    rippingHeroBlock
+                }
                 identityBlock
                 Divider()
                 identifyBlock
@@ -28,9 +34,6 @@ struct DiscInfoColumn: View {
                    ripVM.cachedMediaResult?.mediaType == "tv" {
                     TVEpisodePicker(ripVM: ripVM)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
-                }
-                if ripVM.isRipping {
-                    section("Ripping now") { rippingBlock }
                 }
                 section("Preset") { presetBlock }
                 section("Selected (\(selectedCount) of \(info.titles.count))") { selectedBlock }
@@ -154,24 +157,52 @@ struct DiscInfoColumn: View {
             .background(.clear)
     }
 
-    // MARK: - Ripping now (active only)
+    // MARK: - Ripping hero block (top, accent-tinted, only while ripping)
 
     @ViewBuilder
-    private var rippingBlock: some View {
+    private var rippingHeroBlock: some View {
         let currentTitle = ripVM.currentRippingTitleId.flatMap { tid in
             info.titles.first(where: { $0.id == tid })
         }
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Circle().fill(.red).frame(width: 8, height: 8)
-                Text(currentTitle.map { "Title \($0.id) — \($0.duration)" } ?? "Working…")
-                    .font(.caption).fontWeight(.medium)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 10, height: 10)
+                    .symbolEffect(.pulse, options: .repeating)
+                Text("RIPPING")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.red)
+                    .tracking(0.5)
+                Spacer()
+                Text("\(Int(ripVM.ripProgress * 100))%")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
             }
-            ProgressView(value: ripVM.ripProgress).progressViewStyle(.linear)
+            if let t = currentTitle {
+                Text("Title \(t.id) · \(t.duration) · \(t.humanSize)")
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+            }
+            ProgressView(value: ripVM.ripProgress)
+                .progressViewStyle(.linear)
             Text(ripVM.statusText)
-                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
         }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
+
+    // (rippingBlock from previous version dropped — replaced by hero version above)
 
     // MARK: - Preset
 

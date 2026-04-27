@@ -45,7 +45,11 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 140, ideal: 160, max: 200)
         } detail: {
             VStack(spacing: 0) {
-                NowRippingRibbon(ripVM: ripVM, queueVM: queueVM, selectedTab: $selectedTab)
+                // Hide the global Now-Ripping ribbon on the Disc tab — the disc
+                // tab itself already shows the rip prominently in DiscInfoColumn.
+                if selectedTab != .disc {
+                    NowRippingRibbon(ripVM: ripVM, queueVM: queueVM, selectedTab: $selectedTab)
+                }
                 Group {
                     switch selectedTab {
                     case .disc:     DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config)
@@ -325,6 +329,8 @@ struct DiscPaneView: View {
                             .foregroundColor(ripVM.selectedTitles.contains(title.id) ? .accentColor : .gray)
                     }
                     .buttonStyle(.plain)
+                    .disabled(ripVM.isRipping)
+                    .opacity(ripVM.isRipping ? 0.4 : 1.0)
                 }
                 .width(28)
 
