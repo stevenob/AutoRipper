@@ -41,6 +41,49 @@ actor MakeMKVService {
         return path
     }
 
+    /// Number of times to retry a makemkvcon invocation that failed with the
+    /// transient "MSG:5010 Failed to open disc" error (drive not ready / macOS
+    /// still holds the volume). The first attempt + this many retries.
+    static let maxOpenDiscRetries = 2
+    /// Backoff between retries, in seconds. Indexed by retry attempt (0-based).
+    static let openDiscRetryBackoff: [UInt64] = [4, 8]
+
+    /// True if any line in the output contains MakeMKV's `MSG:5010` —
+    /// "Failed to open disc". This is almost always transient on macOS:
+    /// the disc isn't fully spun up, or DiskArbitration still holds the
+    /// volume mount when makemkvcon tries to grab the raw device.
+    static func outputHas5010Error(_ output: [String]) -> Bool {
+        for line in output where line.hasPrefix("MSG:5010") { return true }
+        return false
+    }
+
+    /// Best-effort `diskutil unmount` of the disc's volume so makemkvcon
+    /// can grab the raw device on the next attempt. Failure is expected
+    /// (no volume mounted, label unknown, etc.) and intentionally swallowed.
+    private func unmountDiscVolume(volumeLabel: String?, logCallback: (@Sendable (String) -> Void)? = nil) async {
+        guard let label = volumeLabel, !label.isEmpty else { return }
+        let mountPath = "/Volumes/\(label)"
+        guard FileManager.default.fileExists(atPath: mountPath) else { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/diskutil")
+        proc.arguments = ["unmount", mountPath]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        do {
+            try proc.run()
+            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                proc.terminationHandler = { _ in cont.resume() }
+            }
+            if proc.terminationStatus == 0 {
+                log.info("Unmounted disc volume \(mountPath) before retry")
+                logCallback?("Unmounted \(mountPath) to release for MakeMKV")
+            }
+        } catch {
+            // Intentionally ignored — best-effort cleanup.
+        }
+    }
+
     /// Manually clear a cached scan — used when the user explicitly re-scans
     /// (e.g., a "Refresh" button) or when a disc is replaced under the same label.
     func invalidateCache(volumeLabel: String? = nil) {
@@ -62,9 +105,28 @@ actor MakeMKVService {
             return cached
         }
         let mkvPath = try getPath()
-        let (output, exitCode) = try await runProcess(
-            path: mkvPath, arguments: ["-r", "info", "disc:0"], logCallback: logCallback
-        )
+        var output: [String] = []
+        var exitCode: Int32 = 0
+        var attempt = 0
+        while true {
+            (output, exitCode) = try await runProcess(
+                path: mkvPath, arguments: ["-r", "info", "disc:0"], logCallback: logCallback
+            )
+
+            // MSG:5010 "Failed to open disc" — almost always transient on macOS
+            // (drive still spinning up, or DiskArbitration holding the volume).
+            // Retry with backoff, attempting an unmount in between.
+            if Self.outputHas5010Error(output), attempt < Self.maxOpenDiscRetries {
+                let delay = Self.openDiscRetryBackoff[attempt]
+                log.warning("MSG:5010 on scan attempt \(attempt + 1); retrying in \(delay)s")
+                logCallback?("MakeMKV failed to open disc (MSG:5010). Retrying in \(delay)s…")
+                await unmountDiscVolume(volumeLabel: volumeLabel, logCallback: logCallback)
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                attempt += 1
+                continue
+            }
+            break
+        }
 
         let joined = output.joined(separator: "\n").lowercased()
         if joined.contains("no disc") || joined.contains("insert disc") {
@@ -168,44 +230,78 @@ actor MakeMKVService {
         let startTime = ContinuousClock.now
         nonisolated(unsafe) var outputFile = ""
 
-        let (_, exitCode) = try await runProcess(
-            path: mkvPath,
-            arguments: ["-r", "mkv", "disc:0", String(titleId), outputDir],
-            lineCallback: { line in
-                logCallback?(line)
+        var exitCode: Int32 = 0
+        var attempt = 0
+        while true {
+            // Tracks whether MakeMKV ever reported progress for this attempt.
+            // Only safe to retry on MSG:5010 if we never started actually ripping.
+            let progressSeen = ProgressFlag()
+            let attemptOutput = LineAccumulator()
+            (_, exitCode) = try await runProcess(
+                path: mkvPath,
+                arguments: ["-r", "mkv", "disc:0", String(titleId), outputDir],
+                lineCallback: { line in
+                    logCallback?(line)
+                    attemptOutput.append(line)
 
-                // PRGV:current,total,max
-                if let groups = MakeMKVService.match(line, pattern: #"PRGV:(\d+),(\d+),(\d+)"#) {
-                    let current = Int(groups[1])!
-                    let pmax = Int(groups[3])!
-                    let percent = pmax > 0 ? min(Int(Double(current) / Double(pmax) * 100), 100) : 0
-                    let elapsed = ContinuousClock.now - startTime
-                    let eta: String
-                    if percent > 0 {
-                        let totalEst = elapsed / Double(percent) * 100
-                        let remaining = totalEst - elapsed
-                        let secs = Int(remaining.components.seconds)
-                        let mins = secs / 60
-                        let hrs = mins / 60
-                        eta = hrs > 0 ? "ETA \(hrs)h\(String(format: "%02d", mins % 60))m" :
-                                        "ETA \(mins)m\(String(format: "%02d", secs % 60))s"
-                    } else {
-                        eta = "ETA calculating..."
+                    // PRGV:current,total,max
+                    if let groups = MakeMKVService.match(line, pattern: #"PRGV:(\d+),(\d+),(\d+)"#) {
+                        progressSeen.set()
+                        let current = Int(groups[1])!
+                        let pmax = Int(groups[3])!
+                        let percent = pmax > 0 ? min(Int(Double(current) / Double(pmax) * 100), 100) : 0
+                        let elapsed = ContinuousClock.now - startTime
+                        let eta: String
+                        if percent > 0 {
+                            let totalEst = elapsed / Double(percent) * 100
+                            let remaining = totalEst - elapsed
+                            let secs = Int(remaining.components.seconds)
+                            let mins = secs / 60
+                            let hrs = mins / 60
+                            eta = hrs > 0 ? "ETA \(hrs)h\(String(format: "%02d", mins % 60))m" :
+                                            "ETA \(mins)m\(String(format: "%02d", secs % 60))s"
+                        } else {
+                            eta = "ETA calculating..."
+                        }
+                        progressCallback?(percent, "Ripping: \(percent)% — \(eta)")
                     }
-                    progressCallback?(percent, "Ripping: \(percent)% — \(eta)")
-                }
 
-                // Capture output filename
-                if line.contains("MKV") && line.contains(outputDir) {
-                    if let range = line.range(of: outputDir + "/", options: .literal) {
-                        let rest = String(line[range.lowerBound...])
-                        if let end = rest.range(of: ".mkv", options: .caseInsensitive) {
-                            outputFile = String(rest[...end.upperBound]).trimmingCharacters(in: .init(charactersIn: "\""))
+                    // Capture output filename
+                    if line.contains("MKV") && line.contains(outputDir) {
+                        if let range = line.range(of: outputDir + "/", options: .literal) {
+                            let rest = String(line[range.lowerBound...])
+                            if let end = rest.range(of: ".mkv", options: .caseInsensitive) {
+                                outputFile = String(rest[...end.upperBound]).trimmingCharacters(in: .init(charactersIn: "\""))
+                            }
                         }
                     }
                 }
+            )
+
+            // Retry MSG:5010 only if no actual rip progress occurred. Restarting
+            // a half-finished rip would corrupt output and waste a full pass.
+            if exitCode != 0,
+               !progressSeen.isSet,
+               Self.outputHas5010Error(attemptOutput.result),
+               attempt < Self.maxOpenDiscRetries {
+                let delay = Self.openDiscRetryBackoff[attempt]
+                log.warning("MSG:5010 on rip attempt \(attempt + 1) for title \(titleId); retrying in \(delay)s")
+                logCallback?("MakeMKV failed to open disc (MSG:5010). Retrying in \(delay)s…")
+                await unmountDiscVolume(volumeLabel: nil, logCallback: logCallback)
+                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                attempt += 1
+                // Clean any partial output left behind so the retry has a clean slate.
+                let suffix = String(format: "_t%02d.mkv", titleId)
+                if let names = try? fm.contentsOfDirectory(atPath: outputDir) {
+                    for name in names where name.hasSuffix(suffix) {
+                        try? fm.removeItem(atPath: (outputDir as NSString).appendingPathComponent(name))
+                    }
+                }
+                outputFile = ""
+                continue
             }
-        )
+            break
+        }
 
         if exitCode != 0 {
             throw MakeMKVError.ripFailed("makemkvcon exited with code \(exitCode)")
@@ -316,6 +412,15 @@ actor MakeMKVService {
         ProcessTracker.shared.unregister(proc)
         return (lines.result, status)
     }
+}
+
+/// Thread-safe flag used to signal that MakeMKV reported rip progress in
+/// the current attempt — gates whether a transient MSG:5010 may be retried.
+private final class ProgressFlag: @unchecked Sendable {
+    private var _set = false
+    private let lock = NSLock()
+    func set() { lock.lock(); _set = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return _set }
 }
 
 /// Thread-safe line accumulator for streaming process output.

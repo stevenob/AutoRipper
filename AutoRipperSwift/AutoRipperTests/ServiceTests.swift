@@ -119,6 +119,34 @@ final class MakeMKVServiceTests: XCTestCase {
         XCTAssertEqual(MakeMKVError.ripFailed("fail").localizedDescription, "fail")
         XCTAssertEqual(MakeMKVError.generalError("oops").localizedDescription, "oops")
     }
+
+    func testOutputHas5010ErrorDetectsExactMessage() {
+        let lines = [
+            "MSG:1005,0,1,\"MakeMKV v1.17.7 darwin started\"",
+            "MSG:5010,0,0,\"Failed to open disc\",\"Failed to open disc\"",
+            "MSG:5021,0,0,\"Scan finished\""
+        ]
+        XCTAssertTrue(MakeMKVService.outputHas5010Error(lines))
+    }
+
+    func testOutputHas5010ErrorAbsent() {
+        let lines = [
+            "MSG:1005,0,1,\"MakeMKV started\"",
+            "TINFO:0,2,0,\"Title 1\"",
+            "MSG:5021,0,0,\"Scan finished\""
+        ]
+        XCTAssertFalse(MakeMKVService.outputHas5010Error(lines))
+    }
+
+    func testOutputHas5010ErrorEmptyInput() {
+        XCTAssertFalse(MakeMKVService.outputHas5010Error([]))
+    }
+
+    func testOutputHas5010DoesNotMatchSubstring() {
+        // Make sure we only match the prefix, not unrelated lines that mention "5010".
+        let lines = ["MSG:1005,0,1,\"Disc copy progress: 5010 sectors read\""]
+        XCTAssertFalse(MakeMKVService.outputHas5010Error(lines))
+    }
 }
 
 // MARK: - OrganizerService Extended Tests
