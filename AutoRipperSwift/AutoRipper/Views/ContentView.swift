@@ -488,13 +488,18 @@ struct DiscPaneView: View {
     @ViewBuilder
     private var scanningView: some View {
         VStack(spacing: 12) {
-            Spacer()
-            ProgressView().controlSize(.large)
-            Text("Scanning disc…")
-                .font(.headline)
-            Text("This can take 1–2 minutes for a Blu-ray.")
-                .font(.caption).foregroundStyle(.secondary)
-            Spacer()
+            VStack(spacing: 12) {
+                Spacer()
+                ProgressView().controlSize(.large)
+                Text("Scanning disc…")
+                    .font(.headline)
+                Text("This can take 1–2 minutes for a Blu-ray.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            Divider()
+            logPane.frame(maxHeight: 240)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

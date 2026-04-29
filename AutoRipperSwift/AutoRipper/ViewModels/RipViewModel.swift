@@ -70,6 +70,20 @@ final class RipViewModel: ObservableObject {
 
     var minDuration: Int { config.minDuration }
 
+    /// Forwards a raw makemkvcon output line to both the in-app log panel
+    /// (`logLines`) and the persistent file log. Filters out the high-frequency
+    /// progress ticks (`PRGV`/`PRGC`/`PRGT`) — they'd otherwise dominate the
+    /// log file (~10 lines/sec during a rip). Everything else, especially
+    /// `MSG:` rows and `Error` lines, is preserved for post-mortem analysis.
+    @MainActor
+    private func appendMakeMKVLog(_ line: String) {
+        logLines.append(line)
+        if line.hasPrefix("PRGV:") || line.hasPrefix("PRGC:") || line.hasPrefix("PRGT:") {
+            return
+        }
+        FileLogger.shared.info("makemkv", line)
+    }
+
     init(config: AppConfig = .shared) {
         self.config = config
         self.makemkv = MakeMKVService(config: config)
@@ -262,7 +276,7 @@ final class RipViewModel: ObservableObject {
         runningTask = Task {
             do {
                 var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
-                    Task { @MainActor in self?.logLines.append(line) }
+                    Task { @MainActor in self?.appendMakeMKVLog(line) }
                 }
 
                 // Auto-label titles by duration/size
@@ -390,7 +404,7 @@ final class RipViewModel: ObservableObject {
                             }
                         },
                         logCallback: { [weak self] line in
-                            Task { @MainActor in self?.logLines.append(line) }
+                            Task { @MainActor in self?.appendMakeMKVLog(line) }
                         }
                     )
                     let titleElapsed = Date().timeIntervalSince(titleStart)
@@ -570,7 +584,7 @@ final class RipViewModel: ObservableObject {
         runningTask = Task {
             do {
                 var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
-                    Task { @MainActor in self?.logLines.append(line) }
+                    Task { @MainActor in self?.appendMakeMKVLog(line) }
                 }
                 info.autoLabel()
                 await lookupTMDb(for: &info)
