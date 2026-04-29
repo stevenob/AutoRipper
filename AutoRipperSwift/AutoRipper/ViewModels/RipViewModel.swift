@@ -393,6 +393,7 @@ final class RipViewModel: ObservableObject {
                     let file = try await makemkv.ripTitle(
                         titleId: tid,
                         outputDir: outputDir,
+                        volumeLabel: detectedDiscName.isEmpty ? info.name : detectedDiscName,
                         progressCallback: { [weak self] pct, _ in
                             lastPRGV.touch()
                             Task { @MainActor in

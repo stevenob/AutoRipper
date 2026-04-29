@@ -43,15 +43,21 @@ actor MakeMKVService {
 
     /// Number of times to retry a makemkvcon invocation that failed with the
     /// transient "MSG:5010 Failed to open disc" error (drive not ready / macOS
-    /// still holds the volume). The first attempt + this many retries.
-    static let maxOpenDiscRetries = 2
+    /// still holds the volume / drive hasn't fully released after a heavy scan).
+    /// The first attempt + this many retries.
+    static let maxOpenDiscRetries = 4
     /// Backoff between retries, in seconds. Indexed by retry attempt (0-based).
-    static let openDiscRetryBackoff: [UInt64] = [4, 8]
+    /// Total wall-clock budget is ~75s, generous enough to cover the worst-
+    /// case post-scan settle on slow USB-bus-powered drives.
+    static let openDiscRetryBackoff: [UInt64] = [5, 10, 20, 40]
 
     /// True if any line in the output contains MakeMKV's `MSG:5010` —
     /// "Failed to open disc". This is almost always transient on macOS:
-    /// the disc isn't fully spun up, or DiskArbitration still holds the
-    /// volume mount when makemkvcon tries to grab the raw device.
+    /// the disc isn't fully spun up, DiskArbitration still holds the
+    /// volume mount when makemkvcon tries to grab the raw device, or
+    /// the drive needs to settle after a previous scan exited.
+    /// Note: makemkvcon exits with status 0 even on MSG:5010, so output
+    /// inspection — not exit code — is the only reliable signal.
     static func outputHas5010Error(_ output: [String]) -> Bool {
         for line in output where line.hasPrefix("MSG:5010") { return true }
         return false
@@ -108,24 +114,39 @@ actor MakeMKVService {
         var output: [String] = []
         var exitCode: Int32 = 0
         var attempt = 0
+        var lastHas5010 = false
         while true {
+            try Task.checkCancellation()
             (output, exitCode) = try await runProcess(
                 path: mkvPath, arguments: ["-r", "info", "disc:0"], logCallback: logCallback
             )
+            lastHas5010 = Self.outputHas5010Error(output)
 
             // MSG:5010 "Failed to open disc" — almost always transient on macOS
             // (drive still spinning up, or DiskArbitration holding the volume).
             // Retry with backoff, attempting an unmount in between.
-            if Self.outputHas5010Error(output), attempt < Self.maxOpenDiscRetries {
+            if lastHas5010, attempt < Self.maxOpenDiscRetries {
                 let delay = Self.openDiscRetryBackoff[attempt]
                 log.warning("MSG:5010 on scan attempt \(attempt + 1); retrying in \(delay)s")
                 logCallback?("MakeMKV failed to open disc (MSG:5010). Retrying in \(delay)s…")
                 await unmountDiscVolume(volumeLabel: volumeLabel, logCallback: logCallback)
-                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                // Cancellation-aware sleep: lets `Task.cancel()` (user abort)
+                // break out of the retry loop instead of spinning through
+                // every backoff and respawning makemkvcon each time.
+                try await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 attempt += 1
                 continue
             }
             break
+        }
+        // makemkvcon exits 0 even on MSG:5010, so the generic exit-code branch
+        // below cannot detect this failure. After exhausting retries, surface
+        // a clear, actionable error instead of falling through to "produced
+        // no titles" which buries the real cause.
+        if lastHas5010 {
+            throw MakeMKVError.generalError(
+                "Failed to open disc after \(attempt + 1) attempt\(attempt == 0 ? "" : "s") (MSG:5010). Drive may be busy, media unreadable, or no disc inserted."
+            )
         }
 
         let joined = output.joined(separator: "\n").lowercased()
@@ -201,9 +222,14 @@ actor MakeMKVService {
     }
 
     /// Rip a single title to the output directory. Returns the path to the ripped file.
+    ///
+    /// `volumeLabel`, when provided, is used by the MSG:5010 retry path to attempt
+    /// a `diskutil unmount /Volumes/<label>` between retries — without it, the
+    /// unmount is a no-op (still safe, just less effective).
     func ripTitle(
         titleId: Int,
         outputDir: String,
+        volumeLabel: String? = nil,
         progressCallback: (@Sendable (Int, String) -> Void)? = nil,
         logCallback: (@Sendable (String) -> Void)? = nil
     ) async throws -> URL {
@@ -232,7 +258,10 @@ actor MakeMKVService {
 
         var exitCode: Int32 = 0
         var attempt = 0
+        var lastHas5010 = false
+        var lastProgressSeen = false
         while true {
+            try Task.checkCancellation()
             // Tracks whether MakeMKV ever reported progress for this attempt.
             // Only safe to retry on MSG:5010 if we never started actually ripping.
             let progressSeen = ProgressFlag()
@@ -278,17 +307,24 @@ actor MakeMKVService {
                 }
             )
 
+            lastHas5010 = Self.outputHas5010Error(attemptOutput.result)
+            lastProgressSeen = progressSeen.isSet
+
             // Retry MSG:5010 only if no actual rip progress occurred. Restarting
             // a half-finished rip would corrupt output and waste a full pass.
-            if exitCode != 0,
-               !progressSeen.isSet,
-               Self.outputHas5010Error(attemptOutput.result),
+            // Note: we key off the OUTPUT (not exitCode) because makemkvcon exits
+            // with status 0 even on MSG:5010, so an exit-code gate would never fire.
+            if lastHas5010,
+               !lastProgressSeen,
                attempt < Self.maxOpenDiscRetries {
                 let delay = Self.openDiscRetryBackoff[attempt]
                 log.warning("MSG:5010 on rip attempt \(attempt + 1) for title \(titleId); retrying in \(delay)s")
                 logCallback?("MakeMKV failed to open disc (MSG:5010). Retrying in \(delay)s…")
-                await unmountDiscVolume(volumeLabel: nil, logCallback: logCallback)
-                try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+                await unmountDiscVolume(volumeLabel: volumeLabel, logCallback: logCallback)
+                // Cancellation-aware sleep: lets the user's abort propagate
+                // instead of letting the loop spin through every backoff and
+                // respawn makemkvcon between aborts.
+                try await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 attempt += 1
                 // Clean any partial output left behind so the retry has a clean slate.
                 let suffix = String(format: "_t%02d.mkv", titleId)
@@ -301,6 +337,16 @@ actor MakeMKVService {
                 continue
             }
             break
+        }
+
+        // Exhausted retries on a clean MSG:5010 (no PRGV ever observed) — surface
+        // a clear error instead of falling through to the misleading "exited with
+        // code 0" / "output file not found" path. makemkvcon exits 0 on 5010,
+        // so without this branch the rip silently looks like a missing-file bug.
+        if lastHas5010, !lastProgressSeen {
+            throw MakeMKVError.ripFailed(
+                "Failed to open disc after \(attempt + 1) attempt\(attempt == 0 ? "" : "s") (MSG:5010). The drive may not have released after a previous operation, or the media is unreadable."
+            )
         }
 
         if exitCode != 0 {
