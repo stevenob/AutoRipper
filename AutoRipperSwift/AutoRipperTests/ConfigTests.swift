@@ -14,6 +14,69 @@ final class AppConfigTests: XCTestCase {
         XCTAssertFalse(config.handbrakePath.isEmpty)
     }
 
+    func testRipScratchDirDefaultsEmpty() {
+        // Fresh user-defaults install: scratch dir not set => empty string.
+        // Existing installs may have a stored value; this only asserts that we
+        // don't blow up on an unset key.
+        let defaults = UserDefaults(suiteName: "group.com.autoripper")!
+        defaults.removeObject(forKey: "ripScratchDir")
+        let config = AppConfig()
+        XCTAssertEqual(config.ripScratchDir, "")
+    }
+
+    func testRipScratchDirPersists() {
+        let config = AppConfig()
+        let before = config.ripScratchDir
+        config.ripScratchDir = "/tmp/autoripper-test-scratch"
+        XCTAssertEqual(
+            UserDefaults(suiteName: "group.com.autoripper")!.string(forKey: "ripScratchDir"),
+            "/tmp/autoripper-test-scratch"
+        )
+        config.ripScratchDir = before
+    }
+
+    func testInFlightRipRoundTrips() {
+        let defaults = UserDefaults(suiteName: "group.com.autoripper")!
+        defaults.removeObject(forKey: "inFlightRip")
+        defaults.removeObject(forKey: "inFlightRipPath")
+        let config = AppConfig()
+        XCTAssertNil(config.inFlightRip)
+
+        let entry = InFlightRip(
+            phase: .staging,
+            titleId: 7,
+            ripFile: "/tmp/scratch/Movie/title_t00.mkv",
+            stagingDest: "/Volumes/NAS/Downloaded/Movie/title_t00.mkv"
+        )
+        config.inFlightRip = entry
+        let roundTripped = config.inFlightRip
+        XCTAssertEqual(roundTripped, entry)
+
+        config.inFlightRip = nil
+        XCTAssertNil(config.inFlightRip)
+        XCTAssertNil(defaults.data(forKey: "inFlightRip"))
+    }
+
+    func testLegacyInFlightRipPathMigratesOnInit() {
+        // Simulate an old install: legacy string key set, new key absent.
+        let defaults = UserDefaults(suiteName: "group.com.autoripper")!
+        defaults.removeObject(forKey: "inFlightRip")
+        defaults.set("/tmp/legacy-scratch/Movie", forKey: "inFlightRipPath")
+
+        // Construction should migrate the legacy key into the structured form
+        // and remove the old key.
+        let config = AppConfig()
+        let migrated = config.inFlightRip
+        XCTAssertNotNil(migrated)
+        XCTAssertEqual(migrated?.phase, .ripping)
+        XCTAssertEqual(migrated?.titleId, -1)
+        XCTAssertEqual(migrated?.ripFile, "/tmp/legacy-scratch/Movie")
+        XCTAssertNil(defaults.string(forKey: "inFlightRipPath"))
+
+        // Cleanup so other tests start clean.
+        config.inFlightRip = nil
+    }
+
     func testUserDefaultsPersistence() {
         let config = AppConfig()
         config.minDuration = 999

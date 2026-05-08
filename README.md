@@ -23,6 +23,7 @@ Built with Swift and SwiftUI for macOS 14+.
 | 🔬 **Per-Job Logs** | HandBrake stdout/stderr captured per job; tap any row to expand and diagnose failures |
 | 💬 **Discord** | Live-updating job card per title + notifications |
 | 💾 **NAS Upload** | Copies to NAS, cleans up local files |
+| 🚧 **Rip Scratch Dir** | Optional local-SSD scratch dir for slow-NAS setups — keeps bandwidth-hungry rips off the network |
 | 🔔 **Notifications** | macOS + Discord alerts for scan, rip, and failures |
 | 🔄 **Update Checker** | Checks GitHub Releases on launch |
 
@@ -72,9 +73,26 @@ Open **Settings** (⌘,):
 1. Enter your **TMDb API key** ([free](https://www.themoviedb.org/settings/api))
 2. Verify **MakeMKV** and **HandBrake CLI** paths
 3. Set **output directory**
-4. Optionally add **Discord webhook** and **NAS paths**
+4. Optionally set a **Rip Scratch Dir** (recommended when output lives on a slow NAS — see below)
+5. Optionally add **Discord webhook** and **NAS paths**
 
 Settings save instantly.
+
+### Rip Scratch Dir (slow-NAS workaround)
+
+When **Output Directory** lives on a NAS / network share, the raw rip step can be bottlenecked by the network. MakeMKV reads Blu-rays at ~50–70 MB/s and 4K UHD even faster — beyond what a typical Wi-Fi-backed SMB share can absorb, triggering MakeMKV's `MSG:2008` "writes too slow" warnings and throttling.
+
+Setting **Rip Scratch Dir** to a fast local directory (e.g., `~/Movies/RipScratch`) decouples the bandwidth-hungry rip from the network. Each title rips to local SSD, then `StagingService` copies it to `<outputDir>/<folderName>/` with byte-for-byte verification before the encode/organize/scrape pipeline picks it up.
+
+Recommended layout for NAS-backed setups:
+
+| Setting | Example | Role |
+|---|---|---|
+| `Rip Scratch Dir` | `~/Movies/RipScratch` | Local SSD — temp landing for raw rips |
+| `Output Directory` | `/Volumes/ServerShare/Downloaded` | NAS — encode/organize/scrape working dir |
+| `NAS Movies Path` | `/Volumes/ServerShare/Movies` | NAS — final library |
+
+Leave `Rip Scratch Dir` empty to keep the legacy behavior (rip writes directly to `Output Directory`).
 
 ## Usage
 
@@ -137,12 +155,13 @@ bash build-swift.sh
 AutoRipperSwift/AutoRipper/
 ├── AutoRipperApp.swift      App entry, quit-on-close, menu
 ├── Models/                  AppConfig, DiscInfo, Job (Codable, intent + edition),
-│                            JobIntent, MediaResult
+│                            JobIntent, MediaResult, InFlightRip (crash-recovery state)
 ├── Services/                MakeMKV, HandBrake (preset validate, disk-space pre-flight,
 │                            stderr-tail on failure), TMDb, Discord, Artwork,
 │                            Organizer ({edition-X} naming), Notifications,
-│                            ProcessTracker, UpdateService, FileLogger, JobStore
-├── ViewModels/              RipViewModel (per-title intents, batch mode),
+│                            ProcessTracker, UpdateService, FileLogger, JobStore,
+│                            StagingService (copy+verify cross-volume transfer)
+├── ViewModels/              RipViewModel (per-title intents, batch mode, scratch->output staging),
 │                            QueueViewModel (persistent, retry, per-job logs)
 └── Views/                   ContentView (NavigationSplitView sidebar),
                              QueueView, HistoryView, SettingsView

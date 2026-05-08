@@ -15,6 +15,17 @@ final class AppConfig: ObservableObject {
     @Published var outputDir: String {
         didSet { defaults.set(outputDir, forKey: "outputDir") }
     }
+    /// Local-disk scratch directory MakeMKV writes raw rips into. When set, each
+    /// completed title is moved to `outputDir/<folderName>/<file>` by
+    /// `StagingService` before the queue picks it up. When empty, MakeMKV writes
+    /// directly to `outputDir` (legacy behavior).
+    ///
+    /// Recommended for slow-NAS-backed `outputDir` setups: keeps the bandwidth-
+    /// hungry rip step on local SSD and avoids MakeMKV's MSG:2008 ("reads faster
+    /// than it can write") throttling.
+    @Published var ripScratchDir: String {
+        didSet { defaults.set(ripScratchDir, forKey: "ripScratchDir") }
+    }
     @Published var makemkvPath: String {
         didSet { defaults.set(makemkvPath, forKey: "makemkvPath") }
     }
@@ -62,20 +73,32 @@ final class AppConfig: ObservableObject {
     @Published var genericWebhookURL: String {
         didSet { defaults.set(genericWebhookURL, forKey: "genericWebhookURL") }
     }
-    /// Path of a MakeMKV-rip-in-progress. Set just before `ripTitle`, cleared on
-    /// success or caught failure. If the app crashes/exits mid-rip, the next launch
-    /// finds this set and deletes the partial file.
-    var inFlightRipPath: String? {
-        get { defaults.string(forKey: "inFlightRipPath") }
+    /// Structured mid-pipeline state for crash/exit recovery. Set just before
+    /// MakeMKV's `ripTitle` (phase = .ripping), updated to .staging while
+    /// `StagingService` is copying the rip to its final home, cleared on success
+    /// or caught failure. If the app crashes/exits mid-pipeline, the next launch
+    /// finds this set and cleans up the partial file(s) appropriately.
+    ///
+    /// Persisted as JSON under the `inFlightRip` key. Setting to `nil` removes
+    /// the key entirely.
+    var inFlightRip: InFlightRip? {
+        get {
+            guard let data = defaults.data(forKey: "inFlightRip") else { return nil }
+            return try? JSONDecoder().decode(InFlightRip.self, from: data)
+        }
         set {
-            if let v = newValue { defaults.set(v, forKey: "inFlightRipPath") }
-            else { defaults.removeObject(forKey: "inFlightRipPath") }
+            if let v = newValue, let data = try? JSONEncoder().encode(v) {
+                defaults.set(data, forKey: "inFlightRip")
+            } else {
+                defaults.removeObject(forKey: "inFlightRip")
+            }
         }
     }
 
     init() {
         let d = UserDefaults(suiteName: "group.com.autoripper")!
         self.outputDir = d.string(forKey: "outputDir") ?? NSHomeDirectory() + "/Desktop/Ripped"
+        self.ripScratchDir = d.string(forKey: "ripScratchDir") ?? ""
         self.makemkvPath = d.string(forKey: "makemkvPath") ?? "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
         self.handbrakePath = d.string(forKey: "handbrakePath") ?? "/opt/homebrew/bin/HandBrakeCLI"
         self.tmdbApiKey = d.string(forKey: "tmdbApiKey") ?? ""
@@ -91,5 +114,19 @@ final class AppConfig: ObservableObject {
         self.preventSleep = d.object(forKey: "preventSleep") as? Bool ?? true
         self.verboseLogging = d.object(forKey: "verboseLogging") as? Bool ?? false
         self.genericWebhookURL = d.string(forKey: "genericWebhookURL") ?? ""
+        // One-time migration: legacy `inFlightRipPath` (a directory string) ->
+        // structured `inFlightRip` so cleanupOrphanedRip can recognize it. We
+        // can't reliably tell which title was being written (the legacy state
+        // didn't capture that), so we record phase = .ripping with titleId = -1
+        // and let cleanup handle "directory contained partial mkvs" by walking
+        // the dir. Old key is removed regardless.
+        if d.data(forKey: "inFlightRip") == nil,
+           let legacy = d.string(forKey: "inFlightRipPath"), !legacy.isEmpty {
+            let migrated = InFlightRip(phase: .ripping, titleId: -1, ripFile: legacy, stagingDest: nil)
+            if let data = try? JSONEncoder().encode(migrated) {
+                d.set(data, forKey: "inFlightRip")
+            }
+        }
+        d.removeObject(forKey: "inFlightRipPath")
     }
 }

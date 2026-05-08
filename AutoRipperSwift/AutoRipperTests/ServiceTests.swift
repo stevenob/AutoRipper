@@ -433,3 +433,203 @@ final class GenericWebhookPayloadTests: XCTestCase {
         XCTAssertNoThrow(try JSONSerialization.data(withJSONObject: p, options: [.sortedKeys]))
     }
 }
+
+// MARK: - StagingService Tests
+
+final class StagingServiceTests: XCTestCase {
+
+    private var tmpRoot: URL!
+
+    override func setUp() {
+        super.setUp()
+        tmpRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("staging-test-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tmpRoot, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tmpRoot)
+        super.tearDown()
+    }
+
+    private func writeFile(at url: URL, sizeBytes: Int) throws {
+        var data = Data(count: sizeBytes)
+        // Make non-zero so size verification differentiates from a freshly-
+        // created empty file on the dest side.
+        for i in 0..<min(sizeBytes, 1024) { data[i] = UInt8(i & 0xFF) }
+        try data.write(to: url)
+    }
+
+    func testCheckReachableSucceedsForWritableDir() async throws {
+        let service = StagingService()
+        try await service.checkReachable(path: tmpRoot.path)
+    }
+
+    func testCheckReachableFailsForMissingDir() async {
+        let service = StagingService()
+        do {
+            try await service.checkReachable(path: tmpRoot.appendingPathComponent("nope").path)
+            XCTFail("expected destinationUnreachable")
+        } catch let err as StagingError {
+            if case .destinationUnreachable = err { return }
+            XCTFail("wrong error: \(err)")
+        } catch {
+            XCTFail("wrong error type: \(error)")
+        }
+    }
+
+    func testCheckReachableFailsForFilePath() async throws {
+        let file = tmpRoot.appendingPathComponent("not-a-dir")
+        try writeFile(at: file, sizeBytes: 4)
+        let service = StagingService()
+        do {
+            try await service.checkReachable(path: file.path)
+            XCTFail("expected destinationUnreachable for non-directory")
+        } catch let err as StagingError {
+            if case .destinationUnreachable = err { return }
+            XCTFail("wrong error: \(err)")
+        } catch {
+            XCTFail("wrong error type: \(error)")
+        }
+    }
+
+    func testCopyAndVerifyHappyPath() async throws {
+        let source = tmpRoot.appendingPathComponent("src.mkv")
+        let dest = tmpRoot.appendingPathComponent("staged/disc/title.mkv")
+        // 17 MB — exercises chunk boundary (8 MB chunks).
+        try writeFile(at: source, sizeBytes: 17 * 1024 * 1024)
+        let originalSize = try FileManager.default
+            .attributesOfItem(atPath: source.path)[.size] as? Int64
+
+        let service = StagingService()
+        let result = try await service.copyAndVerify(from: source, to: dest)
+
+        XCTAssertEqual(result, dest)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path),
+                       "source should be deleted after successful copy")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path + ".partial"),
+                       "partial file should be cleaned up")
+        let destSize = try FileManager.default
+            .attributesOfItem(atPath: dest.path)[.size] as? Int64
+        XCTAssertEqual(destSize, originalSize)
+    }
+
+    func testCopyAndVerifyReportsProgress() async throws {
+        let source = tmpRoot.appendingPathComponent("src.bin")
+        let dest = tmpRoot.appendingPathComponent("dst/file.bin")
+        try writeFile(at: source, sizeBytes: 17 * 1024 * 1024)
+
+        // Use an actor-isolated counter — closure runs off-main from the
+        // service actor, so a plain mutable Int wouldn't be safe.
+        actor Counter {
+            var count = 0
+            var lastTotal: Int64 = 0
+            var lastCopied: Int64 = 0
+            func tick(_ copied: Int64, _ total: Int64) {
+                count += 1
+                lastCopied = copied
+                lastTotal = total
+            }
+        }
+        let counter = Counter()
+        let service = StagingService()
+        _ = try await service.copyAndVerify(from: source, to: dest, progress: { copied, total in
+            // Bridge the sync callback back into the actor.
+            Task { await counter.tick(copied, total) }
+        })
+
+        // Allow the trailing detached tasks to run.
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let calls = await counter.count
+        let lastCopied = await counter.lastCopied
+        let lastTotal = await counter.lastTotal
+        XCTAssertGreaterThan(calls, 0, "progress should fire at least once")
+        XCTAssertEqual(lastCopied, lastTotal,
+                       "final progress tick should report bytesCopied == total")
+    }
+
+    func testCopyAndVerifyFailsOnMissingSource() async throws {
+        let source = tmpRoot.appendingPathComponent("missing.bin")
+        let dest = tmpRoot.appendingPathComponent("dst/file.bin")
+
+        let service = StagingService()
+        do {
+            _ = try await service.copyAndVerify(from: source, to: dest)
+            XCTFail("expected sourceMissing")
+        } catch let err as StagingError {
+            if case .sourceMissing = err { return }
+            XCTFail("wrong error: \(err)")
+        } catch {
+            XCTFail("wrong error type: \(error)")
+        }
+    }
+
+    func testCopyAndVerifyReplacesExistingDestSafely() async throws {
+        let source = tmpRoot.appendingPathComponent("new.bin")
+        let dest = tmpRoot.appendingPathComponent("dest/file.bin")
+        // Pre-existing destination with different content.
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try writeFile(at: dest, sizeBytes: 1024)
+        try writeFile(at: source, sizeBytes: 9 * 1024 * 1024)
+
+        let service = StagingService()
+        _ = try await service.copyAndVerify(from: source, to: dest)
+
+        // New file replaced old file; sizes match the new source.
+        let destSize = try FileManager.default
+            .attributesOfItem(atPath: dest.path)[.size] as? Int64
+        XCTAssertEqual(destSize, 9 * 1024 * 1024)
+    }
+
+    func testCopyAndVerifyCleansUpStaleDotPartial() async throws {
+        let source = tmpRoot.appendingPathComponent("src.bin")
+        let dest = tmpRoot.appendingPathComponent("d/file.bin")
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        // Stale partial from a previous failed run — must not block the new copy.
+        let stalePartial = dest.appendingPathExtension("partial")
+        try writeFile(at: stalePartial, sizeBytes: 999)
+        try writeFile(at: source, sizeBytes: 5 * 1024 * 1024)
+
+        let service = StagingService()
+        _ = try await service.copyAndVerify(from: source, to: dest)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stalePartial.path))
+        let destSize = try FileManager.default
+            .attributesOfItem(atPath: dest.path)[.size] as? Int64
+        XCTAssertEqual(destSize, 5 * 1024 * 1024)
+    }
+}
+
+// MARK: - InFlightRip Tests
+
+final class InFlightRipTests: XCTestCase {
+
+    func testEncodesAndDecodes() throws {
+        let original = InFlightRip(
+            phase: .ripping,
+            titleId: 3,
+            ripFile: "/tmp/scratch/Movie/title_t03.mkv",
+            stagingDest: nil
+        )
+        let data = try JSONEncoder().encode(original)
+        let round = try JSONDecoder().decode(InFlightRip.self, from: data)
+        XCTAssertEqual(round, original)
+    }
+
+    func testStagingPhaseCarriesDestination() throws {
+        let staging = InFlightRip(
+            phase: .staging,
+            titleId: 0,
+            ripFile: "/tmp/scratch/Movie/title.mkv",
+            stagingDest: "/Volumes/NAS/Downloaded/Movie/title.mkv"
+        )
+        let data = try JSONEncoder().encode(staging)
+        let round = try JSONDecoder().decode(InFlightRip.self, from: data)
+        XCTAssertEqual(round.phase, .staging)
+        XCTAssertEqual(round.stagingDest, "/Volumes/NAS/Downloaded/Movie/title.mkv")
+    }
+}

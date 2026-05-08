@@ -60,6 +60,7 @@ final class RipViewModel: ObservableObject {
     private let config: AppConfig
     private let makemkv: MakeMKVService
     private let discord: DiscordService
+    private let stagingService = StagingService()
     private var runningTask: Task<Void, Never>?
     /// TMDb match for the current disc. Published so the rip hero / queue rows can
     /// observe and update reactively if the user picks a different match mid-rip.
@@ -92,23 +93,73 @@ final class RipViewModel: ObservableObject {
         detectDisc()
     }
 
-    /// If a rip was in flight when the app exited/crashed, MakeMKV left a partial
-    /// `.mkv` on disk. Delete it (and its parent dir if empty) so the user doesn't
-    /// later think it's a real rip.
+    /// If a rip (or its post-rip staging copy) was in flight when the app exited
+    /// or crashed, clean up the partial files left behind based on the persisted
+    /// `InFlightRip.phase`.
+    ///
+    /// `.ripping`: MakeMKV was writing into `ripFile` — guaranteed incomplete.
+    /// Delete it and any empty parent dir.
+    ///
+    /// `.staging`: `StagingService` was copying `ripFile` -> `stagingDest`.
+    /// Delete `stagingDest.partial` (always partial). Also delete `stagingDest`
+    /// if its size doesn't match the source — it's an interrupted rename.
+    /// `ripFile` is the authoritative copy and stays.
     private func cleanupOrphanedRip() {
-        guard let path = config.inFlightRipPath else { return }
-        let url = URL(fileURLWithPath: path)
-        let dir = url.deletingLastPathComponent()
+        guard let inFlight = config.inFlightRip else { return }
         let fm = FileManager.default
-        if fm.fileExists(atPath: path) {
-            try? fm.removeItem(at: url)
-            FileLogger.shared.warn("rip-vm", "cleaned up partial rip from previous session: \(path)")
+        switch inFlight.phase {
+        case .ripping:
+            let path = inFlight.ripFile
+            // Legacy migration may pass a directory here (titleId == -1). Walk
+            // it for partial mkvs in that case rather than blindly nuking the
+            // whole tree (which would clobber prior successful titles).
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: path, isDirectory: &isDir) {
+                if isDir.boolValue, inFlight.titleId == -1 {
+                    if let entries = try? fm.contentsOfDirectory(atPath: path) {
+                        // Best-effort: drop any zero-byte mkvs in the dir; leave the
+                        // rest. We can't reliably tell which file was partial.
+                        for entry in entries where entry.hasSuffix(".mkv") {
+                            let entryPath = (path as NSString).appendingPathComponent(entry)
+                            if let attrs = try? fm.attributesOfItem(atPath: entryPath),
+                               (attrs[.size] as? Int64) == 0 {
+                                try? fm.removeItem(atPath: entryPath)
+                                FileLogger.shared.warn("rip-vm", "removed zero-byte legacy partial: \(entryPath)")
+                            }
+                        }
+                    }
+                } else {
+                    try? fm.removeItem(atPath: path)
+                    FileLogger.shared.warn("rip-vm", "cleaned up partial rip from previous session: \(path)")
+                    let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
+                    if let contents = try? fm.contentsOfDirectory(atPath: dir.path), contents.isEmpty {
+                        try? fm.removeItem(at: dir)
+                    }
+                }
+            }
+        case .staging:
+            if let dest = inFlight.stagingDest {
+                let partial = dest + ".partial"
+                if fm.fileExists(atPath: partial) {
+                    try? fm.removeItem(atPath: partial)
+                    FileLogger.shared.warn("rip-vm", "cleaned up partial staging copy: \(partial)")
+                }
+                // If a stale `dest` exists but its size doesn't match the source,
+                // it's a truncated/interrupted rename — drop it.
+                if fm.fileExists(atPath: dest),
+                   let destAttrs = try? fm.attributesOfItem(atPath: dest),
+                   let destSize = destAttrs[.size] as? Int64,
+                   let srcAttrs = try? fm.attributesOfItem(atPath: inFlight.ripFile),
+                   let srcSize = srcAttrs[.size] as? Int64,
+                   destSize != srcSize {
+                    try? fm.removeItem(atPath: dest)
+                    FileLogger.shared.warn("rip-vm", "cleaned up size-mismatched staging dest: \(dest)")
+                }
+            }
+            // ripFile is the authoritative copy — leave it; the user can retry
+            // and the staging step will pick up where it left off.
         }
-        // Try to remove the dir if it's now empty (don't recurse — leave any user files).
-        if let contents = try? fm.contentsOfDirectory(atPath: dir.path), contents.isEmpty {
-            try? fm.removeItem(at: dir)
-        }
-        config.inFlightRipPath = nil
+        config.inFlightRip = nil
     }
 
     func detectDisc() {
@@ -310,13 +361,24 @@ final class RipViewModel: ObservableObject {
         statusText = "Ripping…"
 
         let titlesToRip = selectedTitles.sorted()
-        let baseDir = config.outputDir
         // Use TMDb title if available, otherwise clean disc name
         let folderName = OrganizerService.cleanFilename(
             info.mediaTitle.isEmpty ? info.name : info.mediaTitle
         )
-        let outputDir = URL(fileURLWithPath: baseDir)
+        // Where MakeMKV writes raw rips. Defaults to the legacy in-place path
+        // (`<outputDir>/<folderName>`); falls back to the local scratch dir when
+        // `ripScratchDir` is configured. The `outputDir` local variable name is
+        // preserved so the existing PRGV / size-monitor code (which uses it
+        // heavily below) keeps working unchanged.
+        let scratchBase = config.ripScratchDir.isEmpty ? config.outputDir : config.ripScratchDir
+        let outputDir = URL(fileURLWithPath: scratchBase)
             .appendingPathComponent(folderName).path
+        // Where the file ends up after staging. Equals `outputDir` when no
+        // scratch dir is configured (no-op staging) — equals
+        // `<config.outputDir>/<folderName>` when staging is on.
+        let finalDir = URL(fileURLWithPath: config.outputDir)
+            .appendingPathComponent(folderName).path
+        let stagingEnabled = !config.ripScratchDir.isEmpty
 
         runningTask = Task {
             let start = Date()
@@ -350,8 +412,16 @@ final class RipViewModel: ObservableObject {
                 }
 
                 // Tell AppConfig where the partial rip will live so a crash mid-rip
-                // can clean up on next launch.
-                config.inFlightRipPath = outputDir
+                // can clean up on next launch. The exact ripFile path isn't known
+                // until MakeMKV reports it; record the parent dir for now and
+                // refine to the actual file path once we have it (see staging
+                // transition below).
+                config.inFlightRip = InFlightRip(
+                    phase: .ripping,
+                    titleId: tid,
+                    ripFile: outputDir,
+                    stagingDest: nil
+                )
                 let lastPRGV = LastPRGV()
 
                 // File-size fallback: snapshot existing files in outputDir so we can
@@ -390,7 +460,7 @@ final class RipViewModel: ObservableObject {
                 }
 
                 do {
-                    let file = try await makemkv.ripTitle(
+                    let rippedFile = try await makemkv.ripTitle(
                         titleId: tid,
                         outputDir: outputDir,
                         volumeLabel: detectedDiscName.isEmpty ? info.name : detectedDiscName,
@@ -408,9 +478,62 @@ final class RipViewModel: ObservableObject {
                             Task { @MainActor in self?.appendMakeMKVLog(line) }
                         }
                     )
-                    let titleElapsed = Date().timeIntervalSince(titleStart)
                     sizeMonitor.cancel()
-                    config.inFlightRipPath = nil
+
+                    // Stage to outputDir if a separate ripScratchDir is configured.
+                    // The actor runs the long copy off the main actor; we just await
+                    // its result here. The pipeline waits on this before queuing
+                    // the encode job so downstream stages always see the final path.
+                    let file: URL
+                    if stagingEnabled {
+                        let dest = URL(fileURLWithPath: finalDir)
+                            .appendingPathComponent(rippedFile.lastPathComponent)
+                        config.inFlightRip = InFlightRip(
+                            phase: .staging,
+                            titleId: tid,
+                            ripFile: rippedFile.path,
+                            stagingDest: dest.path
+                        )
+                        statusText = "Staging title \(tid) (\(titleIndex + 1)/\(totalTitles)) → \(config.outputDir)…"
+                        FileLogger.shared.info("rip-vm",
+                            "staging title \(tid): \(rippedFile.path) -> \(dest.path)")
+                        do {
+                            file = try await stagingService.copyAndVerify(
+                                from: rippedFile,
+                                to: dest,
+                                progress: { [weak self] copied, total in
+                                    Task { @MainActor in
+                                        guard let self else { return }
+                                        let pct = total > 0 ? Int(Double(copied) / Double(total) * 100) : 0
+                                        self.statusText = "Staging title \(tid) (\(titleIndex + 1)/\(totalTitles)) — \(pct)%"
+                                    }
+                                }
+                            )
+                        } catch {
+                            // Staging failed — surface as a rip failure for this title.
+                            // ripFile is still on local scratch; cleanupOrphanedRip
+                            // (next launch) will leave it intact since the .partial
+                            // dest is what we explicitly removed below.
+                            config.inFlightRip = nil
+                            titleRipStatuses[tid] = .failed(message: "Staging failed: \(error.localizedDescription)")
+                            statusText = "Staging failed: \(error.localizedDescription)"
+                            errorMessage = error.localizedDescription
+                            log.error("Staging failed for title \(tid): \(error.localizedDescription)")
+                            if fullAutoEnabled {
+                                await card?.fail("rip", detail: "Staging: \(error.localizedDescription)")
+                            } else {
+                                await discord.notifyError("Staging failed for \(folderName): \(error.localizedDescription)")
+                            }
+                            NotificationService.shared.notify(title: "Staging Failed",
+                                                              message: "\(folderName): \(error.localizedDescription)")
+                            continue
+                        }
+                    } else {
+                        file = rippedFile
+                    }
+
+                    let titleElapsed = Date().timeIntervalSince(titleStart)
+                    config.inFlightRip = nil
                     titleRipStatuses[tid] = .done
                     // In Full Auto, every successfully-ripped title flows through the
                     // encode → organize → scrape → NAS pipeline as its own queue job.
@@ -434,7 +557,7 @@ final class RipViewModel: ObservableObject {
                     }
                 } catch {
                     sizeMonitor.cancel()
-                    config.inFlightRipPath = nil
+                    config.inFlightRip = nil
                     titleRipStatuses[tid] = .failed(message: error.localizedDescription)
                     statusText = "Rip failed: \(error.localizedDescription)"
                     errorMessage = error.localizedDescription
@@ -448,13 +571,25 @@ final class RipViewModel: ObservableObject {
                 }
             }
 
+            // Best-effort: if we used a scratch dir, drop the now-empty per-disc
+            // folder so the scratch tree doesn't accumulate stubs.
+            if stagingEnabled {
+                let fm = FileManager.default
+                if let contents = try? fm.contentsOfDirectory(atPath: outputDir), contents.isEmpty {
+                    try? fm.removeItem(atPath: outputDir)
+                }
+            }
+
             _ = start  // overall start kept for potential summary logging
             // Scrape artwork/NFO into the title folder right after rip
             // (skip in full-auto mode — QueueViewModel handles it after organize)
             if !fullAutoEnabled {
                 statusText = "Scraping artwork & NFO…"
                 logLines.append("Scraping artwork for \(folderName)…")
-                let destDir = URL(fileURLWithPath: outputDir)
+                // When staging is on, the rip files now live at `finalDir`; the
+                // scratch `outputDir` was deleted just above. Always scrape into
+                // wherever the files actually ended up.
+                let destDir = URL(fileURLWithPath: stagingEnabled ? finalDir : outputDir)
                 let artwork = ArtworkService()
                 let scraped = await artwork.scrapeAndSave(
                     discName: info.name,
@@ -655,7 +790,7 @@ final class RipViewModel: ObservableObject {
         }
         statusText = "Aborted"
         batchModeEnabled = false  // abort breaks the batch loop
-        config.inFlightRipPath = nil
+        config.inFlightRip = nil
     }
 }
 

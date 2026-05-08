@@ -133,11 +133,39 @@ private func browseFile(binding: Binding<String>) {
 
 private struct GeneralPane: View {
     @ObservedObject var config: AppConfig
+    @State private var scratchStatus: String = ""
 
     var body: some View {
         Form {
             PathRow(label: "Output Directory:", value: $config.outputDir, mustBeDir: true,
                     onBrowse: { browseFolder(binding: $config.outputDir) })
+
+            PathRow(label: "Rip Scratch Dir:", value: $config.ripScratchDir, mustBeDir: true,
+                    onBrowse: { browseFolder(binding: $config.ripScratchDir) })
+
+            HStack(alignment: .top) {
+                Spacer().frame(width: 130)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Optional: when set, MakeMKV writes raw rips to this local directory, then they're moved to Output Directory after each title finishes. Leave empty to write directly to Output Directory.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Recommended when Output Directory lives on a slow NAS — keeps the bandwidth-hungry rip step on local SSD and avoids MakeMKV's \"writes too slow\" warnings.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Check writability") { Task { await checkScratch() } }
+                            .disabled(config.ripScratchDir.isEmpty)
+                        if !scratchStatus.isEmpty {
+                            Text(scratchStatus)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer()
+            }
 
             HStack {
                 Text("Skip titles under:").frame(width: 130, alignment: .trailing)
@@ -150,6 +178,17 @@ private struct GeneralPane: View {
             Toggle(isOn: $config.autoEject) { Text("Auto-eject after rip") }
         }
         .formStyle(.grouped)
+    }
+
+    private func checkScratch() async {
+        let path = config.ripScratchDir
+        guard !path.isEmpty else { scratchStatus = ""; return }
+        do {
+            try await StagingService().checkReachable(path: path)
+            scratchStatus = "✓ writable"
+        } catch {
+            scratchStatus = "✗ \(error.localizedDescription)"
+        }
     }
 }
 
@@ -600,6 +639,7 @@ private struct AdvancedPane: View {
     private func exportSettings() {
         var dict: [String: Any] = [
             "outputDir": config.outputDir,
+            "ripScratchDir": config.ripScratchDir,
             "makemkvPath": config.makemkvPath,
             "handbrakePath": config.handbrakePath,
             "minDuration": config.minDuration,
@@ -652,6 +692,7 @@ private struct AdvancedPane: View {
 
     private func applyImported(_ dict: [String: Any]) {
         if let v = dict["outputDir"]            as? String { config.outputDir = v }
+        if let v = dict["ripScratchDir"]        as? String { config.ripScratchDir = v }
         if let v = dict["makemkvPath"]          as? String { config.makemkvPath = v }
         if let v = dict["handbrakePath"]        as? String { config.handbrakePath = v }
         if let v = dict["minDuration"]          as? Int    { config.minDuration = v }
