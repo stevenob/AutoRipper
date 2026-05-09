@@ -1234,3 +1234,144 @@ final class LibraryNotifierServiceTests: XCTestCase {
         XCTAssertTrue(url.contains("/library/sections/1/refresh"))
     }
 }
+
+// MARK: - DiscFingerprintService tests
+
+final class DiscFingerprintServiceTests: XCTestCase {
+
+    private func makeInfo(name: String = "TEST_DISC",
+                         type: String = "dvd",
+                         titles: [(id: Int, duration: String, size: Int64)]) -> DiscInfo {
+        let mapped = titles.map { t in
+            TitleInfo(id: t.id, name: "Title \(t.id)", duration: t.duration,
+                      sizeBytes: t.size, chapters: 1, fileOutput: "")
+        }
+        return DiscInfo(name: name, type: type, titles: mapped)
+    }
+
+    func testFingerprintIsStable() {
+        let info1 = makeInfo(titles: [(0, "1:30:00", 5_000_000_000), (1, "0:10:00", 800_000_000)])
+        let info2 = makeInfo(titles: [(0, "1:30:00", 5_000_000_000), (1, "0:10:00", 800_000_000)])
+        XCTAssertEqual(DiscFingerprintService.fingerprint(info1),
+                       DiscFingerprintService.fingerprint(info2))
+    }
+
+    func testFingerprintIgnoresTitleOrder() {
+        let a = makeInfo(titles: [(0, "1:30:00", 5_000_000_000), (1, "0:10:00", 800_000_000)])
+        let b = makeInfo(titles: [(1, "0:10:00", 800_000_000), (0, "1:30:00", 5_000_000_000)])
+        XCTAssertEqual(DiscFingerprintService.fingerprint(a),
+                       DiscFingerprintService.fingerprint(b))
+    }
+
+    func testFingerprintDiffersForDifferentDiscs() {
+        let a = makeInfo(name: "DISC_A", titles: [(0, "1:30:00", 5_000_000_000)])
+        let b = makeInfo(name: "DISC_B", titles: [(0, "1:30:00", 5_000_000_000)])
+        XCTAssertNotEqual(DiscFingerprintService.fingerprint(a),
+                          DiscFingerprintService.fingerprint(b))
+    }
+
+    func testFingerprintDiffersForDifferentDuration() {
+        let a = makeInfo(titles: [(0, "1:30:00", 5_000_000_000)])
+        let b = makeInfo(titles: [(0, "1:31:00", 5_000_000_000)])
+        XCTAssertNotEqual(DiscFingerprintService.fingerprint(a),
+                          DiscFingerprintService.fingerprint(b))
+    }
+
+    func testFingerprintIs64HexChars() {
+        let info = makeInfo(titles: [(0, "1:30:00", 5_000_000_000)])
+        let fp = DiscFingerprintService.fingerprint(info)
+        XCTAssertEqual(fp.count, 64, "SHA256 hex should be 64 chars")
+        XCTAssertNotNil(fp.range(of: "^[0-9a-f]{64}$", options: .regularExpression))
+    }
+}
+
+// MARK: - RippedDiscRegistry tests
+
+final class RippedDiscRegistryTests: XCTestCase {
+
+    private var tmpStoreURL: URL!
+
+    override func setUp() {
+        super.setUp()
+        tmpStoreURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("ripped-test-\(UUID().uuidString).json")
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tmpStoreURL)
+        super.tearDown()
+    }
+
+    func testRecordAndLookup() async {
+        let registry = RippedDiscRegistry(storeURL: tmpStoreURL)
+        let entry = RippedDiscEntry(date: Date(),
+                                    discName: "Foo",
+                                    publishedPath: "/Volumes/NAS/Movies/Foo/Foo.mkv")
+        await registry.record(fingerprint: "abc", entry: entry)
+        let got = await registry.entry(forFingerprint: "abc")
+        XCTAssertEqual(got, entry)
+    }
+
+    func testLookupMissReturnsNil() async {
+        let registry = RippedDiscRegistry(storeURL: tmpStoreURL)
+        let got = await registry.entry(forFingerprint: "nope")
+        XCTAssertNil(got)
+    }
+
+    func testRecordPersistsAcrossReinit() async {
+        let r1 = RippedDiscRegistry(storeURL: tmpStoreURL)
+        let entry = RippedDiscEntry(date: Date(timeIntervalSince1970: 100),
+                                    discName: "Bar",
+                                    publishedPath: "/path")
+        await r1.record(fingerprint: "xyz", entry: entry)
+
+        let r2 = RippedDiscRegistry(storeURL: tmpStoreURL)
+        let got = await r2.entry(forFingerprint: "xyz")
+        XCTAssertEqual(got, entry, "entry must survive new instance reading from disk")
+    }
+
+    func testIdempotentRecord() async {
+        let registry = RippedDiscRegistry(storeURL: tmpStoreURL)
+        let entry = RippedDiscEntry(date: Date(timeIntervalSince1970: 200),
+                                    discName: "Same",
+                                    publishedPath: "/")
+        await registry.record(fingerprint: "k", entry: entry)
+        let firstMtime = (try? FileManager.default
+            .attributesOfItem(atPath: tmpStoreURL.path)[.modificationDate]) as? Date
+        XCTAssertNotNil(firstMtime)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        await registry.record(fingerprint: "k", entry: entry)  // no-op
+        let secondMtime = (try? FileManager.default
+            .attributesOfItem(atPath: tmpStoreURL.path)[.modificationDate]) as? Date
+        XCTAssertEqual(firstMtime, secondMtime,
+                       "redundant record must not rewrite the file")
+    }
+
+    func testForgetRemovesEntry() async {
+        let registry = RippedDiscRegistry(storeURL: tmpStoreURL)
+        await registry.record(fingerprint: "a", entry: RippedDiscEntry(date: Date(), discName: "x", publishedPath: ""))
+        await registry.forget(fingerprint: "a")
+        let got = await registry.entry(forFingerprint: "a")
+        XCTAssertNil(got)
+    }
+
+    func testClearRemovesAll() async {
+        let registry = RippedDiscRegistry(storeURL: tmpStoreURL)
+        await registry.record(fingerprint: "a", entry: RippedDiscEntry(date: Date(), discName: "x", publishedPath: ""))
+        await registry.record(fingerprint: "b", entry: RippedDiscEntry(date: Date(), discName: "y", publishedPath: ""))
+        await registry.clear()
+        let all = await registry.all()
+        XCTAssertTrue(all.isEmpty)
+    }
+
+    func testAllReturnsMostRecentFirst() async {
+        let registry = RippedDiscRegistry(storeURL: tmpStoreURL)
+        let older = RippedDiscEntry(date: Date(timeIntervalSince1970: 100), discName: "old", publishedPath: "")
+        let newer = RippedDiscEntry(date: Date(timeIntervalSince1970: 200), discName: "new", publishedPath: "")
+        await registry.record(fingerprint: "old", entry: older)
+        await registry.record(fingerprint: "new", entry: newer)
+        let all = await registry.all()
+        XCTAssertEqual(all.first?.fingerprint, "new")
+        XCTAssertEqual(all.last?.fingerprint, "old")
+    }
+}

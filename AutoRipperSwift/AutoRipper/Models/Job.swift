@@ -44,6 +44,11 @@ struct Job: Identifiable, Sendable, Codable {
     /// Where in the publish step we are. Used by retry-from-phase logic and by
     /// the relaunch cleanup to know whether to nuke a `<dest>.partial/`.
     var publishPhase: PublishPhase = .notStarted
+    /// Stable disc fingerprint computed at scan time. Persisted with the job
+    /// so v3.7.1's `RippedDiscRegistry` can record it when publish completes.
+    /// Optional for backward compat — old jobs in the store don't have one,
+    /// and we just skip recording for them.
+    var discFingerprint: String?
     var status: JobStatus = .queued
     var error: String = ""
     var progress: Int = 0
@@ -77,7 +82,7 @@ struct Job: Identifiable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
-             workDir, publishedFile, publishPhase,
+             workDir, publishedFile, publishPhase, discFingerprint,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
@@ -85,7 +90,7 @@ struct Job: Identifiable, Sendable, Codable {
              logLines, createdAt, finishedAt
     }
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         self.discName = discName
         self.rippedFile = rippedFile
@@ -98,6 +103,7 @@ struct Job: Identifiable, Sendable, Codable {
         self.seasonNumber = seasonNumber
         self.episodeNumber = episodeNumber
         self.episodeTitle = episodeTitle
+        self.discFingerprint = discFingerprint
     }
 
     /// Append a streaming log line (capped at 200 to keep JSON small).

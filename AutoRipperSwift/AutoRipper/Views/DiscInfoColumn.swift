@@ -26,6 +26,10 @@ struct DiscInfoColumn: View {
                 identityBlock
                 Divider()
                 identifyBlock
+                if let prior = ripVM.previousRipMatch {
+                    alreadyRippedBanner(prior: prior)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
                 if info.looksLikeTVSeason && !ripVM.titleIntents.values.contains(.episode) {
                     TVDetectBanner(ripVM: ripVM)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -210,6 +214,55 @@ struct DiscInfoColumn: View {
     }
 
     // (rippingBlock from previous version dropped — replaced by hero version above)
+
+    // MARK: - Already-ripped banner (v3.7.1)
+
+    @ViewBuilder
+    private func alreadyRippedBanner(prior: RippedDiscEntry) -> some View {
+        let formatter = DateFormatter()
+        let _ = { formatter.dateStyle = .medium; formatter.timeStyle = .short }()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Already ripped")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Dismiss") { ripVM.previousRipMatch = nil }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+            Text("This disc was published \(prior.date, formatter: relativeDateFormatter) (\(prior.discName))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if !prior.publishedPath.isEmpty {
+                Text(prior.publishedPath)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Text("Re-ripping will overwrite the existing same-name file in the library.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.orange.opacity(0.30), lineWidth: 1)
+        )
+    }
+
+    private var relativeDateFormatter: RelativeDateTimeFormatter {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }
 
     // MARK: - Preset
 

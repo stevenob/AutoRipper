@@ -87,8 +87,8 @@ struct ContentView: View {
             Text(ripVM.errorMessage ?? "")
         }
         .onAppear {
-            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle in
-                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: season, episodeNumber: episode, episodeTitle: episodeTitle)
+            ripVM.onRipComplete = { [weak queueVM] name, file, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint in
+                queueVM?.addJob(discName: name, rippedFile: file, ripElapsed: elapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: season, episodeNumber: episode, episodeTitle: episodeTitle, discFingerprint: discFingerprint)
             }
             NotificationService.shared.requestPermission()
             updateService.checkForUpdates()

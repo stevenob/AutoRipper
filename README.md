@@ -24,6 +24,7 @@ Built with Swift and SwiftUI for macOS 14+.
 | 💬 **Discord** | Live-updating job card per title + notifications |
 | 💾 **NAS Upload** | Copies to NAS, cleans up local files |
 | 📺 **Library refresh** | Optional Plex / Jellyfin webhooks fired after publish so newly ripped media shows up in clients within seconds, not minutes |
+| 🔁 **Duplicate detection** | Each scanned disc is fingerprinted (title structure + sizes); re-inserting a previously-ripped disc surfaces an "Already ripped on \<date\>" banner |
 | 🚧 **Rip Scratch Dir** | Optional local-SSD scratch dir for slow-NAS setups — keeps bandwidth-hungry rips off the network |
 | 🔔 **Notifications** | macOS + Discord alerts for scan, rip, and failures |
 | 🔄 **Update Checker** | Checks GitHub Releases on launch |

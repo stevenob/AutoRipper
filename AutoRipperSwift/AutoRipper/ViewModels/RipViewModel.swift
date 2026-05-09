@@ -39,6 +39,13 @@ final class RipViewModel: ObservableObject {
     @Published var lastCompletedMedia: MediaResult?
     /// Display name of the disc whose rip just finished (for the "next disc" hero).
     @Published var lastCompletedDiscName: String?
+    /// Set by `scanDisc` after each scan. When non-nil, the inserted disc's
+    /// fingerprint already exists in `RippedDiscRegistry` — i.e., the user
+    /// has previously ripped this exact disc. UI uses this to show a
+    /// "Already ripped on <date>" banner so the user doesn't accidentally
+    /// re-rip the same content during a long batch session.
+    /// Cleared on new scan or banner dismiss.
+    @Published var previousRipMatch: RippedDiscEntry?
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
@@ -67,8 +74,8 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -324,6 +331,7 @@ final class RipViewModel: ObservableObject {
         selectedTitles = []
         discCandidates = []
         unidentifiedDiscName = nil
+        previousRipMatch = nil
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -345,6 +353,12 @@ final class RipViewModel: ObservableObject {
                 for title in info.titles where title.durationSeconds >= config.minDuration {
                     selectedTitles.insert(title.id)
                 }
+                // Check duplicate-rip registry. Compute fingerprint and look
+                // it up; surface the prior entry on the model so the UI can
+                // banner-warn the user.
+                let fp = DiscFingerprintService.fingerprint(info)
+                let prior = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
+                self.previousRipMatch = prior
                 let displayName = info.mediaTitle.isEmpty ? info.name : info.mediaTitle
                 statusText = "Scanned: \(displayName) — \(info.titles.count) titles"
                 NotificationService.shared.notify(title: "Scan Complete", message: "\(displayName) — \(info.titles.count) titles")
@@ -582,8 +596,12 @@ final class RipViewModel: ObservableObject {
                         // TV episode assignment (populated by v3.3.0 picker UI; nil today
                         // unless the user has manually injected one via titleEpisodeAssignments).
                         let assignment = episodeAssignment(for: tid)
+                        // Compute disc fingerprint from the current scan info
+                        // and thread it through to the queue, so v3.7.1's
+                        // RippedDiscRegistry can record the publish.
+                        let discFp = DiscFingerprintService.fingerprint(info)
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
-                                       assignment?.season, assignment?.episode, assignment?.title)
+                                       assignment?.season, assignment?.episode, assignment?.title, discFp)
                     }
                 } catch {
                     sizeMonitor.cancel()
@@ -811,6 +829,11 @@ final class RipViewModel: ObservableObject {
                 info.autoLabel()
                 await lookupTMDb(for: &info)
                 self.discInfo = info
+                // Even in Full Auto, run the duplicate check — surfaces in
+                // the disc panel if the user happens to glance at the screen
+                // mid-batch. Doesn't gate the rip; Full Auto proceeds.
+                let fp = DiscFingerprintService.fingerprint(info)
+                self.previousRipMatch = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
                 isScanning = false
 
                 // Pick the largest title above min duration

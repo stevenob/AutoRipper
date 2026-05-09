@@ -86,8 +86,8 @@ final class QueueViewModel: ObservableObject {
         FileLogger.shared.info("queue", "loaded \(loaded.count) jobs (interrupted: \(rescued), pruned: \(pruned))")
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle, discFingerprint: discFingerprint)
         jobs.append(job)
         let extra = editionLabel.map { " {edition-\($0)}" } ?? ""
         let ep = (seasonNumber != nil || episodeNumber != nil)
@@ -458,6 +458,19 @@ final class QueueViewModel: ObservableObject {
                 jobs[index].publishPhase = .done
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.finish("nas", detail: publishedDir.path)
+
+                // v3.7.1: record this disc as published in the registry so
+                // future re-insertions of the same disc surface a "Already
+                // ripped on <date>" banner. Only records if a fingerprint
+                // was supplied (older queue jobs may not have one).
+                if let fp = jobs[index].discFingerprint, !fp.isEmpty {
+                    let entry = RippedDiscEntry(
+                        date: Date(),
+                        discName: jobs[index].discName,
+                        publishedPath: publishedDir.path
+                    )
+                    Task { await RippedDiscRegistry.shared.record(fingerprint: fp, entry: entry) }
+                }
 
                 // v3.7: best-effort library refresh hooks. Fire after a
                 // successful publish so newly ripped media shows up in Plex /
