@@ -220,16 +220,10 @@ struct DiscPaneView: View {
             Toggle(isOn: Binding(
                 get: { ripVM.fullAutoEnabled },
                 set: { ripVM.fullAutoEnabled = $0 }
-            )) { Label("Full Auto", systemImage: "bolt.fill") }
+            )) { Label("Auto", systemImage: "bolt.fill") }
                 .toggleStyle(.checkbox)
                 .disabled(ripVM.isScanning || ripVM.isRipping)
-
-            Toggle(isOn: $ripVM.batchModeEnabled) {
-                Label("Batch", systemImage: "rectangle.stack.fill")
-            }
-            .toggleStyle(.checkbox)
-            .disabled(!ripVM.fullAutoEnabled)
-            .help("After each disc, eject and wait for the next one. Requires Full Auto.")
+                .help("Hands-free mode: insert disc → app rips, encodes, organizes, uploads. Loops to the next disc until you turn it off.")
 
             Text("Skip under:").foregroundStyle(.secondary).font(.caption)
             Stepper(value: $config.minDuration, in: 0...7200, step: 60) {

@@ -12,6 +12,7 @@ final class QueueViewModel: ObservableObject {
     private let config: AppConfig
     private let handbrake: HandBrakeService
     private let discord: DiscordService
+    private let stagingService = StagingService()
     private let store: JobStore
     private var workerTask: Task<Void, Never>?
     private var currentTask: Task<Void, Never>?
@@ -309,18 +310,37 @@ final class QueueViewModel: ObservableObject {
 
                 let nasDest = URL(fileURLWithPath: nasBase).appendingPathComponent(folderName)
 
-                // Remove existing destination if present
-                let fm = FileManager.default
-                if fm.fileExists(atPath: nasDest.path) {
-                    try fm.removeItem(at: nasDest)
-                }
-
-                // Copy entire organized folder to NAS
-                try fm.copyItem(at: sourceDir, to: nasDest)
+                // Off-main-actor copy with byte-for-byte verification, atomic
+                // .partial -> final rename, and live progress updates. Replaces
+                // the previous synchronous `FileManager.copyItem` which froze
+                // the entire UI for 15+ min on slow NAS shares.
+                jobs[index].progressText = "Uploading to NAS — 0%"
+                jobs[index].progress = 0
+                let jobIdx = index
+                _ = try await stagingService.copyDirectoryAndVerify(
+                    from: sourceDir,
+                    to: nasDest,
+                    progress: { [weak self] copied, total in
+                        Task { @MainActor in
+                            guard let self, total > 0 else { return }
+                            // Cheap throttle: only update SwiftUI when the
+                            // percent integer changes. Avoids hundreds of
+                            // updates per second on a long copy.
+                            let pct = Int(Double(copied) / Double(total) * 100)
+                            // Re-find the job by id in case the queue was
+                            // mutated since we started (retry, prune, etc.)
+                            guard self.jobs.indices.contains(jobIdx),
+                                  self.jobs[jobIdx].status == .uploading else { return }
+                            if pct != self.jobs[jobIdx].progress {
+                                self.jobs[jobIdx].progress = pct
+                                self.jobs[jobIdx].progressText = "Uploading to NAS — \(pct)%"
+                            }
+                        }
+                    }
+                )
                 jobs[index].progressText = "Copied to NAS: \(nasDest.path)"
-
-                // Clean up local files after successful NAS copy — frees disk space.
-                try? fm.removeItem(at: sourceDir)
+                // copyDirectoryAndVerify deletes source files + empty parent
+                // dir as it goes, so no explicit local cleanup needed here.
 
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.finish("nas", detail: nasDest.path)

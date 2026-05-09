@@ -633,3 +633,134 @@ final class InFlightRipTests: XCTestCase {
         XCTAssertEqual(round.stagingDest, "/Volumes/NAS/Downloaded/Movie/title.mkv")
     }
 }
+
+// MARK: - StagingService directory copy tests
+
+final class StagingDirectoryTests: XCTestCase {
+
+    private var tmpRoot: URL!
+
+    override func setUp() {
+        super.setUp()
+        tmpRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("staging-dir-test-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tmpRoot, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tmpRoot)
+        super.tearDown()
+    }
+
+    private func writeFile(at url: URL, sizeBytes: Int) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var data = Data(count: sizeBytes)
+        for i in 0..<min(sizeBytes, 256) { data[i] = UInt8(i & 0xFF) }
+        try data.write(to: url)
+    }
+
+    func testCopyDirectoryHappyPath() async throws {
+        let source = tmpRoot.appendingPathComponent("source")
+        let dest   = tmpRoot.appendingPathComponent("dest")
+
+        // Mirror what AutoRipper would lay down: an MKV plus an NFO + poster.
+        try writeFile(at: source.appendingPathComponent("Movie (Year).mkv"), sizeBytes: 5 * 1024 * 1024)
+        try writeFile(at: source.appendingPathComponent("Movie (Year).nfo"), sizeBytes: 4096)
+        try writeFile(at: source.appendingPathComponent("poster.jpg"),       sizeBytes: 80_000)
+
+        let service = StagingService()
+        let result = try await service.copyDirectoryAndVerify(from: source, to: dest)
+
+        XCTAssertEqual(result, dest)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("Movie (Year).mkv").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("Movie (Year).nfo").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("poster.jpg").path))
+        // Source dir is consumed during copy.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        // No partial scaffold left behind.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path + ".partial"))
+    }
+
+    func testCopyDirectoryPreservesNestedStructure() async throws {
+        let source = tmpRoot.appendingPathComponent("show")
+        let dest   = tmpRoot.appendingPathComponent("staged-show")
+
+        try writeFile(at: source.appendingPathComponent("Season 01/Show - S01E01.mkv"), sizeBytes: 1024 * 1024)
+        try writeFile(at: source.appendingPathComponent("Season 01/Show - S01E02.mkv"), sizeBytes: 1024 * 1024)
+        try writeFile(at: source.appendingPathComponent("Season 02/Show - S02E01.mkv"), sizeBytes: 1024 * 1024)
+
+        let service = StagingService()
+        _ = try await service.copyDirectoryAndVerify(from: source, to: dest)
+
+        let fm = FileManager.default
+        XCTAssertTrue(fm.fileExists(atPath: dest.appendingPathComponent("Season 01/Show - S01E01.mkv").path))
+        XCTAssertTrue(fm.fileExists(atPath: dest.appendingPathComponent("Season 01/Show - S01E02.mkv").path))
+        XCTAssertTrue(fm.fileExists(atPath: dest.appendingPathComponent("Season 02/Show - S02E01.mkv").path))
+    }
+
+    func testCopyDirectoryReplacesExistingDestination() async throws {
+        let source = tmpRoot.appendingPathComponent("new")
+        let dest   = tmpRoot.appendingPathComponent("dest")
+
+        // Old destination with a stale file the new copy doesn't have — must be
+        // replaced, not merged into.
+        try writeFile(at: dest.appendingPathComponent("stale.txt"), sizeBytes: 32)
+        try writeFile(at: source.appendingPathComponent("new.mkv"), sizeBytes: 4 * 1024 * 1024)
+
+        let service = StagingService()
+        _ = try await service.copyDirectoryAndVerify(from: source, to: dest)
+
+        let fm = FileManager.default
+        XCTAssertTrue(fm.fileExists(atPath: dest.appendingPathComponent("new.mkv").path))
+        XCTAssertFalse(fm.fileExists(atPath: dest.appendingPathComponent("stale.txt").path),
+                       "stale destination contents should be replaced, not merged")
+    }
+
+    func testCopyDirectoryReportsProgressBytes() async throws {
+        let source = tmpRoot.appendingPathComponent("src")
+        let dest   = tmpRoot.appendingPathComponent("dst")
+        try writeFile(at: source.appendingPathComponent("a.bin"), sizeBytes: 6 * 1024 * 1024)
+        try writeFile(at: source.appendingPathComponent("b.bin"), sizeBytes: 4 * 1024 * 1024)
+        let expectedTotal: Int64 = 10 * 1024 * 1024
+
+        actor Counter {
+            var lastCopied: Int64 = 0
+            var lastTotal: Int64 = 0
+            var sawIncreasing = true
+            var prev: Int64 = 0
+            func tick(_ copied: Int64, _ total: Int64) {
+                if copied < prev { sawIncreasing = false }
+                prev = copied
+                lastCopied = copied
+                lastTotal = total
+            }
+        }
+        let counter = Counter()
+        let service = StagingService()
+        _ = try await service.copyDirectoryAndVerify(from: source, to: dest, progress: { copied, total in
+            Task { await counter.tick(copied, total) }
+        })
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let lastCopied = await counter.lastCopied
+        let lastTotal = await counter.lastTotal
+        let monotone = await counter.sawIncreasing
+        XCTAssertEqual(lastTotal, expectedTotal)
+        XCTAssertEqual(lastCopied, expectedTotal,
+                       "final progress must equal total bytes")
+        XCTAssertTrue(monotone, "progress must be monotonically non-decreasing")
+    }
+
+    func testCopyDirectoryFailsForMissingSource() async throws {
+        let source = tmpRoot.appendingPathComponent("ghost")
+        let dest   = tmpRoot.appendingPathComponent("dst")
+        let service = StagingService()
+        do {
+            _ = try await service.copyDirectoryAndVerify(from: source, to: dest)
+            XCTFail("expected sourceMissing")
+        } catch let err as StagingError {
+            if case .sourceMissing = err { return }
+            XCTFail("wrong error: \(err)")
+        }
+    }
+}

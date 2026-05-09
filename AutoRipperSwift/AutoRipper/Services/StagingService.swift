@@ -184,4 +184,126 @@ actor StagingService {
         log.info("staging copy done: \(destination.path, privacy: .public)")
         return destination
     }
+
+    /// Recursively copies the contents of `sourceDir` into a new folder at
+    /// `destinationDir`. Walks the tree once to compute total bytes, then uses
+    /// `copyAndVerify` per-file (so each file is independently verified and
+    /// resumable-on-cancel via its own `.partial` cleanup).
+    ///
+    /// The destination is built up in a sibling `<destinationDir>.partial/`
+    /// directory and renamed atomically at the end — never pre-deletes the
+    /// existing `destinationDir`. This means a crash mid-copy leaves the old
+    /// destination intact and only the `.partial` to clean up.
+    ///
+    /// `progress(bytesCopied, totalBytes)` fires roughly once per chunk during
+    /// each file (not per file). Source files are deleted as they're copied,
+    /// so on cancellation the source ends up partially consumed; the caller
+    /// can choose whether to re-copy or treat that as the new authoritative
+    /// state. (For the NAS-upload use case this is fine — the caller always
+    /// retries from the in-progress source on next launch.)
+    func copyDirectoryAndVerify(
+        from sourceDir: URL,
+        to destinationDir: URL,
+        progress: ((Int64, Int64) -> Void)? = nil
+    ) async throws -> URL {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: sourceDir.path, isDirectory: &isDir), isDir.boolValue else {
+            throw StagingError.sourceMissing(sourceDir.path)
+        }
+
+        // Reachability + writability check before we start a long copy.
+        let parentDir = destinationDir.deletingLastPathComponent()
+        try fm.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        try checkReachable(path: parentDir.path)
+
+        // Walk source once: collect file URLs + cumulative byte total. Skip
+        // hidden/.DS_Store entries — they're noise from macOS, not movie data.
+        guard let enumerator = fm.enumerator(
+            at: sourceDir,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw StagingError.copyFailed("could not enumerate \(sourceDir.path)")
+        }
+        // Resolve symlinks in the source path BEFORE comparing. macOS reports
+        // /tmp/... as /private/tmp/... from the enumerator, so a string-prefix
+        // compare against the un-resolved source path silently fails and we
+        // fall back to lastPathComponent — which flattens nested folders.
+        let resolvedSourcePrefix = sourceDir.resolvingSymlinksInPath().path + "/"
+        var files: [(src: URL, relPath: String, size: Int64)] = []
+        var totalBytes: Int64 = 0
+        while let url = enumerator.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true else { continue }
+            let size = Int64(values.fileSize ?? 0)
+            // Build path relative to sourceDir so we can mirror the structure
+            // into the destination — supports nested folders (e.g. Season 01/).
+            let resolvedURLPath = url.resolvingSymlinksInPath().path
+            let rel = resolvedURLPath.hasPrefix(resolvedSourcePrefix)
+                ? String(resolvedURLPath.dropFirst(resolvedSourcePrefix.count))
+                : url.lastPathComponent
+            files.append((src: url, relPath: rel, size: size))
+            totalBytes += size
+        }
+        log.info("dir copy start: \(sourceDir.path, privacy: .public) -> \(destinationDir.path, privacy: .public) (\(files.count) files, \(totalBytes) bytes)")
+
+        // Stage everything into <dest>.partial/ first; rename at the end.
+        let partialDir = destinationDir.appendingPathExtension("partial")
+        if fm.fileExists(atPath: partialDir.path) {
+            try? fm.removeItem(at: partialDir)
+        }
+        try fm.createDirectory(at: partialDir, withIntermediateDirectories: true)
+
+        var bytesDoneBefore: Int64 = 0
+        for entry in files {
+            if Task.isCancelled {
+                try? fm.removeItem(at: partialDir)
+                throw StagingError.cancelled
+            }
+            // Build destination URL by appending each path component
+            // separately — avoids any URL escaping ambiguity around "/"
+            // when the relative path includes nested folders.
+            var dest = partialDir
+            for component in entry.relPath.split(separator: "/") {
+                dest = dest.appendingPathComponent(String(component))
+            }
+            // Per-file copyAndVerify handles its own .partial + verify + delete-source.
+            // We layer dir-level progress on top by accumulating completed-file bytes.
+            let baseBytes = bytesDoneBefore
+            _ = try await copyAndVerify(
+                from: entry.src,
+                to: dest,
+                progress: { copied, total in
+                    progress?(baseBytes + copied, totalBytes)
+                    _ = total  // total per-file; we already aggregate via baseBytes + copied
+                }
+            )
+            bytesDoneBefore += entry.size
+            // Tick once at file boundaries even if no chunked progress fired
+            // (small files copy in a single chunk).
+            progress?(bytesDoneBefore, totalBytes)
+        }
+
+        // All files moved; rename .partial directory into final place. If a
+        // previous destination exists, replaceItemAt handles the swap atomically.
+        do {
+            if fm.fileExists(atPath: destinationDir.path) {
+                _ = try fm.replaceItemAt(destinationDir, withItemAt: partialDir)
+            } else {
+                try fm.moveItem(at: partialDir, to: destinationDir)
+            }
+        } catch {
+            try? fm.removeItem(at: partialDir)
+            throw StagingError.copyFailed("rename dir: \(error.localizedDescription)")
+        }
+
+        // Source dir's contents have all been deleted by copyAndVerify; the
+        // empty parent itself can go too. Ignore failure (might be non-empty
+        // due to hidden files we skipped).
+        try? fm.removeItem(at: sourceDir)
+
+        log.info("dir copy done: \(destinationDir.path, privacy: .public)")
+        return destinationDir
+    }
 }

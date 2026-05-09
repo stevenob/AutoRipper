@@ -17,10 +17,11 @@ final class RipViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var detectedDiscType: String = ""
     @Published var detectedDiscName: String = ""
-    /// When on, after a Full Auto rip ejects the disc, the app polls for the next
-    /// disc and runs Full Auto again automatically. Disables on the next call to
-    /// `abort()` or when the user toggles it off.
-    @Published var batchModeEnabled: Bool = false
+    /// Active phase of the rip pipeline currently driven by THIS view model.
+    /// Used by the disc hero block to show "RIPPING" vs "STAGING" instead of
+    /// always saying "RIPPING" while we're actually copying files to the NAS
+    /// during staging. Cleared back to `.idle` between titles and at end.
+    @Published var activePhase: RipPhase = .idle
     /// Set after a scan when TMDb couldn't identify the disc. UI shows a dismissible
     /// banner prompting the user to set per-title search overrides. Cleared on dismiss
     /// or new scan.
@@ -395,6 +396,7 @@ final class RipViewModel: ObservableObject {
                 statusText = "Ripping title \(tid) (\(idx + 1)/\(titlesToRip.count))…"
                 currentRippingTitleId = tid
                 titleRipStatuses[tid] = .ripping(percent: 0)
+                activePhase = .ripping
                 let totalTitles = titlesToRip.count
                 let titleIndex = idx
                 let titleStart = Date()
@@ -494,6 +496,11 @@ final class RipViewModel: ObservableObject {
                             ripFile: rippedFile.path,
                             stagingDest: dest.path
                         )
+                        // Phase shift: hero block now reads "STAGING …%" and the
+                        // bar resets so it reflects staging progress, not the
+                        // already-100%-rip.
+                        activePhase = .staging
+                        ripProgress = 0
                         statusText = "Staging title \(tid) (\(titleIndex + 1)/\(totalTitles)) → \(config.outputDir)…"
                         FileLogger.shared.info("rip-vm",
                             "staging title \(tid): \(rippedFile.path) -> \(dest.path)")
@@ -504,7 +511,14 @@ final class RipViewModel: ObservableObject {
                                 progress: { [weak self] copied, total in
                                     Task { @MainActor in
                                         guard let self else { return }
-                                        let pct = total > 0 ? Int(Double(copied) / Double(total) * 100) : 0
+                                        let stagePct = total > 0 ? Double(copied) / Double(total) : 0
+                                        // Combine staging across all titles in the
+                                        // disc so the bar advances monotonically.
+                                        let overall = (Double(titleIndex) + stagePct) / Double(totalTitles)
+                                        if overall > self.ripProgress {
+                                            self.ripProgress = overall
+                                        }
+                                        let pct = Int(stagePct * 100)
                                         self.statusText = "Staging title \(tid) (\(titleIndex + 1)/\(totalTitles)) — \(pct)%"
                                     }
                                 }
@@ -515,6 +529,7 @@ final class RipViewModel: ObservableObject {
                             // (next launch) will leave it intact since the .partial
                             // dest is what we explicitly removed below.
                             config.inFlightRip = nil
+                            activePhase = .idle
                             titleRipStatuses[tid] = .failed(message: "Staging failed: \(error.localizedDescription)")
                             statusText = "Staging failed: \(error.localizedDescription)"
                             errorMessage = error.localizedDescription
@@ -534,6 +549,7 @@ final class RipViewModel: ObservableObject {
 
                     let titleElapsed = Date().timeIntervalSince(titleStart)
                     config.inFlightRip = nil
+                    activePhase = .idle
                     titleRipStatuses[tid] = .done
                     // In Full Auto, every successfully-ripped title flows through the
                     // encode → organize → scrape → NAS pipeline as its own queue job.
@@ -630,51 +646,49 @@ final class RipViewModel: ObservableObject {
             ripProgress = 0
             logLines = []
             titleRipStatuses = [:]
-            statusText = batchModeEnabled && fullAutoEnabled
-                ? "Batch — insert next disc"
+            statusText = fullAutoEnabled
+                ? "Auto — insert next disc"
                 : "Ready — insert next disc"
 
-            // Batch mode: wait for the next disc to appear, then auto-Full-Auto.
-            if batchModeEnabled && fullAutoEnabled {
+            // Auto mode: wait for the next disc to appear, then run again.
+            if fullAutoEnabled {
                 await waitForNextDiscAndContinue()
             }
         }
     }
 
-    /// Polls drutil until a disc is detected (or the user disables batch mode /
-    /// aborts), then kicks off Full Auto. Used by `batch-mode`.
+    /// Polls drutil until a disc is detected (or the user disables Auto mode /
+    /// aborts), then kicks off Full Auto on the new disc.
     ///
     /// Two-phase wait so we don't trigger on the disc that *just* finished:
     ///   1. Wait until drutil reports NO disc (eject completed).
     ///   2. Wait until drutil reports a disc (next one inserted).
     private func waitForNextDiscAndContinue() async {
-        FileLogger.shared.info("rip-vm", "batch: waiting for eject to complete")
-        statusText = "Batch — waiting for eject…"
+        FileLogger.shared.info("rip-vm", "auto: waiting for eject to complete")
+        statusText = "Auto — waiting for eject…"
         // Phase 1: wait for the drive to be empty.
         // Bail out after ~60s if drutil never reports empty (some drives lie).
         var waited = 0
-        while batchModeEnabled && !Task.isCancelled && waited < 60 {
+        while fullAutoEnabled && !Task.isCancelled && waited < 60 {
             let detected = await currentDiscType()
             if detected.isEmpty { break }
             try? await Task.sleep(for: .seconds(2))
             waited += 2
         }
-        guard batchModeEnabled, !Task.isCancelled else {
-            FileLogger.shared.info("rip-vm", "batch: stopped during eject wait")
+        guard fullAutoEnabled, !Task.isCancelled else {
+            FileLogger.shared.info("rip-vm", "auto: stopped during eject wait")
             return
         }
 
-        FileLogger.shared.info("rip-vm", "batch: drive empty, waiting for next disc")
-        statusText = batchModeEnabled
-            ? "Batch — insert next disc"
-            : "Ready — insert next disc"
+        FileLogger.shared.info("rip-vm", "auto: drive empty, waiting for next disc")
+        statusText = "Auto — insert next disc"
 
         // Phase 2: poll for new disc insertion.
-        while batchModeEnabled && !Task.isCancelled {
+        while fullAutoEnabled && !Task.isCancelled {
             let detected = await currentDiscType()
             if !detected.isEmpty {
-                FileLogger.shared.info("rip-vm", "batch: new disc detected (\(detected)), starting Full Auto")
-                statusText = "Batch — \(detected) detected, scanning…"
+                FileLogger.shared.info("rip-vm", "auto: new disc detected (\(detected)), starting Full Auto")
+                statusText = "Auto — \(detected) detected, scanning…"
                 // Give MakeMKV a moment to see the freshly-mounted disc — some drives
                 // report it in drutil before the volume actually mounts.
                 try? await Task.sleep(for: .seconds(3))
@@ -683,7 +697,7 @@ final class RipViewModel: ObservableObject {
             }
             try? await Task.sleep(for: .seconds(5))
         }
-        FileLogger.shared.info("rip-vm", "batch: stopped (batchModeEnabled=\(batchModeEnabled))")
+        FileLogger.shared.info("rip-vm", "auto: stopped (fullAutoEnabled=\(fullAutoEnabled))")
     }
 
     /// Synchronous-style query of drutil for current disc type, "" if no disc.
@@ -789,7 +803,10 @@ final class RipViewModel: ObservableObject {
             }
         }
         statusText = "Aborted"
-        batchModeEnabled = false  // abort breaks the batch loop
+        // Abort always exits the auto loop. The user must explicitly re-enable
+        // Full Auto to resume hands-free behavior.
+        fullAutoEnabled = false
+        activePhase = .idle
         config.inFlightRip = nil
     }
 }
@@ -801,6 +818,17 @@ enum TitleRipStatus: Sendable, Equatable {
     case ripping(percent: Int)
     case done
     case failed(message: String)
+}
+
+/// Coarse-grained phase exposed to the disc-view UI so the hero block label
+/// can switch between "RIPPING" and "STAGING" as the rip flow progresses
+/// through MakeMKV → StagingService. Encode/Organize/Scrape/Upload phases
+/// happen later in `QueueViewModel` and are surfaced separately by the queue
+/// view; we only track here the ones owned by `RipViewModel`.
+enum RipPhase: Sendable, Equatable {
+    case idle
+    case ripping
+    case staging
 }
 
 /// TV episode assignment for a single title on a series disc. Set by the

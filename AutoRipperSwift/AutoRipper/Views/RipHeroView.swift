@@ -273,7 +273,9 @@ struct InsertNextDiscHero: View {
                         Image(systemName: ripVM.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
                             .font(.system(size: 64))
                         if ripVM.fullAutoEnabled {
-                            Text(ripVM.batchModeEnabled ? "Insert next disc" : "Full Auto")
+                            // In Auto mode, the same button shows the next-disc affordance
+                            // both immediately after enabling and after each completed disc.
+                            Text(ripVM.lastCompletedMedia == nil ? "Auto" : "Insert next disc")
                                 .font(.title2)
                                 .fontWeight(.semibold)
                         } else if !ripVM.detectedDiscType.isEmpty {

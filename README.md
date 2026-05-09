@@ -10,8 +10,7 @@ Built with Swift and SwiftUI for macOS 14+.
 
 | | |
 |---|---|
-| ⚡ **Full Auto** | One click: scan → rip → encode → organize → artwork → NAS → eject |
-| 📚 **Batch Mode** | Rip → eject → wait for next disc → repeat. Feed it a stack and walk away. |
+| ⚡ **Auto** | One toggle: insert disc → app rips, encodes, organizes, scrapes, uploads, ejects → polls for the next disc → repeat. Feed it a stack and walk away. |
 | 🎬 **Smart Detection** | Auto-detects DVD or Blu-ray, labels Main Feature vs Extras vs Trailers |
 | 🎯 **Per-Title Intent** | Mark each title as Movie / Episode / Edition / Extra — collections, double features, and director's cuts all handled correctly |
 | 🎞️ **Editions** | Theatrical / Unrated / Director's Cut / Extended / Final Cut → Plex/Jellyfin `{edition-X}` filenames in a shared movie folder |
@@ -32,12 +31,12 @@ Built with Swift and SwiftUI for macOS 14+.
 ```
 Insert Disc → App detects DVD/Blu-ray
                     │
-        ┌── Full Auto ON ──→ Scan → Rip selected titles
-        │                         → Per-title: encode → organize → scrape → NAS
-        │                         → Eject + notify
-        │                         (Batch Mode → loop to next disc)
+        ┌── Auto ON ─────→ Scan → Rip selected titles
+        │                       → Per-title: stage → encode → organize → scrape → NAS upload
+        │                       → Eject + notify
+        │                       → Poll for next disc → repeat
         │
-        └── Manual ────────→ Scan → Tag intent per title → Rip
+        └── Auto OFF ────→ Scan → Tag intent per title → Rip
 ```
 
 ### Auto-Selected Presets
@@ -96,16 +95,16 @@ Leave `Rip Scratch Dir` empty to keep the legacy behavior (rip writes directly t
 
 ## Usage
 
-### Full Auto
+### Auto
 
 1. Insert disc — app detects type and name
-2. Check **☑ Full Auto** (and optionally **☑ Batch** to loop), set **Skip under** duration
+2. Check **☑ Auto**, set **Skip under** duration
 3. Click the big button
-4. Insert next disc when it ejects (or sit back if Batch is on)
+4. Walk away. The app rips → stages → encodes → organizes → scrapes → uploads → ejects, then polls for the next disc and does it all again. Click **Abort** to stop the loop.
 
 ### Manual: collections, editions, double features
 
-1. Uncheck Full Auto
+1. Uncheck Auto
 2. Click **Scan DVD** / **Scan Blu-ray**
 3. For each title, set the **Intent** column:
    - **Movie** — type a search override in the inline field if it's a different movie than the disc name (collection discs)

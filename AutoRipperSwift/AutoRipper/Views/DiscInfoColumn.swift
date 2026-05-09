@@ -164,16 +164,22 @@ struct DiscInfoColumn: View {
         let currentTitle = ripVM.currentRippingTitleId.flatMap { tid in
             info.titles.first(where: { $0.id == tid })
         }
+        // Drive the label, color, and pulse from the active phase so it
+        // doesn't always say "RIPPING" when we've actually moved on to the
+        // post-rip staging copy.
+        let isStaging = ripVM.activePhase == .staging
+        let phaseLabel = isStaging ? "STAGING" : "RIPPING"
+        let phaseTint: Color = isStaging ? .orange : .red
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(.red)
+                    .fill(phaseTint)
                     .frame(width: 10, height: 10)
                     .symbolEffect(.pulse, options: .repeating)
-                Text("RIPPING")
+                Text(phaseLabel)
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(phaseTint)
                     .tracking(0.5)
                 Spacer()
                 Text("\(Int(ripVM.ripProgress * 100))%")
@@ -188,16 +194,17 @@ struct DiscInfoColumn: View {
             }
             ProgressView(value: ripVM.ripProgress)
                 .progressViewStyle(.linear)
+                .tint(phaseTint)
             Text(ripVM.statusText)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
         }
         .padding(12)
-        .background(Color.accentColor.opacity(0.10))
+        .background(phaseTint.opacity(0.10))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+                .stroke(phaseTint.opacity(0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
