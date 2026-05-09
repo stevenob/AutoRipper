@@ -890,7 +890,7 @@ private struct JobDetailView: View {
                 pipelineConnector
                 pipelineSegment(label: "Scrape", color: scrapeColor)
                 pipelineConnector
-                pipelineSegment(label: "NAS", color: nasColor)
+                pipelineSegment(label: "Publish", color: nasColor)
             }
             if job.status != .queued && job.status != .done && job.status != .failed {
                 ProgressView(value: Double(job.progress), total: 100)

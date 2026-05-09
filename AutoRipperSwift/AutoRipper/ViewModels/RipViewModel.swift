@@ -486,12 +486,22 @@ final class RipViewModel: ObservableObject {
                     )
                     sizeMonitor.cancel()
 
-                    // Stage to outputDir if a separate ripScratchDir is configured.
-                    // The actor runs the long copy off the main actor; we just await
-                    // its result here. The pipeline waits on this before queuing
-                    // the encode job so downstream stages always see the final path.
+                    // Stage to outputDir ONLY for jobs that won't enter the
+                    // queue pipeline. Queue-bound jobs (full-auto, non-extra)
+                    // skip staging — QueueViewModel does the local-encode
+                    // pipeline straight from scratch and publishes at the end.
+                    //
+                    // Cases that still need staging:
+                    //   * .extra titles (kept as raw rip; never enter queue)
+                    //   * manual-mode rips (no queue at all)
+                    //
+                    // For everything else (full-auto + non-extra), the rip
+                    // file stays in scratch and `file` points there directly.
+                    let titleIntent = intent(for: tid)
+                    let needsStaging = stagingEnabled
+                        && (!fullAutoEnabled || titleIntent == .extra)
                     let file: URL
-                    if stagingEnabled {
+                    if needsStaging {
                         let dest = URL(fileURLWithPath: finalDir)
                             .appendingPathComponent(rippedFile.lastPathComponent)
                         config.inFlightRip = InFlightRip(

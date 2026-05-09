@@ -5,6 +5,17 @@ enum JobStatus: String, Sendable {
     case queued, encoding, organizing, scraping, uploading, done, failed
 }
 
+/// Phase of the publish step (the final NAS hand-off). Used so retry can
+/// resume from the right point and crash-recovery on relaunch can clean up
+/// `<dest>.partial/` scaffolding for jobs interrupted mid-publish.
+enum PublishPhase: String, Sendable, Codable {
+    case notStarted    // publish hasn't begun (or job hasn't reached publish yet)
+    case copying       // PublishService is per-file copying into <dest>.partial/
+    case verifying     // copy done, verifying byte sizes match
+    case swapping      // partial -> final rename in progress
+    case done          // published; published file lives at job.publishedFile
+}
+
 /// What kind of content a queued title represents. Used by the post-rip pipeline
 /// to decide naming, organizing, and whether to encode at all.
 enum JobIntent: String, Sendable {
@@ -22,6 +33,17 @@ struct Job: Identifiable, Sendable, Codable {
     var resolution: String = ""
     var encodedFile: URL?
     var organizedFile: URL?
+    /// Local-scratch directory the encode/organize/scrape pipeline writes into
+    /// when the local-encode flow is active (v3.6.0+). Allows cleanup-on-crash
+    /// to find and remove the work area when a job is interrupted, and gives
+    /// retry logic a stable anchor for the in-flight workspace.
+    var workDir: URL?
+    /// Final NAS / library path of the published file. Nil until publish
+    /// completes. `Reveal in Finder` and webhook payloads prefer this when set.
+    var publishedFile: URL?
+    /// Where in the publish step we are. Used by retry-from-phase logic and by
+    /// the relaunch cleanup to know whether to nuke a `<dest>.partial/`.
+    var publishPhase: PublishPhase = .notStarted
     var status: JobStatus = .queued
     var error: String = ""
     var progress: Int = 0
@@ -55,6 +77,7 @@ struct Job: Identifiable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
+             workDir, publishedFile, publishPhase,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,

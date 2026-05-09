@@ -764,3 +764,214 @@ final class StagingDirectoryTests: XCTestCase {
         }
     }
 }
+
+// MARK: - PublishService Tests
+
+final class PublishServiceTests: XCTestCase {
+
+    private var tmpRoot: URL!
+
+    override func setUp() {
+        super.setUp()
+        tmpRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("publish-test-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: tmpRoot, withIntermediateDirectories: true)
+    }
+
+    override func tearDown() {
+        try? FileManager.default.removeItem(at: tmpRoot)
+        super.tearDown()
+    }
+
+    private func writeFile(at url: URL, sizeBytes: Int) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        var data = Data(count: sizeBytes)
+        for i in 0..<min(sizeBytes, 256) { data[i] = UInt8(i & 0xFF) }
+        try data.write(to: url)
+    }
+
+    func testPublishMoviePreservesEditionSiblings() async throws {
+        // Library already has a Theatrical edition + a poster; publish a
+        // Director's Cut. Expect both editions + the poster to coexist.
+        let library = tmpRoot.appendingPathComponent("Movies")
+        let movieFolder = library.appendingPathComponent("Blade Runner (1982)")
+        try writeFile(at: movieFolder.appendingPathComponent("Blade Runner (1982).mkv"), sizeBytes: 1024)
+        try writeFile(at: movieFolder.appendingPathComponent("poster.jpg"), sizeBytes: 64)
+
+        let scratchFolder = tmpRoot.appendingPathComponent("scratch/Blade Runner (1982)")
+        try writeFile(
+            at: scratchFolder.appendingPathComponent("Blade Runner (1982) {edition-Director's Cut}.mkv"),
+            sizeBytes: 2048
+        )
+
+        let svc = PublishService()
+        _ = try await svc.publish(localDir: scratchFolder, libraryRoot: library)
+
+        let fm = FileManager.default
+        XCTAssertTrue(fm.fileExists(atPath: movieFolder.appendingPathComponent("Blade Runner (1982).mkv").path),
+                      "Theatrical edition must survive publish of Director's Cut")
+        XCTAssertTrue(fm.fileExists(atPath: movieFolder.appendingPathComponent("poster.jpg").path),
+                      "Poster must survive")
+        XCTAssertTrue(fm.fileExists(atPath: movieFolder.appendingPathComponent("Blade Runner (1982) {edition-Director's Cut}.mkv").path),
+                      "New edition must be present")
+    }
+
+    func testPublishTVPreservesOtherEpisodes() async throws {
+        // Library has Show/Season 01/E01.mkv + E02.mkv. Publish E03.mkv.
+        // Expect all three present.
+        let library = tmpRoot.appendingPathComponent("TV")
+        let showFolder = library.appendingPathComponent("Some Show")
+        try writeFile(at: showFolder.appendingPathComponent("Season 01/Some Show - S01E01.mkv"), sizeBytes: 1024)
+        try writeFile(at: showFolder.appendingPathComponent("Season 01/Some Show - S01E02.mkv"), sizeBytes: 1024)
+
+        let scratchShow = tmpRoot.appendingPathComponent("scratch/Some Show")
+        try writeFile(at: scratchShow.appendingPathComponent("Season 01/Some Show - S01E03.mkv"), sizeBytes: 2048)
+
+        let svc = PublishService()
+        _ = try await svc.publish(localDir: scratchShow, libraryRoot: library)
+
+        let fm = FileManager.default
+        for ep in ["S01E01", "S01E02", "S01E03"] {
+            XCTAssertTrue(
+                fm.fileExists(atPath: showFolder.appendingPathComponent("Season 01/Some Show - \(ep).mkv").path),
+                "\(ep) must be present after publish"
+            )
+        }
+    }
+
+    func testPublishReplacesSameNameFile() async throws {
+        // Re-publishing the same edition name overwrites the prior copy.
+        let library = tmpRoot.appendingPathComponent("Movies")
+        let movieFolder = library.appendingPathComponent("Some Movie (2020)")
+        try writeFile(at: movieFolder.appendingPathComponent("Some Movie (2020).mkv"), sizeBytes: 100)
+
+        let scratchFolder = tmpRoot.appendingPathComponent("scratch/Some Movie (2020)")
+        try writeFile(at: scratchFolder.appendingPathComponent("Some Movie (2020).mkv"), sizeBytes: 555)
+
+        let svc = PublishService()
+        _ = try await svc.publish(localDir: scratchFolder, libraryRoot: library)
+
+        let attrs = try FileManager.default
+            .attributesOfItem(atPath: movieFolder.appendingPathComponent("Some Movie (2020).mkv").path)
+        XCTAssertEqual(attrs[.size] as? Int64, 555,
+                       "same-named file at dest must be overwritten")
+    }
+
+    func testPublishProgressMonotonic() async throws {
+        let scratchFolder = tmpRoot.appendingPathComponent("scratch/Big Movie")
+        try writeFile(at: scratchFolder.appendingPathComponent("Big Movie.mkv"), sizeBytes: 4 * 1024 * 1024)
+        try writeFile(at: scratchFolder.appendingPathComponent("Big Movie.nfo"), sizeBytes: 1024)
+        let library = tmpRoot.appendingPathComponent("Library")
+
+        actor Counter {
+            var prev: Int64 = 0
+            var monotonic = true
+            func tick(_ copied: Int64) {
+                if copied < prev { monotonic = false }
+                prev = copied
+            }
+        }
+        let counter = Counter()
+        let svc = PublishService()
+        _ = try await svc.publish(localDir: scratchFolder, libraryRoot: library, progress: { copied, _ in
+            Task { await counter.tick(copied) }
+        })
+        try await Task.sleep(nanoseconds: 50_000_000)
+        let mono = await counter.monotonic
+        XCTAssertTrue(mono, "publish progress must be monotonically non-decreasing")
+    }
+}
+
+// MARK: - ScratchReservationService tests
+
+final class ScratchReservationServiceTests: XCTestCase {
+
+    func testReserveAndRelease() async {
+        let svc = ScratchReservationService()
+        await svc.reserve(jobId: "a", bytes: 100)
+        await svc.reserve(jobId: "b", bytes: 200)
+        var total = await svc.totalReserved
+        XCTAssertEqual(total, 300)
+        await svc.release(jobId: "a")
+        total = await svc.totalReserved
+        XCTAssertEqual(total, 200)
+    }
+
+    func testReplacingReservationOverwrites() async {
+        let svc = ScratchReservationService()
+        await svc.reserve(jobId: "a", bytes: 100)
+        await svc.reserve(jobId: "a", bytes: 999)
+        let total = await svc.totalReserved
+        XCTAssertEqual(total, 999, "subsequent reserve(jobId:) replaces, not adds")
+    }
+
+    func testCanReserveAccountsForOtherClaims() async {
+        // canReserve at /tmp considers our existing reservations + safety margin.
+        // Use a tiny additionalBytes to avoid flaky outcomes on real free space.
+        let svc = ScratchReservationService()
+        // Pretend something else has already taken a huge chunk.
+        await svc.reserve(jobId: "occupier", bytes: Int64.max - 10)
+        let result = await svc.canReserve(atPath: "/tmp", additionalBytes: 1_000_000_000, safetyMargin: 0)
+        XCTAssertFalse(result.ok, "should refuse when prior reservations consume all space")
+        await svc._testReset()
+    }
+}
+
+// MARK: - URL.sameVolume tests
+
+final class URLSameVolumeTests: XCTestCase {
+
+    func testSamePathIsSameVolume() throws {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+        XCTAssertTrue(url.sameVolume(as: url))
+    }
+
+    func testTwoTempDirsAreSameVolume() throws {
+        let a = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("a-\(UUID().uuidString)")
+        let b = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("b-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: a)
+            try? FileManager.default.removeItem(at: b)
+        }
+        XCTAssertTrue(a.sameVolume(as: b))
+    }
+
+    func testNonexistentPathFailsSafe() {
+        let nope1 = URL(fileURLWithPath: "/nonexistent/path/a")
+        let nope2 = URL(fileURLWithPath: "/another/missing/b")
+        // Either both unreadable -> false (the safe default) or both happen
+        // to resolve to the same root volume -> true. Whatever the result,
+        // the API must not crash.
+        _ = nope1.sameVolume(as: nope2)
+    }
+}
+
+// MARK: - Job model new fields tests
+
+final class JobV360FieldsTests: XCTestCase {
+
+    func testNewFieldsRoundTripThroughCodable() throws {
+        var job = Job(discName: "Foo", rippedFile: URL(fileURLWithPath: "/tmp/foo.mkv"))
+        job.workDir = URL(fileURLWithPath: "/tmp/scratch/Foo")
+        job.publishedFile = URL(fileURLWithPath: "/Volumes/NAS/Movies/Foo/Foo.mkv")
+        job.publishPhase = .swapping
+
+        let data = try JSONEncoder().encode(job)
+        let decoded = try JSONDecoder().decode(Job.self, from: data)
+        XCTAssertEqual(decoded.workDir, job.workDir)
+        XCTAssertEqual(decoded.publishedFile, job.publishedFile)
+        XCTAssertEqual(decoded.publishPhase, .swapping)
+    }
+
+    func testDefaultsAreNilNotStarted() {
+        let job = Job(discName: "Bar", rippedFile: URL(fileURLWithPath: "/tmp/bar.mkv"))
+        XCTAssertNil(job.workDir)
+        XCTAssertNil(job.publishedFile)
+        XCTAssertEqual(job.publishPhase, .notStarted)
+    }
+}

@@ -10,6 +10,7 @@ enum StagingError: Error, LocalizedError {
     case copyFailed(String)
     case verificationFailed(String)
     case cancelled
+    case insufficientSpace(required: Int64, available: Int64, path: String)
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +20,10 @@ enum StagingError: Error, LocalizedError {
         case .copyFailed(let m): return "Staging copy failed: \(m)"
         case .verificationFailed(let m): return "Staging verification failed: \(m)"
         case .cancelled: return "Staging cancelled"
+        case .insufficientSpace(let req, let avail, let path):
+            let reqGB = String(format: "%.1f", Double(req) / 1_073_741_824)
+            let availGB = String(format: "%.1f", Double(avail) / 1_073_741_824)
+            return "Not enough free space at \(path) — need \(reqGB) GB, have \(availGB) GB"
         }
     }
 }
@@ -305,5 +310,225 @@ actor StagingService {
 
         log.info("dir copy done: \(destinationDir.path, privacy: .public)")
         return destinationDir
+    }
+
+    /// Available capacity at `path` accounting for purgeable space, in bytes.
+    /// Uses `volumeAvailableCapacityForImportantUsageKey` per Apple's guidance —
+    /// reflects what apps can realistically use without OS-level reclamation.
+    /// Returns nil if the URL doesn't expose volume info.
+    static func freeBytes(at path: String) -> Int64? {
+        let url = URL(fileURLWithPath: path)
+        let keys: Set<URLResourceKey> = [.volumeAvailableCapacityForImportantUsageKey]
+        guard let values = try? url.resourceValues(forKeys: keys),
+              let available = values.volumeAvailableCapacityForImportantUsage else { return nil }
+        return Int64(available)
+    }
+
+    /// Throws `StagingError.insufficientSpace` if `path`'s volume has less than
+    /// `requiredBytes` of important-usage capacity available. Used as a
+    /// pre-flight check before kicking off a long encode or publish — fail
+    /// quickly with a clear message instead of HandBrake/copy failing
+    /// somewhere mid-stream.
+    func checkFreeSpace(at path: String, requiredBytes: Int64) throws {
+        guard let free = Self.freeBytes(at: path) else {
+            // Best-effort: if we can't even read free space we don't block —
+            // this typically means the path doesn't exist yet, which the
+            // caller will catch in its own way.
+            return
+        }
+        if free < requiredBytes {
+            throw StagingError.insufficientSpace(required: requiredBytes, available: free, path: path)
+        }
+    }
+
+    /// Like `copyDirectoryAndVerify`, but **leaves the source directory and
+    /// its contents intact** until the entire destination has been verified
+    /// and the final swap completes. Used for the publish step where the
+    /// scratch source is the authoritative copy of the encoded library file —
+    /// we never want to be in a state where the source has been partially
+    /// consumed and the destination is also partial.
+    ///
+    /// On any failure (including cancellation), the partial destination is
+    /// removed; the source is untouched. The caller can safely retry from
+    /// the same source on the next launch / job retry.
+    ///
+    /// On success, the final destination exists at `destinationDir` and the
+    /// source directory **still exists** — caller decides when to delete it
+    /// (typically right after `Job.publishedFile` is recorded so a crash in
+    /// between leaves the local copy as a recovery anchor).
+    func copyDirectoryAndVerifyKeepingSource(
+        from sourceDir: URL,
+        to destinationDir: URL,
+        progress: ((Int64, Int64) -> Void)? = nil
+    ) async throws -> URL {
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: sourceDir.path, isDirectory: &isDir), isDir.boolValue else {
+            throw StagingError.sourceMissing(sourceDir.path)
+        }
+
+        let parentDir = destinationDir.deletingLastPathComponent()
+        try fm.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        try checkReachable(path: parentDir.path)
+
+        // Walk source, summing bytes. Same prefix-matching logic as the
+        // destructive variant — uses resolved symlink paths to handle macOS's
+        // /tmp -> /private/tmp shadow.
+        guard let enumerator = fm.enumerator(
+            at: sourceDir,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            throw StagingError.copyFailed("could not enumerate \(sourceDir.path)")
+        }
+        let resolvedSourcePrefix = sourceDir.resolvingSymlinksInPath().path + "/"
+        var files: [(src: URL, relPath: String, size: Int64)] = []
+        var totalBytes: Int64 = 0
+        while let url = enumerator.nextObject() as? URL {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true else { continue }
+            let size = Int64(values.fileSize ?? 0)
+            let resolved = url.resolvingSymlinksInPath().path
+            let rel = resolved.hasPrefix(resolvedSourcePrefix)
+                ? String(resolved.dropFirst(resolvedSourcePrefix.count))
+                : url.lastPathComponent
+            files.append((src: url, relPath: rel, size: size))
+            totalBytes += size
+        }
+        log.info("dir copy (keeping source) start: \(sourceDir.path, privacy: .public) -> \(destinationDir.path, privacy: .public) (\(files.count) files, \(totalBytes) bytes)")
+
+        let partialDir = destinationDir.appendingPathExtension("partial")
+        if fm.fileExists(atPath: partialDir.path) {
+            try? fm.removeItem(at: partialDir)
+        }
+        try fm.createDirectory(at: partialDir, withIntermediateDirectories: true)
+
+        // Per-file copy WITHOUT delete-source. Inline a slimmed `copyAndVerify`
+        // that only reads source and writes dest — never deletes source.
+        var bytesDoneBefore: Int64 = 0
+        for entry in files {
+            if Task.isCancelled {
+                try? fm.removeItem(at: partialDir)
+                throw StagingError.cancelled
+            }
+            var dest = partialDir
+            for component in entry.relPath.split(separator: "/") {
+                dest = dest.appendingPathComponent(String(component))
+            }
+            let baseBytes = bytesDoneBefore
+            try await copyOneFileKeepingSource(
+                from: entry.src,
+                to: dest,
+                progress: { copied in
+                    progress?(baseBytes + copied, totalBytes)
+                }
+            )
+            bytesDoneBefore += entry.size
+            progress?(bytesDoneBefore, totalBytes)
+        }
+
+        // Atomic-ish swap of <dest>.partial -> <dest>. Source is still intact.
+        do {
+            if fm.fileExists(atPath: destinationDir.path) {
+                _ = try fm.replaceItemAt(destinationDir, withItemAt: partialDir)
+            } else {
+                try fm.moveItem(at: partialDir, to: destinationDir)
+            }
+        } catch {
+            try? fm.removeItem(at: partialDir)
+            throw StagingError.copyFailed("rename dir: \(error.localizedDescription)")
+        }
+
+        log.info("dir copy (keeping source) done: \(destinationDir.path, privacy: .public)")
+        return destinationDir
+    }
+
+    /// Internal: per-file copy that writes to `<dest>.partial`, verifies size,
+    /// renames into place, and **never deletes `source`**. Used by
+    /// `copyDirectoryAndVerifyKeepingSource`. Stripped-down version of
+    /// `copyAndVerify` without source-deletion so the public-facing single-file
+    /// API keeps its existing destructive contract for the v3.4.6 staging path.
+    private func copyOneFileKeepingSource(
+        from source: URL,
+        to destination: URL,
+        progress: ((Int64) -> Void)? = nil
+    ) async throws {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: source.path) else {
+            throw StagingError.sourceMissing(source.path)
+        }
+        let sourceAttrs = try fm.attributesOfItem(atPath: source.path)
+        guard let sourceSize = sourceAttrs[.size] as? Int64 else {
+            throw StagingError.copyFailed("could not read source size: \(source.path)")
+        }
+        let destDir = destination.deletingLastPathComponent()
+        try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
+
+        let partial = destination.appendingPathExtension("partial")
+        if fm.fileExists(atPath: partial.path) { try? fm.removeItem(at: partial) }
+        guard fm.createFile(atPath: partial.path, contents: nil) else {
+            throw StagingError.copyFailed("could not create \(partial.path)")
+        }
+
+        let inHandle: FileHandle
+        let outHandle: FileHandle
+        do {
+            inHandle = try FileHandle(forReadingFrom: source)
+        } catch {
+            try? fm.removeItem(at: partial)
+            throw StagingError.copyFailed("open source: \(error.localizedDescription)")
+        }
+        do {
+            outHandle = try FileHandle(forWritingTo: partial)
+        } catch {
+            try? inHandle.close()
+            try? fm.removeItem(at: partial)
+            throw StagingError.copyFailed("open dest: \(error.localizedDescription)")
+        }
+        defer {
+            try? inHandle.close()
+            try? outHandle.close()
+        }
+
+        var copied: Int64 = 0
+        while true {
+            if Task.isCancelled {
+                try? fm.removeItem(at: partial)
+                throw StagingError.cancelled
+            }
+            let chunk = inHandle.readData(ofLength: Self.chunkSize)
+            if chunk.isEmpty { break }
+            do {
+                try outHandle.write(contentsOf: chunk)
+            } catch {
+                try? fm.removeItem(at: partial)
+                throw StagingError.copyFailed("write: \(error.localizedDescription)")
+            }
+            copied += Int64(chunk.count)
+            progress?(copied)
+        }
+        try? outHandle.synchronize()
+        try? outHandle.close()
+        try? inHandle.close()
+
+        // Verify size
+        guard let partialAttrs = try? fm.attributesOfItem(atPath: partial.path),
+              let partialSize = partialAttrs[.size] as? Int64,
+              partialSize == sourceSize else {
+            try? fm.removeItem(at: partial)
+            throw StagingError.verificationFailed("size mismatch at \(partial.path)")
+        }
+        // Atomic rename .partial -> final
+        do {
+            if fm.fileExists(atPath: destination.path) {
+                _ = try fm.replaceItemAt(destination, withItemAt: partial)
+            } else {
+                try fm.moveItem(at: partial, to: destination)
+            }
+        } catch {
+            try? fm.removeItem(at: partial)
+            throw StagingError.copyFailed("rename: \(error.localizedDescription)")
+        }
+        // NB: source intentionally not deleted here.
     }
 }

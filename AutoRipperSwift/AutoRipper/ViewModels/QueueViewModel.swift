@@ -13,6 +13,7 @@ final class QueueViewModel: ObservableObject {
     private let handbrake: HandBrakeService
     private let discord: DiscordService
     private let stagingService = StagingService()
+    private let publishService = PublishService()
     private let store: JobStore
     private var workerTask: Task<Void, Never>?
     private var currentTask: Task<Void, Never>?
@@ -44,12 +45,31 @@ final class QueueViewModel: ObservableObject {
         // Mark as failed so the user can see what happened and decide whether to retry.
         let interrupted: Set<JobStatus> = [.encoding, .organizing, .scraping, .uploading]
         var rescued = 0
+        let fm = FileManager.default
         for i in loaded.indices where interrupted.contains(loaded[i].status) {
             loaded[i].status = .failed
             loaded[i].error = "Interrupted (app exited mid-job)"
             loaded[i].progressText = "Interrupted"
             loaded[i].finishedAt = Date()
             rescued += 1
+            // Best-effort: clean up any `<dest>.partial/` folder/files left
+            // behind by an interrupted publish. If publish was in copying or
+            // verifying phase the partial dir is at the parent of the (yet-to-
+            // exist) publishedFile; if swapping was in flight we can't be
+            // 100% sure where it ended up, but the partial pattern is the
+            // same. Source workspace stays intact so a retry can re-publish.
+            let inPublish = loaded[i].publishPhase == .copying
+                || loaded[i].publishPhase == .verifying
+                || loaded[i].publishPhase == .swapping
+            if inPublish, let pub = loaded[i].publishedFile {
+                let partial = pub.deletingLastPathComponent().path + ".partial"
+                if fm.fileExists(atPath: partial) {
+                    try? fm.removeItem(atPath: partial)
+                    FileLogger.shared.warn("queue", "cleaned partial publish: \(partial)")
+                }
+            }
+            // Reset publishPhase so retry starts clean.
+            if loaded[i].publishPhase != .done { loaded[i].publishPhase = .notStarted }
         }
         // Drop any history older than the retention window (default 30 days).
         let retention = TimeInterval(max(1, config.historyRetentionDays) * 86_400)
@@ -150,6 +170,68 @@ final class QueueViewModel: ObservableObject {
             tmdbMedia = (await tmdb.searchMedia(query: jobs[index].discName)).first
         }
 
+        // ─── v3.6.0 local-encode pipeline ───
+        // Derive the work root (where encode/organize/scrape land their files)
+        // and the library root (where publish hands the final folder off to).
+        //
+        // workRoot = ripScratchDir if configured, else outputDir. Either way,
+        // it's the local-fast volume the rip is already sitting on, so encode
+        // / organize / scrape all run against fast disk.
+        //
+        // libraryRoot = the NAS movies/tv path (or, when NAS upload is off,
+        // outputDir — keeps the legacy "library = outputDir" behavior).
+        let workRoot = config.ripScratchDir.isEmpty ? config.outputDir : config.ripScratchDir
+        let isTV = tmdbMedia?.mediaType == "tv" || jobs[index].intent == .episode
+        let libraryRootStr: String = {
+            if config.nasUploadEnabled {
+                let base = isTV ? config.nasTvPath : config.nasMoviesPath
+                return base.isEmpty ? config.outputDir : base
+            }
+            return config.outputDir
+        }()
+
+        // Pre-flight free space check on workRoot, conservatively budget
+        // 2× source size + 1 GB safety margin for HandBrake's encode workspace.
+        // ScratchReservationService accounts for any concurrent jobs already
+        // holding scratch budget so this passes only if there is *real*
+        // headroom right now, not just on paper.
+        let sourceSize: Int64 = {
+            let attrs = try? FileManager.default.attributesOfItem(atPath: jobs[index].rippedFile.path)
+            return (attrs?[.size] as? Int64) ?? 0
+        }()
+        let requiredBytes: Int64 = sourceSize * 2 + 1_073_741_824
+        let reservation = await ScratchReservationService.shared
+            .canReserve(atPath: workRoot, additionalBytes: requiredBytes)
+        if !reservation.ok {
+            jobs[index].status = .failed
+            jobs[index].error = "Not enough local space at \(workRoot) — need \(requiredBytes / 1_073_741_824) GB, "
+                + "short by \(reservation.shortfallBytes / 1_073_741_824) GB. "
+                + "Free up disk or move Rip Scratch Dir to a larger volume."
+            jobs[index].progressText = "Insufficient local space"
+            jobs[index].finishedAt = Date()
+            FileLogger.shared.error("queue", "preflight: \(jobs[index].error)")
+            await card.fail("encode", detail: "Insufficient space")
+            NotificationService.shared.notify(title: "Insufficient Space", message: jobs[index].discName)
+            await GenericWebhookService(config: config).notifyFailed(jobs[index])
+            return
+        }
+        await ScratchReservationService.shared.reserve(jobId: jobs[index].id, bytes: requiredBytes)
+        defer { Task { await ScratchReservationService.shared.release(jobId: jobs[index].id) } }
+
+        // If we're retrying a job that already has an organized file on disk,
+        // skip encode/organize/scrape — they're done. Jump straight into the
+        // publish step. This is the retry-from-publish path.
+        let resumeFromPublish = jobs[index].organizedFile != nil
+            && FileManager.default.fileExists(atPath: jobs[index].organizedFile!.path)
+        if resumeFromPublish {
+            FileLogger.shared.info("queue", "resume from publish: \(jobs[index].discName)")
+            await card.skip("encode")
+            await card.skip("organize")
+            await card.skip("scrape")
+            await runPublishStep(at: index, card: card, tmdbMedia: tmdbMedia, isTV: isTV)
+            return
+        }
+
         // Encode
         jobs[index].status = .encoding
         jobs[index].progressText = "Encoding…"
@@ -209,7 +291,7 @@ final class QueueViewModel: ObservableObject {
                     // fall back to S01E01 placeholder. v3.3.0's picker UI
                     // populates the fields; today they're typically nil.
                     dest = OrganizerService.buildTvPath(
-                        outputDir: config.outputDir,
+                        outputDir: workRoot,
                         show: media.title,
                         season: jobs[index].seasonNumber ?? 1,
                         episode: jobs[index].episodeNumber ?? 1,
@@ -217,7 +299,7 @@ final class QueueViewModel: ObservableObject {
                     )
                 } else {
                     dest = OrganizerService.buildMoviePath(
-                        outputDir: config.outputDir,
+                        outputDir: workRoot,
                         title: media.title,
                         year: media.year,
                         edition: jobs[index].intent == .edition ? edition : nil
@@ -225,13 +307,16 @@ final class QueueViewModel: ObservableObject {
                 }
             } else {
                 dest = OrganizerService.buildMoviePath(
-                    outputDir: config.outputDir,
+                    outputDir: workRoot,
                     title: OrganizerService.cleanFilename(jobs[index].discName),
                     edition: jobs[index].intent == .edition ? edition : nil
                 )
             }
             let organized = try OrganizerService.organizeFile(source: source, destination: dest)
             jobs[index].organizedFile = organized
+            // Record the work directory so cleanup-on-crash can find and
+            // remove it if the publish step doesn't complete.
+            jobs[index].workDir = organized.deletingLastPathComponent()
             jobs[index].organizeElapsed = Date().timeIntervalSince(organizeStart)
             await card.finish("organize")
         } catch {
@@ -278,20 +363,30 @@ final class QueueViewModel: ObservableObject {
             await card.fail("scrape", detail: "No TMDb results")
         }
 
-        // NAS upload
+        // Publish + done — extracted so retry-from-publish can call it directly.
+        await runPublishStep(at: index, card: card, tmdbMedia: tmdbMedia, isTV: isTV)
+    }
+
+    /// Publish the job's organized local folder to the NAS library, then mark
+    /// done and fire notifications. Called both as the final step of a fresh
+    /// pipeline and directly when retrying a job that already has an
+    /// organized file on disk.
+    private func runPublishStep(at index: Int, card: JobCard, tmdbMedia: MediaResult?, isTV: Bool) async {
+        // Publish — hand the locally-organized + scraped folder off to the
+        // NAS library. Same-volume hand-offs become server-side renames
+        // (instant). Cross-volume hand-offs are chunked + verified copies that
+        // **leave the local source intact** until the swap succeeds, so a
+        // crash mid-publish is recoverable.
         let nasStart = Date()
         if config.nasUploadEnabled {
             jobs[index].status = .uploading
-            jobs[index].progressText = "Copying to NAS…"
+            jobs[index].progressText = "Publishing — 0%"
+            jobs[index].publishPhase = .copying
             await card.start("nas")
 
             do {
                 let source = jobs[index].organizedFile ?? jobs[index].rippedFile
                 let sourceDir = source.deletingLastPathComponent()
-                let folderName = sourceDir.lastPathComponent
-
-                // Pick the right NAS base path based on media type
-                let isTV = tmdbMedia?.mediaType == "tv"
                 let nasBase = isTV ? config.nasTvPath : config.nasMoviesPath
 
                 guard !nasBase.isEmpty else {
@@ -302,56 +397,75 @@ final class QueueViewModel: ObservableObject {
                     jobs[index].progressText = "Complete (NAS path not configured)"
                     jobs[index].finishedAt = Date()
                     jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
+                    jobs[index].publishPhase = .notStarted
                     await card.complete(footer: buildFooter(ripElapsed: jobs[index].ripElapsed, encodeElapsed: jobs[index].encodeElapsed))
                     NotificationService.shared.notify(title: "Job Complete", message: jobs[index].discName)
                     await GenericWebhookService(config: config).notifyComplete(jobs[index])
                     return
                 }
 
-                let nasDest = URL(fileURLWithPath: nasBase).appendingPathComponent(folderName)
-
-                // Off-main-actor copy with byte-for-byte verification, atomic
-                // .partial -> final rename, and live progress updates. Replaces
-                // the previous synchronous `FileManager.copyItem` which froze
-                // the entire UI for 15+ min on slow NAS shares.
-                jobs[index].progressText = "Uploading to NAS — 0%"
-                jobs[index].progress = 0
+                let libraryRoot = URL(fileURLWithPath: nasBase)
                 let jobIdx = index
-                _ = try await stagingService.copyDirectoryAndVerify(
-                    from: sourceDir,
-                    to: nasDest,
+                let jobId = jobs[index].id
+                let publishedDir = try await publishService.publish(
+                    localDir: sourceDir,
+                    libraryRoot: libraryRoot,
                     progress: { [weak self] copied, total in
                         Task { @MainActor in
                             guard let self, total > 0 else { return }
-                            // Cheap throttle: only update SwiftUI when the
-                            // percent integer changes. Avoids hundreds of
-                            // updates per second on a long copy.
                             let pct = Int(Double(copied) / Double(total) * 100)
-                            // Re-find the job by id in case the queue was
-                            // mutated since we started (retry, prune, etc.)
                             guard self.jobs.indices.contains(jobIdx),
+                                  self.jobs[jobIdx].id == jobId,
                                   self.jobs[jobIdx].status == .uploading else { return }
                             if pct != self.jobs[jobIdx].progress {
                                 self.jobs[jobIdx].progress = pct
-                                self.jobs[jobIdx].progressText = "Uploading to NAS — \(pct)%"
+                                self.jobs[jobIdx].progressText = "Publishing — \(pct)%"
                             }
+                        }
+                    },
+                    phaseUpdate: { [weak self] phase in
+                        Task { @MainActor in
+                            guard let self else { return }
+                            guard self.jobs.indices.contains(jobIdx),
+                                  self.jobs[jobIdx].id == jobId else { return }
+                            self.jobs[jobIdx].publishPhase = phase
                         }
                     }
                 )
-                jobs[index].progressText = "Copied to NAS: \(nasDest.path)"
-                // copyDirectoryAndVerify deletes source files + empty parent
-                // dir as it goes, so no explicit local cleanup needed here.
+                // Resolve the published file's final URL (organized file's
+                // name relative to its old parent dir, but rooted at
+                // publishedDir).
+                let oldPath = source.path
+                let prefix = sourceDir.path + "/"
+                let rel = oldPath.hasPrefix(prefix)
+                    ? String(oldPath.dropFirst(prefix.count))
+                    : source.lastPathComponent
+                var finalURL = publishedDir
+                for c in rel.split(separator: "/") {
+                    finalURL = finalURL.appendingPathComponent(String(c))
+                }
+                jobs[index].publishedFile = finalURL
+                jobs[index].progressText = "Published: \(publishedDir.path)"
 
+                // Now that the dest is verified, we can drop the local
+                // workspace. The PublishService.renamePerFile path already
+                // moves files out (so source is gone for same-volume); for
+                // cross-volume keep-source we do the cleanup here.
+                if FileManager.default.fileExists(atPath: sourceDir.path) {
+                    try? FileManager.default.removeItem(at: sourceDir)
+                }
+                jobs[index].workDir = nil
+                jobs[index].publishPhase = .done
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
-                await card.finish("nas", detail: nasDest.path)
+                await card.finish("nas", detail: publishedDir.path)
             } catch {
                 jobs[index].status = .failed
-                jobs[index].error = "NAS copy failed: \(error.localizedDescription)"
-                jobs[index].progressText = "NAS copy failed"
+                jobs[index].error = "Publish failed: \(error.localizedDescription)"
+                jobs[index].progressText = "Publish failed"
                 jobs[index].finishedAt = Date()
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.fail("nas", detail: error.localizedDescription)
-                NotificationService.shared.notify(title: "NAS Copy Failed", message: jobs[index].discName)
+                NotificationService.shared.notify(title: "Publish Failed", message: jobs[index].discName)
                 await GenericWebhookService(config: config).notifyFailed(jobs[index])
                 return
             }
@@ -359,7 +473,8 @@ final class QueueViewModel: ObservableObject {
             await card.skip("nas")
         }
 
-        // Done — clean up rip source directory (if it wasn't already removed by NAS step)
+        // Done — clean up rip source directory (if it wasn't already removed
+        // by the publish step above)
         let ripDir = jobs[index].rippedFile.deletingLastPathComponent()
         let organizedDir = (jobs[index].organizedFile ?? jobs[index].rippedFile).deletingLastPathComponent()
         if ripDir.path != organizedDir.path, FileManager.default.fileExists(atPath: ripDir.path) {
@@ -496,7 +611,30 @@ final class QueueViewModel: ObservableObject {
     func retry(jobId: String) {
         guard let i = jobs.firstIndex(where: { $0.id == jobId }) else { return }
         guard jobs[i].status == .failed else { return }
-        guard FileManager.default.fileExists(atPath: jobs[i].rippedFile.path) else {
+
+        // Choose the most-advanced still-existing source for retry.
+        // - If publish failed but encode/organize succeeded, the organized
+        //   file in workDir is the authoritative starting point — re-publish
+        //   from there, skip re-encoding.
+        // - If encode failed, restart from rippedFile (raw rip).
+        let fm = FileManager.default
+        if let organized = jobs[i].organizedFile,
+           fm.fileExists(atPath: organized.path) {
+            // Resume from publish — organized file is the authoritative copy
+            // of what should land in the library.
+            FileLogger.shared.info("queue", "retry from publish: \(jobs[i].discName) (\(jobId))")
+            jobs[i].status = .queued
+            jobs[i].error = ""
+            jobs[i].progress = 0
+            jobs[i].progressText = "Queued for retry (publish)"
+            jobs[i].finishedAt = nil
+            jobs[i].publishPhase = .notStarted
+            jobs[i].logLines = []
+            startWorkerIfNeeded()
+            return
+        }
+        // Otherwise the queue worker will redo encode from rippedFile.
+        guard fm.fileExists(atPath: jobs[i].rippedFile.path) else {
             jobs[i].error = "Source rip is no longer on disk: \(jobs[i].rippedFile.path)"
             return
         }
@@ -505,8 +643,9 @@ final class QueueViewModel: ObservableObject {
         jobs[i].progress = 0
         jobs[i].progressText = "Queued for retry"
         jobs[i].finishedAt = nil
+        jobs[i].publishPhase = .notStarted
         jobs[i].logLines = []
-        FileLogger.shared.info("queue", "retry: \(jobs[i].discName) (\(jobId))")
+        FileLogger.shared.info("queue", "retry from rip: \(jobs[i].discName) (\(jobId))")
         startWorkerIfNeeded()
     }
 

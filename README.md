@@ -33,12 +33,14 @@ Built with Swift and SwiftUI for macOS 14+.
 Insert Disc → App detects DVD/Blu-ray
                     │
         ┌── Auto ON ─────→ Scan → Rip selected titles
-        │                       → Per-title: stage → encode → organize → scrape → NAS upload
+        │                       → Per-title: encode → organize → scrape → publish to NAS
         │                       → Eject + notify
         │                       → Poll for next disc → repeat
         │
         └── Auto OFF ────→ Scan → Tag intent per title → Rip
 ```
+
+**v3.6.0 — Local-encode pipeline.** When `Rip Scratch Dir` is configured, encode/organize/scrape all run on local SSD and a single move/copy publishes the finished folder to the NAS at the end. Pre-flight free-space check (`2× source + 1 GB safety`) fails the job up-front if local SSD is too small. Same-volume publishes are server-side renames (instant); cross-volume publishes use byte-verified chunked copy that **preserves the local source** until the swap completes.
 
 ### Auto-Selected Presets
 
@@ -78,21 +80,22 @@ Open **Settings** (⌘,):
 
 Settings save instantly.
 
-### Rip Scratch Dir (slow-NAS workaround)
+### Rip Scratch Dir (slow-NAS workaround) + Local-encode pipeline (v3.6.0)
 
 When **Output Directory** lives on a NAS / network share, the raw rip step can be bottlenecked by the network. MakeMKV reads Blu-rays at ~50–70 MB/s and 4K UHD even faster — beyond what a typical Wi-Fi-backed SMB share can absorb, triggering MakeMKV's `MSG:2008` "writes too slow" warnings and throttling.
 
-Setting **Rip Scratch Dir** to a fast local directory (e.g., `~/Movies/RipScratch`) decouples the bandwidth-hungry rip from the network. Each title rips to local SSD, then `StagingService` copies it to `<outputDir>/<folderName>/` with byte-for-byte verification before the encode/organize/scrape pipeline picks it up.
+Setting **Rip Scratch Dir** to a fast local directory (e.g., `~/Movies/RipScratch` or an external SSD) decouples the bandwidth-hungry rip from the network. **As of v3.6.0 the entire pipeline runs locally** when scratch is configured: rip → encode → organize → scrape all happen on local SSD, then a single move/copy publishes the finished folder to the NAS library at the end. Pre-flight free-space check (`2× source + 1 GB safety`) fails the job up-front if local SSD is too small.
 
 Recommended layout for NAS-backed setups:
 
 | Setting | Example | Role |
 |---|---|---|
-| `Rip Scratch Dir` | `~/Movies/RipScratch` | Local SSD — temp landing for raw rips |
-| `Output Directory` | `/Volumes/ServerShare/Downloaded` | NAS — encode/organize/scrape working dir |
-| `NAS Movies Path` | `/Volumes/ServerShare/Movies` | NAS — final library |
+| `Rip Scratch Dir` | `/Volumes/RipSSD` (1 TB external M.2) | Local SSD — entire post-rip pipeline runs here |
+| `Output Directory` | `~/Desktop/Ripped` (or any local) | Default landing for rips when scratch is empty |
+| `NAS Movies Path` | `/Volumes/ServerShare/Movies` | NAS library — final published location |
+| `NAS TV Path` | `/Volumes/ServerShare/TV` | NAS TV library |
 
-Leave `Rip Scratch Dir` empty to keep the legacy behavior (rip writes directly to `Output Directory`).
+Leave `Rip Scratch Dir` empty to keep the legacy behavior (rip writes directly to `Output Directory` and pipeline runs in place).
 
 ## Usage
 
