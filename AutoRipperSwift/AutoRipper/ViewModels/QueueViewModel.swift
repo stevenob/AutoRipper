@@ -458,6 +458,23 @@ final class QueueViewModel: ObservableObject {
                 jobs[index].publishPhase = .done
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
                 await card.finish("nas", detail: publishedDir.path)
+
+                // v3.7: best-effort library refresh hooks. Fire after a
+                // successful publish so newly ripped media shows up in Plex /
+                // Jellyfin within seconds. Failures are logged but never block
+                // the otherwise-successful job — the file is already on the NAS.
+                let notifier = LibraryNotifierService(config: config)
+                let results = await notifier.notifyAfterPublish(isTV: isTV)
+                for r in results {
+                    switch r {
+                    case .success(let server):
+                        FileLogger.shared.info("queue", "library refresh: \(server) ✓")
+                    case .failure(let server, let err):
+                        FileLogger.shared.warn("queue", "library refresh: \(server) ✗ \(err)")
+                    case .skipped:
+                        break  // expected when not configured
+                    }
+                }
             } catch {
                 jobs[index].status = .failed
                 jobs[index].error = "Publish failed: \(error.localizedDescription)"

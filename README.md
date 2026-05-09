@@ -23,6 +23,7 @@ Built with Swift and SwiftUI for macOS 14+.
 | 🔬 **Per-Job Logs** | HandBrake stdout/stderr captured per job; tap any row to expand and diagnose failures |
 | 💬 **Discord** | Live-updating job card per title + notifications |
 | 💾 **NAS Upload** | Copies to NAS, cleans up local files |
+| 📺 **Library refresh** | Optional Plex / Jellyfin webhooks fired after publish so newly ripped media shows up in clients within seconds, not minutes |
 | 🚧 **Rip Scratch Dir** | Optional local-SSD scratch dir for slow-NAS setups — keeps bandwidth-hungry rips off the network |
 | 🔔 **Notifications** | macOS + Discord alerts for scan, rip, and failures |
 | 🔄 **Update Checker** | Checks GitHub Releases on launch |
@@ -79,6 +80,23 @@ Open **Settings** (⌘,):
 5. Optionally add **Discord webhook** and **NAS paths**
 
 Settings save instantly.
+
+### Library refresh (Plex / Jellyfin)
+
+After every successful publish, AutoRipper can ping Plex or Jellyfin to immediately scan for the new file — saves the wait for the periodic library sweep.
+
+Settings → **Library** pane:
+
+**Plex**
+- URL — e.g., `http://192.168.1.10:32400`
+- X-Plex-Token — find in Plex Web → Settings → "View XML" of any item
+- Movies / TV Section IDs — open Settings → Manage → Libraries; the URL reads `?source=N`
+
+**Jellyfin**
+- URL — e.g., `http://192.168.1.10:8096`
+- API Key — Dashboard → API Keys → Generate
+
+Both have **Test refresh** buttons. Empty URLs are silently no-op'd; failures are logged but never block a successful publish.
 
 ### Rip Scratch Dir (slow-NAS workaround) + Local-encode pipeline (v3.6.0)
 

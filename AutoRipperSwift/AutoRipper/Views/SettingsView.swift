@@ -20,6 +20,8 @@ struct SettingsView: View {
                 .tabItem { Label("TMDb", systemImage: "magnifyingglass") }
             NASPane(config: config)
                 .tabItem { Label("NAS", systemImage: "externaldrive.connected.to.line.below") }
+            LibraryRefreshPane(config: config)
+                .tabItem { Label("Library", systemImage: "play.tv.fill") }
             DiscordPane(config: config)
                 .tabItem { Label("Discord", systemImage: "bubble.left.and.bubble.right") }
             HistoryPane(config: config)
@@ -375,6 +377,140 @@ private struct NASPane: View {
     }
 }
 
+// MARK: - Library Refresh
+
+private struct LibraryRefreshPane: View {
+    @ObservedObject var config: AppConfig
+    @State private var revealPlexToken = false
+    @State private var revealJellyfinKey = false
+    @State private var plexStatus: String = ""
+    @State private var jellyfinStatus: String = ""
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text("URL:").frame(width: 130, alignment: .trailing)
+                    TextField("http://192.168.1.10:32400", text: $config.plexUrl)
+                        .textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("X-Plex-Token:").frame(width: 130, alignment: .trailing)
+                    if revealPlexToken {
+                        TextField("", text: $config.plexToken).textFieldStyle(.roundedBorder)
+                    } else {
+                        SecureField("", text: $config.plexToken).textFieldStyle(.roundedBorder)
+                    }
+                    Button { revealPlexToken.toggle() } label: {
+                        Image(systemName: revealPlexToken ? "eye.slash" : "eye")
+                    }
+                }
+                HStack {
+                    Text("Movies Section:").frame(width: 130, alignment: .trailing)
+                    TextField("1", text: $config.plexMoviesSectionId)
+                        .textFieldStyle(.roundedBorder).frame(maxWidth: 100)
+                    Spacer()
+                }
+                HStack {
+                    Text("TV Section:").frame(width: 130, alignment: .trailing)
+                    TextField("2", text: $config.plexTvSectionId)
+                        .textFieldStyle(.roundedBorder).frame(maxWidth: 100)
+                    Spacer()
+                }
+                HStack {
+                    Spacer().frame(width: 130)
+                    Button("Test Movies refresh") { Task { await testPlex(isTV: false) } }
+                        .disabled(!plexConfigured(isTV: false))
+                    Button("Test TV refresh") { Task { await testPlex(isTV: true) } }
+                        .disabled(!plexConfigured(isTV: true))
+                    if !plexStatus.isEmpty {
+                        Text(plexStatus).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                HStack(alignment: .top) {
+                    Spacer().frame(width: 130)
+                    Text("Find your section ID by opening Settings → Manage → Libraries in Plex; the URL will read `…source=N` — that N is the ID.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+            } header: {
+                Text("Plex")
+            }
+
+            Section {
+                HStack {
+                    Text("URL:").frame(width: 130, alignment: .trailing)
+                    TextField("http://192.168.1.10:8096", text: $config.jellyfinUrl)
+                        .textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Text("API Key:").frame(width: 130, alignment: .trailing)
+                    if revealJellyfinKey {
+                        TextField("", text: $config.jellyfinApiKey).textFieldStyle(.roundedBorder)
+                    } else {
+                        SecureField("", text: $config.jellyfinApiKey).textFieldStyle(.roundedBorder)
+                    }
+                    Button { revealJellyfinKey.toggle() } label: {
+                        Image(systemName: revealJellyfinKey ? "eye.slash" : "eye")
+                    }
+                }
+                HStack {
+                    Spacer().frame(width: 130)
+                    Button("Test refresh") { Task { await testJellyfin() } }
+                        .disabled(!jellyfinConfigured)
+                    if !jellyfinStatus.isEmpty {
+                        Text(jellyfinStatus).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                HStack(alignment: .top) {
+                    Spacer().frame(width: 130)
+                    Text("Generate an API key in Jellyfin → Dashboard → API Keys.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } header: {
+                Text("Jellyfin")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func plexConfigured(isTV: Bool) -> Bool {
+        let section = isTV ? config.plexTvSectionId : config.plexMoviesSectionId
+        return !config.plexUrl.trimmingCharacters(in: .whitespaces).isEmpty
+            && !config.plexToken.trimmingCharacters(in: .whitespaces).isEmpty
+            && !section.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var jellyfinConfigured: Bool {
+        !config.jellyfinUrl.trimmingCharacters(in: .whitespaces).isEmpty
+            && !config.jellyfinApiKey.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func testPlex(isTV: Bool) async {
+        plexStatus = "…"
+        let result = await LibraryNotifierService(config: config).refreshPlex(isTV: isTV)
+        switch result {
+        case .success: plexStatus = "✓ refresh accepted"
+        case .failure(_, let err): plexStatus = "✗ \(err)"
+        case .skipped(let reason): plexStatus = "skipped: \(reason)"
+        }
+    }
+
+    private func testJellyfin() async {
+        jellyfinStatus = "…"
+        let result = await LibraryNotifierService(config: config).refreshJellyfin()
+        switch result {
+        case .success: jellyfinStatus = "✓ refresh accepted"
+        case .failure(_, let err): jellyfinStatus = "✗ \(err)"
+        case .skipped(let reason): jellyfinStatus = "skipped: \(reason)"
+        }
+    }
+}
+
 // MARK: - Discord
 
 private struct DiscordPane: View {
@@ -652,10 +788,16 @@ private struct AdvancedPane: View {
             "historyRetentionDays": config.historyRetentionDays,
             "preventSleep": config.preventSleep,
             "verboseLogging": config.verboseLogging,
+            "plexUrl": config.plexUrl,
+            "plexMoviesSectionId": config.plexMoviesSectionId,
+            "plexTvSectionId": config.plexTvSectionId,
+            "jellyfinUrl": config.jellyfinUrl,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
             dict["discordWebhook"] = config.discordWebhook
+            dict["plexToken"] = config.plexToken
+            dict["jellyfinApiKey"] = config.jellyfinApiKey
         }
 
         let panel = NSSavePanel()
@@ -707,5 +849,11 @@ private struct AdvancedPane: View {
         if let v = dict["verboseLogging"]       as? Bool   { config.verboseLogging = v }
         if let v = dict["tmdbApiKey"]           as? String { config.tmdbApiKey = v }
         if let v = dict["discordWebhook"]       as? String { config.discordWebhook = v }
+        if let v = dict["plexUrl"]              as? String { config.plexUrl = v }
+        if let v = dict["plexToken"]            as? String { config.plexToken = v }
+        if let v = dict["plexMoviesSectionId"]  as? String { config.plexMoviesSectionId = v }
+        if let v = dict["plexTvSectionId"]      as? String { config.plexTvSectionId = v }
+        if let v = dict["jellyfinUrl"]          as? String { config.jellyfinUrl = v }
+        if let v = dict["jellyfinApiKey"]       as? String { config.jellyfinApiKey = v }
     }
 }

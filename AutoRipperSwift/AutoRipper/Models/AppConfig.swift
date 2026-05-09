@@ -73,6 +73,37 @@ final class AppConfig: ObservableObject {
     @Published var genericWebhookURL: String {
         didSet { defaults.set(genericWebhookURL, forKey: "genericWebhookURL") }
     }
+
+    // MARK: - v3.7 — Library refresh hooks
+    // After a successful publish, optionally ping Plex / Jellyfin to scan
+    // the new file immediately rather than waiting for the periodic sweep.
+    // Each setting is independently enabled — leave URL empty to disable.
+
+    /// Plex server URL (e.g. `http://192.168.1.10:32400`).
+    @Published var plexUrl: String {
+        didSet { defaults.set(plexUrl, forKey: "plexUrl") }
+    }
+    /// X-Plex-Token. Find via Account → Settings → "View XML" of any item.
+    @Published var plexToken: String {
+        didSet { defaults.set(plexToken, forKey: "plexToken") }
+    }
+    /// Library section ID for Movies (numeric, e.g. 1).
+    @Published var plexMoviesSectionId: String {
+        didSet { defaults.set(plexMoviesSectionId, forKey: "plexMoviesSectionId") }
+    }
+    /// Library section ID for TV (numeric).
+    @Published var plexTvSectionId: String {
+        didSet { defaults.set(plexTvSectionId, forKey: "plexTvSectionId") }
+    }
+
+    /// Jellyfin server URL (e.g. `http://192.168.1.10:8096`).
+    @Published var jellyfinUrl: String {
+        didSet { defaults.set(jellyfinUrl, forKey: "jellyfinUrl") }
+    }
+    /// Jellyfin API key from Dashboard → API Keys.
+    @Published var jellyfinApiKey: String {
+        didSet { defaults.set(jellyfinApiKey, forKey: "jellyfinApiKey") }
+    }
     /// Structured mid-pipeline state for crash/exit recovery. Set just before
     /// MakeMKV's `ripTitle` (phase = .ripping), updated to .staging while
     /// `StagingService` is copying the rip to its final home, cleared on success
@@ -114,6 +145,12 @@ final class AppConfig: ObservableObject {
         self.preventSleep = d.object(forKey: "preventSleep") as? Bool ?? true
         self.verboseLogging = d.object(forKey: "verboseLogging") as? Bool ?? false
         self.genericWebhookURL = d.string(forKey: "genericWebhookURL") ?? ""
+        self.plexUrl = d.string(forKey: "plexUrl") ?? ""
+        self.plexToken = d.string(forKey: "plexToken") ?? ""
+        self.plexMoviesSectionId = d.string(forKey: "plexMoviesSectionId") ?? ""
+        self.plexTvSectionId = d.string(forKey: "plexTvSectionId") ?? ""
+        self.jellyfinUrl = d.string(forKey: "jellyfinUrl") ?? ""
+        self.jellyfinApiKey = d.string(forKey: "jellyfinApiKey") ?? ""
         // One-time migration: legacy `inFlightRipPath` (a directory string) ->
         // structured `inFlightRip` so cleanupOrphanedRip can recognize it. We
         // can't reliably tell which title was being written (the legacy state

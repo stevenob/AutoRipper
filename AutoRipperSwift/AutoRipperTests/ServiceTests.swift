@@ -1037,3 +1037,200 @@ final class LongIORegressionTests: XCTestCase {
         )
     }
 }
+
+// MARK: - LibraryNotifierService tests
+//
+// Uses a custom URLProtocol that intercepts HTTP requests so we can assert
+// the right URL/headers without ever hitting a network. The mock holds the
+// last request observed in a thread-safe class-level static; we drain it
+// before each test.
+
+private final class MockURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var lastRequest: URLRequest?
+    nonisolated(unsafe) static var responseStatus: Int = 200
+    nonisolated(unsafe) static var responseError: Error?
+
+    static func reset() {
+        lastRequest = nil
+        responseStatus = 200
+        responseError = nil
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.lastRequest = self.request
+        if let err = Self.responseError {
+            client?.urlProtocol(self, didFailWithError: err)
+            return
+        }
+        let response = HTTPURLResponse(
+            url: request.url ?? URL(string: "https://x")!,
+            statusCode: Self.responseStatus,
+            httpVersion: "HTTP/1.1",
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+final class LibraryNotifierServiceTests: XCTestCase {
+
+    private func makeSession() -> URLSession {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.protocolClasses = [MockURLProtocol.self]
+        return URLSession(configuration: cfg)
+    }
+
+    private func makeConfig(
+        plexUrl: String = "",
+        plexToken: String = "",
+        plexMovies: String = "",
+        plexTv: String = "",
+        jellyfinUrl: String = "",
+        jellyfinKey: String = ""
+    ) -> AppConfig {
+        let c = AppConfig()
+        c.plexUrl = plexUrl
+        c.plexToken = plexToken
+        c.plexMoviesSectionId = plexMovies
+        c.plexTvSectionId = plexTv
+        c.jellyfinUrl = jellyfinUrl
+        c.jellyfinApiKey = jellyfinKey
+        return c
+    }
+
+    override func tearDown() {
+        // Reset all v3.7 plex/jellyfin keys back to empty so test pollution
+        // does not leak into the next case (AppConfig is a singleton).
+        let c = AppConfig.shared
+        c.plexUrl = ""
+        c.plexToken = ""
+        c.plexMoviesSectionId = ""
+        c.plexTvSectionId = ""
+        c.jellyfinUrl = ""
+        c.jellyfinApiKey = ""
+        MockURLProtocol.reset()
+        super.tearDown()
+    }
+
+    func testPlexRefreshSkippedWhenUnconfigured() async {
+        MockURLProtocol.reset()
+        let svc = LibraryNotifierService(config: makeConfig(), session: makeSession())
+        let result = await svc.refreshPlex(isTV: false)
+        if case .skipped = result { return }
+        XCTFail("expected skipped, got \(result)")
+    }
+
+    func testPlexRefreshHitsCorrectMoviesEndpoint() async throws {
+        MockURLProtocol.reset()
+        MockURLProtocol.responseStatus = 200
+        let cfg = makeConfig(
+            plexUrl: "http://192.168.1.10:32400",
+            plexToken: "abc123",
+            plexMovies: "5",
+            plexTv: "9"
+        )
+        let svc = LibraryNotifierService(config: cfg, session: makeSession())
+        let result = await svc.refreshPlex(isTV: false)
+        if case .success(let server) = result { XCTAssertEqual(server, "Plex") }
+        else { XCTFail("expected .success, got \(result)") }
+
+        let req = MockURLProtocol.lastRequest
+        XCTAssertNotNil(req)
+        XCTAssertEqual(req?.httpMethod, "POST")
+        let url = req?.url?.absoluteString ?? ""
+        XCTAssertTrue(url.contains("/library/sections/5/refresh"),
+                      "expected movies section endpoint, got \(url)")
+        XCTAssertTrue(url.contains("X-Plex-Token=abc123"),
+                      "expected token in query, got \(url)")
+    }
+
+    func testPlexRefreshUsesTVSectionWhenIsTVTrue() async {
+        MockURLProtocol.reset()
+        MockURLProtocol.responseStatus = 200
+        let cfg = makeConfig(
+            plexUrl: "http://plex.local:32400",
+            plexToken: "tt",
+            plexMovies: "1",
+            plexTv: "2"
+        )
+        let svc = LibraryNotifierService(config: cfg, session: makeSession())
+        _ = await svc.refreshPlex(isTV: true)
+        let url = MockURLProtocol.lastRequest?.url?.absoluteString ?? ""
+        XCTAssertTrue(url.contains("/library/sections/2/refresh"),
+                      "expected TV section, got \(url)")
+    }
+
+    func testPlexRefreshFailsOnNon2xx() async {
+        MockURLProtocol.reset()
+        MockURLProtocol.responseStatus = 401
+        let cfg = makeConfig(plexUrl: "http://x", plexToken: "t", plexMovies: "1")
+        let svc = LibraryNotifierService(config: cfg, session: makeSession())
+        let result = await svc.refreshPlex(isTV: false)
+        if case .failure(_, let err) = result {
+            XCTAssertTrue(err.contains("401"), "got \(err)")
+        } else {
+            XCTFail("expected .failure, got \(result)")
+        }
+    }
+
+    func testJellyfinRefreshSkippedWhenUnconfigured() async {
+        MockURLProtocol.reset()
+        let svc = LibraryNotifierService(config: makeConfig(), session: makeSession())
+        let result = await svc.refreshJellyfin()
+        if case .skipped = result { return }
+        XCTFail("expected skipped, got \(result)")
+    }
+
+    func testJellyfinRefreshHitsCorrectEndpointWithApiKeyHeader() async {
+        MockURLProtocol.reset()
+        MockURLProtocol.responseStatus = 204  // Jellyfin returns 204 No Content
+        let cfg = makeConfig(
+            jellyfinUrl: "http://jelly.local:8096",
+            jellyfinKey: "k3y"
+        )
+        let svc = LibraryNotifierService(config: cfg, session: makeSession())
+        let result = await svc.refreshJellyfin()
+        if case .success(let server) = result {
+            XCTAssertEqual(server, "Jellyfin")
+        } else {
+            XCTFail("expected .success, got \(result)")
+        }
+        let req = MockURLProtocol.lastRequest
+        XCTAssertEqual(req?.httpMethod, "POST")
+        XCTAssertEqual(req?.url?.absoluteString, "http://jelly.local:8096/Library/Refresh")
+        XCTAssertEqual(req?.value(forHTTPHeaderField: "X-Emby-Token"), "k3y")
+    }
+
+    func testNotifyAfterPublishSkipsBothWhenNothingConfigured() async {
+        MockURLProtocol.reset()
+        let svc = LibraryNotifierService(config: makeConfig(), session: makeSession())
+        let results = await svc.notifyAfterPublish(isTV: false)
+        XCTAssertEqual(results.count, 2)
+        for r in results {
+            if case .skipped = r {} else {
+                XCTFail("expected all skipped, got \(r)")
+            }
+        }
+    }
+
+    func testTrailingSlashInBaseUrlIsTolerated() async {
+        MockURLProtocol.reset()
+        MockURLProtocol.responseStatus = 200
+        let cfg = makeConfig(
+            plexUrl: "http://plex.local:32400/",   // trailing slash
+            plexToken: "x",
+            plexMovies: "1"
+        )
+        let svc = LibraryNotifierService(config: cfg, session: makeSession())
+        _ = await svc.refreshPlex(isTV: false)
+        let url = MockURLProtocol.lastRequest?.url?.absoluteString ?? ""
+        XCTAssertFalse(url.contains("//library"), "must not double-slash, got \(url)")
+        XCTAssertTrue(url.contains("/library/sections/1/refresh"))
+    }
+}
