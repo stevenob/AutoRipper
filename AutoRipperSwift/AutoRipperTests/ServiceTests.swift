@@ -975,3 +975,65 @@ final class JobV360FieldsTests: XCTestCase {
         XCTAssertEqual(job.publishPhase, .notStarted)
     }
 }
+
+// MARK: - Long-IO regression guard
+
+/// Source-level lint: no synchronous, blocking `FileManager` operations
+/// (.copyItem, .moveItem on potentially-large folders, .removeItem on
+/// potentially-large folders) in @MainActor view models. They must always
+/// be wrapped in an actor (StagingService, PublishService) or detached
+/// Task so the UI never freezes during long disk/network IO.
+///
+/// This caught the v3.4.6 -> v3.5.0 lockup (FileManager.copyItem on the
+/// 6 GB NAS upload step). Lives as a test so the same class of regression
+/// can't sneak back in.
+final class LongIORegressionTests: XCTestCase {
+
+    /// Path to the source files we want to lint. Resolved via #file so the
+    /// test works regardless of where xctest is invoked from.
+    private var viewModelsDir: URL {
+        URL(fileURLWithPath: #file)
+            .deletingLastPathComponent()        // .../AutoRipperTests
+            .deletingLastPathComponent()        // .../AutoRipperSwift
+            .appendingPathComponent("AutoRipper")
+            .appendingPathComponent("ViewModels")
+    }
+
+    /// Lines we DON'T want to see in @MainActor view models. Each is matched
+    /// as a substring on lines that aren't comments or whitespace-only.
+    private static let bannedPatterns: [String] = [
+        "FileManager.default.copyItem",   // big folder copies must run via StagingService/PublishService
+        "fm.copyItem",
+    ]
+
+    func testViewModelsHaveNoSyncBigCopyCalls() throws {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(at: viewModelsDir, includingPropertiesForKeys: nil) else {
+            // If the directory layout has changed the test should fail loudly
+            // rather than silently pass.
+            XCTFail("ViewModels directory not found at \(viewModelsDir.path)")
+            return
+        }
+
+        var violations: [String] = []
+        for url in entries where url.pathExtension == "swift" {
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let lines = content.components(separatedBy: .newlines)
+            for (i, raw) in lines.enumerated() {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                // Skip comment lines & blank lines
+                if line.hasPrefix("//") || line.hasPrefix("///") || line.isEmpty { continue }
+                for pattern in Self.bannedPatterns where line.contains(pattern) {
+                    violations.append("\(url.lastPathComponent):\(i + 1)  \(pattern) — \(line)")
+                }
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            "Synchronous big-IO call on @MainActor view model. Wrap in StagingService/PublishService "
+            + "or a detached Task so the UI does not freeze during long copies. Violations:\n  "
+            + violations.joined(separator: "\n  ")
+        )
+    }
+}
