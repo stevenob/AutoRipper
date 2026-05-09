@@ -11,6 +11,7 @@ Built with Swift and SwiftUI for macOS 14+.
 | | |
 |---|---|
 | ⚡ **Auto** | One toggle: insert disc → app rips, encodes, organizes, scrapes, uploads, ejects → polls for the next disc → repeat. Feed it a stack and walk away. |
+| ⏯️ **Auto-close tray** | Drop a disc on the open tray and walk away — app sends `drutil tray close` on scan/auto and during the auto-mode poll loop. No-op on drives without soft-close. |
 | 🎬 **Smart Detection** | Auto-detects DVD or Blu-ray, labels Main Feature vs Extras vs Trailers |
 | 🎯 **Per-Title Intent** | Mark each title as Movie / Episode / Edition / Extra — collections, double features, and director's cuts all handled correctly |
 | 🎞️ **Editions** | Theatrical / Unrated / Director's Cut / Extended / Final Cut → Plex/Jellyfin `{edition-X}` filenames in a shared movie folder |

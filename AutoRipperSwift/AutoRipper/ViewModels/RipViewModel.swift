@@ -326,6 +326,10 @@ final class RipViewModel: ObservableObject {
         unidentifiedDiscName = nil
 
         runningTask = Task {
+            // Best-effort: if the user left the tray open with a disc on it,
+            // pull it in before scanning. Drives without a motorized tray
+            // (most slot-loaders, slim USB units) just no-op.
+            await closeDiscTrayBestEffort(reason: "scan")
             do {
                 var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
                     Task { @MainActor in self?.appendMakeMKVLog(line) }
@@ -684,6 +688,10 @@ final class RipViewModel: ObservableObject {
         statusText = "Auto — insert next disc"
 
         // Phase 2: poll for new disc insertion.
+        // Periodically attempt a tray close — lets the user drop a disc on an
+        // open tray and walk away. drutil tray close is a no-op when the tray
+        // is already shut, and silently fails on drives without soft-close.
+        var pollsSinceClose = 0
         while fullAutoEnabled && !Task.isCancelled {
             let detected = await currentDiscType()
             if !detected.isEmpty {
@@ -694,6 +702,14 @@ final class RipViewModel: ObservableObject {
                 try? await Task.sleep(for: .seconds(3))
                 await MainActor.run { self.fullAuto() }
                 return
+            }
+            // Try a tray close every ~30s while idle. If the user dropped a
+            // disc on the open tray, the next poll cycle picks it up.
+            if pollsSinceClose >= 6 {
+                await closeDiscTrayBestEffort(reason: "auto-poll")
+                pollsSinceClose = 0
+            } else {
+                pollsSinceClose += 1
             }
             try? await Task.sleep(for: .seconds(5))
         }
@@ -725,6 +741,49 @@ final class RipViewModel: ObservableObject {
         }.value
     }
 
+    /// Best-effort `drutil tray close` to pull in a disc the user has placed
+    /// on an open tray. Always followed by a short settle delay so MakeMKV has
+    /// time to see the freshly-loaded disc.
+    ///
+    /// Silent on:
+    ///   * drives that don't support soft-close (slim USB units, slot-loaders) —
+    ///     drutil exits non-zero and we just continue
+    ///   * tray already closed with a disc — drutil is a no-op
+    ///   * tray already closed with no disc — drutil is a no-op
+    ///
+    /// Status text is briefly updated to `Closing tray…` so the user sees
+    /// *something* happening between clicking the button and the scan starting,
+    /// otherwise the click feels unresponsive while the drive spins up.
+    private func closeDiscTrayBestEffort(reason: String) async {
+        let prev = statusText
+        statusText = "Closing tray…"
+        let success = await Task.detached { () -> Bool in
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/drutil")
+            proc.arguments = ["tray", "close"]
+            // Pipe stdout/stderr to /dev/null — we only care about exit code.
+            proc.standardOutput = Pipe()
+            proc.standardError = Pipe()
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                return proc.terminationStatus == 0
+            } catch {
+                return false
+            }
+        }.value
+        if success {
+            FileLogger.shared.info("rip-vm", "tray-close (\(reason)): drutil tray close OK; sleeping for spin-up")
+            // Drives need a few seconds after tray close before drutil/MakeMKV
+            // can read the disc. Most spin up in ~3–5s; 5s is a reliable floor.
+            try? await Task.sleep(for: .seconds(5))
+        } else {
+            FileLogger.shared.info("rip-vm", "tray-close (\(reason)): drutil tray close not supported / no-op")
+        }
+        // Restore prior status text if no other code path has overwritten it.
+        if statusText == "Closing tray…" { statusText = prev }
+    }
+
     func fullAuto() {
         guard !isScanning, !isRipping else { return }
         isScanning = true
@@ -732,6 +791,9 @@ final class RipViewModel: ObservableObject {
         logLines = []
 
         runningTask = Task {
+            // Best-effort tray close so the user can drop a disc on the open
+            // tray and click Auto without first manually pushing it shut.
+            await closeDiscTrayBestEffort(reason: "auto")
             do {
                 var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
                     Task { @MainActor in self?.appendMakeMKVLog(line) }
