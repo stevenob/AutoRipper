@@ -41,6 +41,9 @@ struct DiscInfoColumn: View {
                 }
                 section("Preset") { presetBlock }
                 section("Selected (\(selectedCount) of \(info.titles.count))") { selectedBlock }
+                if info.titles.count > 1 {
+                    section("Disc contents") { contentsSummaryBlock }
+                }
                 section("Storage") { storageBlock }
             }
             .padding(16)
@@ -348,6 +351,21 @@ struct DiscInfoColumn: View {
             .filter { ripVM.selectedTitles.contains($0.id) }
             .max { ($0.resolution.height ?? 0) < ($1.resolution.height ?? 0) }?
             .resolution ?? ""
+    }
+
+    // MARK: - Disc contents summary (v3.8 — category breakdown)
+
+    @ViewBuilder
+    private var contentsSummaryBlock: some View {
+        let summary = info.categorySummary
+        if summary.isEmpty {
+            EmptyView()
+        } else {
+            Text(summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Selected (titles · runtime · raw → encoded estimate)

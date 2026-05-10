@@ -1440,3 +1440,139 @@ final class RecentlySkippedCooldownTests: XCTestCase {
         XCTAssertFalse(vm.isRecentlySkipped(volumeName: "RANDOM_DISC"))
     }
 }
+
+// MARK: - DiscInfo autoLabel categorization tests (v3.8)
+
+final class DiscInfoAutoLabelV380Tests: XCTestCase {
+
+    private func makeTitle(id: Int, duration: String, sizeGB: Double) -> TitleInfo {
+        TitleInfo(
+            id: id, name: "Title \(id)", duration: duration,
+            sizeBytes: Int64(sizeGB * 1_073_741_824), chapters: 1, fileOutput: ""
+        )
+    }
+
+    func testLargestIsMainFeature() {
+        var info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "1:50:00", sizeGB: 6.5),
+            makeTitle(id: 1, duration: "0:10:00", sizeGB: 0.8),
+            makeTitle(id: 2, duration: "0:02:00", sizeGB: 0.1),
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[0].category, .mainFeature)
+    }
+
+    func testAlternateCutDetectedAtSameRuntime() {
+        // Same runtime ±5% as main, smaller size, ≥60 min → .alternateCut.
+        // (Smaller size makes it .alternateAudio if it's ALSO within ±0.5%.)
+        var info = DiscInfo(name: "X", type: "bluray", titles: [
+            makeTitle(id: 0, duration: "2:00:00", sizeGB: 32.0),
+            makeTitle(id: 1, duration: "2:03:00", sizeGB: 28.0),  // alt cut (2.5% off, ≥60 min)
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[0].category, .mainFeature)
+        XCTAssertEqual(info.titles[1].category, .alternateCut,
+                       "near-runtime + ≥60min should be alt cut")
+    }
+
+    func testAlternateAudioDetectedAtIdenticalRuntime() {
+        // Exact same runtime, much smaller — typical commentary track structure.
+        var info = DiscInfo(name: "X", type: "bluray", titles: [
+            makeTitle(id: 0, duration: "2:00:00", sizeGB: 30.0),
+            makeTitle(id: 1, duration: "2:00:00", sizeGB: 5.0),
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[1].category, .alternateAudio)
+    }
+
+    func testFeaturetteCategory() {
+        var info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "1:50:00", sizeGB: 7.0),
+            makeTitle(id: 1, duration: "0:45:00", sizeGB: 1.5),    // featurette (30–90 min)
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[1].category, .featurette)
+    }
+
+    func testExtraCategory() {
+        var info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "1:50:00", sizeGB: 7.0),
+            makeTitle(id: 1, duration: "0:15:00", sizeGB: 0.4),    // extra (5–30 min)
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[1].category, .extra)
+    }
+
+    func testShortExtraAndTrailer() {
+        var info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "1:50:00", sizeGB: 7.0),
+            makeTitle(id: 1, duration: "0:02:30", sizeGB: 0.1),    // short extra (1–5 min)
+            makeTitle(id: 2, duration: "0:00:30", sizeGB: 0.01),   // trailer (<60s)
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[1].category, .shortExtra)
+        XCTAssertEqual(info.titles[2].category, .trailer)
+    }
+
+    func testTVSeasonOverridesMainFeature() {
+        // 3 episodes of similar runtime, plus a short trailer.
+        var info = DiscInfo(name: "S01D01", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "0:42:00", sizeGB: 1.5),
+            makeTitle(id: 1, duration: "0:43:00", sizeGB: 1.5),
+            makeTitle(id: 2, duration: "0:42:30", sizeGB: 1.4),
+            makeTitle(id: 3, duration: "0:01:00", sizeGB: 0.05),
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[0].category, .episode)
+        XCTAssertEqual(info.titles[1].category, .episode)
+        XCTAssertEqual(info.titles[2].category, .episode)
+        XCTAssertNotEqual(info.titles[0].category, .mainFeature,
+                          "TV-shape should not produce a main feature")
+    }
+
+    func testBonusFeatureForLong90PlusMinNonMain() {
+        // A second 90+ min movie on a double-feature disc.
+        var info = DiscInfo(name: "DOUBLE", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "1:50:00", sizeGB: 4.5),
+            makeTitle(id: 1, duration: "1:35:00", sizeGB: 4.0),  // 95 min, ≥90 → bonus feature
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[1].category, .bonusFeature)
+    }
+
+    func testCategorySummaryFormatting() {
+        var info = DiscInfo(name: "X", type: "bluray", titles: [
+            makeTitle(id: 0, duration: "2:00:00", sizeGB: 30.0),
+            makeTitle(id: 1, duration: "0:45:00", sizeGB: 1.5),    // featurette
+            makeTitle(id: 2, duration: "0:10:00", sizeGB: 0.3),    // extra
+            makeTitle(id: 3, duration: "0:00:30", sizeGB: 0.01),   // trailer
+            makeTitle(id: 4, duration: "0:00:30", sizeGB: 0.01),   // trailer
+        ])
+        info.autoLabel()
+        let summary = info.categorySummary
+        XCTAssertTrue(summary.contains("1 main"), summary)
+        XCTAssertTrue(summary.contains("1 featurette"), summary)
+        XCTAssertTrue(summary.contains("1 extra"), summary)
+        XCTAssertTrue(summary.contains("2 trailers"), summary)
+    }
+
+    func testCategorySummaryIsEmptyForEmptyDisc() {
+        let info = DiscInfo(name: "X", type: "dvd", titles: [])
+        XCTAssertEqual(info.categorySummary, "")
+    }
+
+    func testEmptyDiscAutoLabelDoesNotCrash() {
+        var info = DiscInfo(name: "X", type: "dvd", titles: [])
+        info.autoLabel()  // must not crash
+        XCTAssertEqual(info.titles.count, 0)
+    }
+
+    func testLabelDisplayStringSet() {
+        var info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, duration: "1:50:00", sizeGB: 6.0),
+        ])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[0].label, TitleCategory.mainFeature.displayLabel)
+        XCTAssertTrue(info.titles[0].label.contains("Main Feature"))
+    }
+}
