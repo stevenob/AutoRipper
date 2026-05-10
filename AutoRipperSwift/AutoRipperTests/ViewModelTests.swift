@@ -91,7 +91,10 @@ final class QueueViewModelTests: XCTestCase {
     func testStatusLabelWithJobs() {
         let vm = makeVM()
         vm.addJob(discName: "Movie 1", rippedFile: URL(fileURLWithPath: "/tmp/a.mkv"), ripElapsed: 0)
-        XCTAssertTrue(vm.statusLabel.contains("Processing"))
+        // v3.8.1 format: "Job X of N · Y queued" (or just "Job X of N" when
+        // no jobs are pending after the current one).
+        XCTAssertTrue(vm.statusLabel.contains("Job"),
+                      "statusLabel should mention the position: \(vm.statusLabel)")
     }
 
     func testStatusLabelIdle() {

@@ -114,7 +114,18 @@ final class QueueViewModel: ObservableObject {
         let active = jobs.filter { $0.status != .done && $0.status != .failed }
         if active.isEmpty { return "Idle" }
         let done = jobs.filter { $0.status == .done }.count
-        return "Processing \(done + 1) of \(jobs.count)"
+        let queued = jobs.filter { $0.status == .queued }.count
+        let inFlight = active.count - queued
+        // When the queue is mostly done ("Processing 33 of 33" reads as if
+        // we're stuck on the last one but actually means "started job #33"),
+        // surface what's actually happening: "Job 33 of 33 · 32 done".
+        // When still early ("Job 1 of 33 · 32 queued"), the queued count
+        // helps the user see they have a lot of work ahead.
+        let position = done + inFlight  // jobs we've started so far
+        if queued > 0 {
+            return "Job \(position) of \(jobs.count) · \(queued) queued"
+        }
+        return "Job \(position) of \(jobs.count)"
     }
 
     // MARK: - Worker
