@@ -104,6 +104,14 @@ final class AppConfig: ObservableObject {
     @Published var jellyfinApiKey: String {
         didSet { defaults.set(jellyfinApiKey, forKey: "jellyfinApiKey") }
     }
+
+    /// In Auto mode, when a freshly-scanned disc's fingerprint already exists
+    /// in `RippedDiscRegistry`, skip the rip and eject. Default: true. Set to
+    /// false if the user wants Auto mode to re-rip duplicates anyway (e.g. to
+    /// re-do a previously botched rip without manual intervention).
+    @Published var skipAlreadyRippedInAuto: Bool {
+        didSet { defaults.set(skipAlreadyRippedInAuto, forKey: "skipAlreadyRippedInAuto") }
+    }
     /// Structured mid-pipeline state for crash/exit recovery. Set just before
     /// MakeMKV's `ripTitle` (phase = .ripping), updated to .staging while
     /// `StagingService` is copying the rip to its final home, cleared on success
@@ -151,6 +159,7 @@ final class AppConfig: ObservableObject {
         self.plexTvSectionId = d.string(forKey: "plexTvSectionId") ?? ""
         self.jellyfinUrl = d.string(forKey: "jellyfinUrl") ?? ""
         self.jellyfinApiKey = d.string(forKey: "jellyfinApiKey") ?? ""
+        self.skipAlreadyRippedInAuto = d.object(forKey: "skipAlreadyRippedInAuto") as? Bool ?? true
         // One-time migration: legacy `inFlightRipPath` (a directory string) ->
         // structured `inFlightRip` so cleanupOrphanedRip can recognize it. We
         // can't reliably tell which title was being written (the legacy state

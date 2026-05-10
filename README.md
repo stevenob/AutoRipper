@@ -25,6 +25,8 @@ Built with Swift and SwiftUI for macOS 14+.
 | 💾 **NAS Upload** | Copies to NAS, cleans up local files |
 | 📺 **Library refresh** | Optional Plex / Jellyfin webhooks fired after publish so newly ripped media shows up in clients within seconds, not minutes |
 | 🔁 **Duplicate detection** | Each scanned disc is fingerprinted (title structure + sizes); re-inserting a previously-ripped disc surfaces an "Already ripped on \<date\>" banner |
+| ⛔ **Auto-skip duplicates** | In Auto mode, already-ripped discs eject without re-ripping — prevents the auto-eject + drive-auto-close re-rip loop on motorized-tray drives |
+| 🚥 **Phase-aware rip startup** | Real-time status during the 20–60 s `makemkvcon mkv` startup gap (drive auth → reading structure → preparing title → ripping) so the UI doesn't look frozen |
 | 🚧 **Rip Scratch Dir** | Optional local-SSD scratch dir for slow-NAS setups — keeps bandwidth-hungry rips off the network |
 | 🔔 **Notifications** | macOS + Discord alerts for scan, rip, and failures |
 | 🔄 **Update Checker** | Checks GitHub Releases on launch |

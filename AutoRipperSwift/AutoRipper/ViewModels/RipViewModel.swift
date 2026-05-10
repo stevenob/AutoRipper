@@ -46,6 +46,21 @@ final class RipViewModel: ObservableObject {
     /// re-rip the same content during a long batch session.
     /// Cleared on new scan or banner dismiss.
     @Published var previousRipMatch: RippedDiscEntry?
+    /// v3.7.2: substate of `activePhase == .ripping`. Tracks where the rip
+    /// is in its own startup sequence so the UI can show "Reading disc…"
+    /// instead of leaving the user staring at "RIPPING 0%" while
+    /// makemkvcon re-walks the disc structure (~20–60 s on Blu-ray).
+    /// Resets to `.notStarted` between titles and at end of rip.
+    @Published var startupPhase: RipStartupPhase = .notStarted
+    /// v3.7.2: most-recent informational MakeMKV log line, surfaced as a
+    /// caption beneath the rip status. Filters out high-frequency progress
+    /// ticks (PRGV/PRGC/PRGT) and structural data lines (DRV/CINFO/TINFO/SINFO).
+    /// Lets the impatient user see *something* moving during rip startup.
+    @Published var lastInformationalMakeMKVLine: String?
+    /// v3.7.2: when the current rip's MakeMKV process was launched. Used by
+    /// the UI to show an "elapsed" counter while in startup phase.
+    /// Reset between titles. Nil when not ripping.
+    @Published var ripStartedAt: Date?
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
@@ -70,6 +85,17 @@ final class RipViewModel: ObservableObject {
     private let discord: DiscordService
     private let stagingService = StagingService()
     private var runningTask: Task<Void, Never>?
+    /// v3.7.2: in-memory cache of discs the auto loop just skipped because
+    /// they were already in the rip registry. Avoids re-scanning when the
+    /// drive's hardware auto-close pulls the same disc back in moments after
+    /// we ejected it. Keyed by detected volume label (cheap from drutil/
+    /// diskutil — no MakeMKV scan needed). Entries expire after the cooldown
+    /// window so the user can intentionally re-rip after clearing the registry.
+    private var recentlySkippedDiscNames: [(name: String, at: Date)] = []
+    /// Cooldown window for `recentlySkippedDiscNames`. 5 min is long enough
+    /// to absorb the drive's tray-cycle behavior and short enough that an
+    /// intentional re-rip works without restarting the app.
+    private static let recentlySkippedCooldown: TimeInterval = 300
     /// TMDb match for the current disc. Published so the rip hero / queue rows can
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
@@ -84,13 +110,107 @@ final class RipViewModel: ObservableObject {
     /// progress ticks (`PRGV`/`PRGC`/`PRGT`) — they'd otherwise dominate the
     /// log file (~10 lines/sec during a rip). Everything else, especially
     /// `MSG:` rows and `Error` lines, is preserved for post-mortem analysis.
+    ///
+    /// v3.7.2 also: parses MakeMKV's MSG codes during rip startup to keep
+    /// `startupPhase` in sync, and captures the most-recent informational
+    /// MSG line into `lastInformationalMakeMKVLine` so the UI can show it
+    /// as a caption.
     @MainActor
     private func appendMakeMKVLog(_ line: String) {
         logLines.append(line)
-        if line.hasPrefix("PRGV:") || line.hasPrefix("PRGC:") || line.hasPrefix("PRGT:") {
+        // Progress ticks: don't log, but PRGV moves the startup phase to
+        // .ripping if we haven't already seen it.
+        if line.hasPrefix("PRGV:") {
+            if case .ripping = startupPhase {} else {
+                startupPhase = .ripping
+            }
+            return
+        }
+        if line.hasPrefix("PRGC:") || line.hasPrefix("PRGT:") {
             return
         }
         FileLogger.shared.info("makemkv", line)
+        // Update startup phase from MSG codes. Best-effort: a missed code
+        // just means the UI shows a less-specific status, never an error.
+        Self.advanceStartupPhase(&startupPhase, fromLine: line)
+        // Capture informational caption lines. Skip raw structure rows
+        // (DRV/CINFO/TINFO/SINFO) — too noisy and useless to a casual user.
+        if let caption = Self.extractInformationalCaption(line) {
+            lastInformationalMakeMKVLine = caption
+        }
+    }
+
+    /// Pure parser for the rip-startup phase machine. Inputs a current phase
+    /// and a single MakeMKV log line; mutates the phase if the line signals
+    /// a transition. Visible-for-tests so unit tests can drive the FSM
+    /// without spinning up a full RipViewModel + MakeMKV process.
+    static func advanceStartupPhase(_ phase: inout RipStartupPhase, fromLine line: String) {
+        // Once we've reached .ripping, no further MSG can move us back.
+        if case .ripping = phase { return }
+        if line.hasPrefix("MSG:1011") {
+            // "Using LibreDrive mode" — drive auth handshake
+            phase = .openingDrive
+        } else if line.hasPrefix("MSG:2010") {
+            // "Optical drive opened in OS access mode"
+            phase = .openingDrive
+        } else if line.hasPrefix("MSG:3007") {
+            // "Using direct disc access mode" — title walk is starting
+            if phase != .readingDiscStructure {
+                phase = .readingDiscStructure
+            }
+        } else if line.hasPrefix("DRV:") || line.hasPrefix("CINFO:") || line.hasPrefix("TINFO:") || line.hasPrefix("SINFO:") {
+            // Structure walk in progress
+            switch phase {
+            case .notStarted, .startingProcess, .openingDrive:
+                phase = .readingDiscStructure
+            default:
+                break
+            }
+        } else if line.hasPrefix("MSG:5014") {
+            // "Saving N titles into directory ..." — extract title id if present
+            // Format: MSG:5014,131072,2,"Saving 1 titles into directory ...","..."
+            // The structured fields don't directly include a title id, but we
+            // can extract from the saving-title message. For now record that
+            // we've moved past structure-reading.
+            phase = .preparingTitle(extractTitleIdFromSaving(line) ?? -1)
+        }
+    }
+
+    /// Extract a title-id from `MSG:5014` if it's discoverable. Heuristic;
+    /// returns nil if not present.
+    private static func extractTitleIdFromSaving(_ line: String) -> Int? {
+        // Look for "title #N" or "title NN" inside the message string.
+        if let r = line.range(of: #"title\s*#?(\d+)"#, options: .regularExpression) {
+            let match = String(line[r])
+            let digits = match.filter { $0.isNumber }
+            return Int(digits)
+        }
+        return nil
+    }
+
+    /// Pull a human-readable caption out of a MakeMKV log line. Returns nil
+    /// for lines that aren't worth showing in the UI (raw structure, progress
+    /// ticks, malformed). Visible-for-tests.
+    static func extractInformationalCaption(_ line: String) -> String? {
+        if line.hasPrefix("DRV:") || line.hasPrefix("CINFO:")
+            || line.hasPrefix("TINFO:") || line.hasPrefix("SINFO:")
+            || line.hasPrefix("PRGV:") || line.hasPrefix("PRGC:")
+            || line.hasPrefix("PRGT:") {
+            return nil
+        }
+        if line.hasPrefix("MSG:") {
+            // Format: MSG:CODE,FLAGS,COUNT,"MESSAGE","FORMAT",arg1,arg2,...
+            // The first quoted string is a fully-formatted human message.
+            // Extract it for display.
+            if let firstQ = line.firstIndex(of: "\"") {
+                let after = line.index(after: firstQ)
+                if let closing = line[after...].firstIndex(of: "\"") {
+                    let msg = String(line[after..<closing])
+                    if !msg.isEmpty { return msg }
+                }
+            }
+        }
+        return nil
     }
 
     init(config: AppConfig = .shared) {
@@ -415,6 +535,11 @@ final class RipViewModel: ObservableObject {
                 currentRippingTitleId = tid
                 titleRipStatuses[tid] = .ripping(percent: 0)
                 activePhase = .ripping
+                // v3.7.2: reset startup phase + caption + counter for the
+                // new title's rip startup.
+                startupPhase = .startingProcess
+                lastInformationalMakeMKVLine = nil
+                ripStartedAt = Date()
                 let totalTitles = titlesToRip.count
                 let titleIndex = idx
                 let titleStart = Date()
@@ -654,6 +779,10 @@ final class RipViewModel: ObservableObject {
             ripProgress = 1.0
             statusText = "Rip complete"
             isRipping = false
+            // v3.7.2: clear startup tracking when rip ends.
+            startupPhase = .notStarted
+            ripStartedAt = nil
+            lastInformationalMakeMKVLine = nil
             if config.preventSleep { SleepAssertion.shared.release() }
             currentRippingTitleId = nil
             // Stash the just-finished media so the "insert next disc" hero can
@@ -723,6 +852,21 @@ final class RipViewModel: ObservableObject {
         while fullAutoEnabled && !Task.isCancelled {
             let detected = await currentDiscType()
             if !detected.isEmpty {
+                // v3.7.2: re-detect the disc to update detectedDiscName so the
+                // cooldown check below has the freshest volume label.
+                detectDisc()
+                // Give detectDisc's detached task a moment to populate
+                // detectedDiscName from diskutil before we check the cache.
+                try? await Task.sleep(for: .seconds(2))
+                if isRecentlySkipped(volumeName: detectedDiscName) {
+                    FileLogger.shared.info("rip-vm",
+                        "auto: ignoring \(detectedDiscName) — recently skipped (within cooldown)")
+                    statusText = "Auto — same disc still loaded, ignoring"
+                    // Re-eject; some drives need a nudge.
+                    ejectDisc()
+                    try? await Task.sleep(for: .seconds(8))
+                    continue
+                }
                 FileLogger.shared.info("rip-vm", "auto: new disc detected (\(detected)), starting Full Auto")
                 statusText = "Auto — \(detected) detected, scanning…"
                 // Give MakeMKV a moment to see the freshly-mounted disc — some drives
@@ -742,6 +886,21 @@ final class RipViewModel: ObservableObject {
             try? await Task.sleep(for: .seconds(5))
         }
         FileLogger.shared.info("rip-vm", "auto: stopped (fullAutoEnabled=\(fullAutoEnabled))")
+    }
+
+    /// True if `volumeName` was added to `recentlySkippedDiscNames` within the
+    /// cooldown window. Empty names never match.
+    func isRecentlySkipped(volumeName: String) -> Bool {
+        guard !volumeName.isEmpty else { return false }
+        pruneRecentlySkipped()
+        return recentlySkippedDiscNames.contains { $0.name == volumeName }
+    }
+
+    /// Drop expired entries from the recently-skipped cache. Called before
+    /// every read and after every write.
+    func pruneRecentlySkipped() {
+        let cutoff = Date().addingTimeInterval(-Self.recentlySkippedCooldown)
+        recentlySkippedDiscNames.removeAll { $0.at < cutoff }
     }
 
     /// Synchronous-style query of drutil for current disc type, "" if no disc.
@@ -829,12 +988,33 @@ final class RipViewModel: ObservableObject {
                 info.autoLabel()
                 await lookupTMDb(for: &info)
                 self.discInfo = info
-                // Even in Full Auto, run the duplicate check — surfaces in
-                // the disc panel if the user happens to glance at the screen
-                // mid-batch. Doesn't gate the rip; Full Auto proceeds.
                 let fp = DiscFingerprintService.fingerprint(info)
                 self.previousRipMatch = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
                 isScanning = false
+
+                // v3.7.2: skip auto-re-rip when the disc is already in the
+                // registry. Prevents the auto-eject + drive-auto-close +
+                // re-scan loop the user hit on the LG WH16NS40. The user
+                // can disable via Settings → Library → "Skip already-ripped".
+                if let prior = self.previousRipMatch, config.skipAlreadyRippedInAuto {
+                    let dateStr = ISO8601DateFormatter().string(from: prior.date)
+                    FileLogger.shared.info("rip-vm",
+                        "auto: skipping already-ripped disc \(prior.discName) (originally ripped \(dateStr))")
+                    statusText = "Skipped — already ripped"
+                    NotificationService.shared.notify(
+                        title: "Skipped: already ripped",
+                        message: "\(prior.discName) — originally on \(prior.date.formatted(date: .abbreviated, time: .shortened))"
+                    )
+                    // Cache the disc name so the auto poll loop doesn't
+                    // bother re-scanning it if the drive's auto-close
+                    // pulls it back in shortly.
+                    let detectedName = self.detectedDiscName.isEmpty ? info.name : self.detectedDiscName
+                    self.recentlySkippedDiscNames.append((name: detectedName, at: Date()))
+                    self.pruneRecentlySkipped()
+                    // Eject so the auto poll can move on.
+                    ejectDisc()
+                    return
+                }
 
                 // Pick the largest title above min duration
                 let candidates = info.titles.filter { $0.durationSeconds >= config.minDuration }
@@ -890,6 +1070,10 @@ final class RipViewModel: ObservableObject {
         isRipping = false
         ripProgress = 0
         currentRippingTitleId = nil
+        // v3.7.2: clear startup tracking on abort
+        startupPhase = .notStarted
+        ripStartedAt = nil
+        lastInformationalMakeMKVLine = nil
         // Mark any in-flight title as failed so the UI doesn't show a half-ripped
         // bar forever.
         for (id, status) in titleRipStatuses {
@@ -924,6 +1108,21 @@ enum RipPhase: Sendable, Equatable {
     case idle
     case ripping
     case staging
+}
+
+/// Substate of `.ripping` for the ~20–60 s "startup" gap between when
+/// `makemkvcon mkv` is launched and the first PRGV progress event arrives.
+/// Driven by parsing MakeMKV's MSG codes in the log stream so the user
+/// gets meaningful feedback during what's otherwise a silent dead zone
+/// that *looks* like a duplicate scan but is actually the rip command
+/// re-opening + re-walking the disc.
+enum RipStartupPhase: Sendable, Equatable {
+    case notStarted
+    case startingProcess           // makemkvcon launched; nothing said yet
+    case openingDrive              // saw MSG:1011 / 2010 — drive being authorized + opened
+    case readingDiscStructure      // titles/CINFO being walked (post drive-open, pre 5014)
+    case preparingTitle(Int)       // saw MSG:5014 — about to start saving
+    case ripping                   // first PRGV — switch to existing progress UI
 }
 
 /// TV episode assignment for a single title on a series disc. Set by the

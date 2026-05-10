@@ -1375,3 +1375,68 @@ final class RippedDiscRegistryTests: XCTestCase {
         XCTAssertEqual(all.last?.fingerprint, "old")
     }
 }
+
+// MARK: - RipStartupPhase parser tests (v3.7.2)
+
+@MainActor
+final class RipStartupPhaseTests: XCTestCase {
+
+    func testParserStartsAtStartingProcessAndProgressesViaMSG() {
+        var phase: RipStartupPhase = .startingProcess
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "MSG:1011,0,1,\"Using LibreDrive mode (v06.3 id=…)\",\"…\"")
+        XCTAssertEqual(phase, .openingDrive)
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "MSG:2010,0,1,\"Optical drive opened in OS access mode\",\"…\"")
+        XCTAssertEqual(phase, .openingDrive)
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "DRV:0,2,999,12,\"BD-RE HL-DT-ST BD-RE\"")
+        XCTAssertEqual(phase, .readingDiscStructure)
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "TINFO:0,9,0,\"1:30:00\"")
+        XCTAssertEqual(phase, .readingDiscStructure)
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "MSG:5014,131072,2,\"Saving 1 titles into directory ...\",\"…\"")
+        if case .preparingTitle = phase {} else { XCTFail("expected .preparingTitle, got \(phase)") }
+    }
+
+    func testParserNeverMovesBackOnceRipping() {
+        var phase: RipStartupPhase = .ripping
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "MSG:1011,0,1,\"Using LibreDrive mode\",\"…\"")
+        XCTAssertEqual(phase, .ripping, "should stay .ripping once reached")
+        RipViewModel.advanceStartupPhase(&phase, fromLine: "DRV:0,...")
+        XCTAssertEqual(phase, .ripping)
+    }
+
+    func testCaptionExtractorPullsHumanMessage() {
+        let line = "MSG:5014,131072,2,\"Saving 1 titles into directory file:///Volumes/X/Foo\",\"format\""
+        let cap = RipViewModel.extractInformationalCaption(line)
+        XCTAssertEqual(cap, "Saving 1 titles into directory file:///Volumes/X/Foo")
+    }
+
+    func testCaptionExtractorSkipsStructuralLines() {
+        XCTAssertNil(RipViewModel.extractInformationalCaption("DRV:0,2,999"))
+        XCTAssertNil(RipViewModel.extractInformationalCaption("CINFO:1,0,\"…\""))
+        XCTAssertNil(RipViewModel.extractInformationalCaption("TINFO:1,9,0,\"1:30:00\""))
+        XCTAssertNil(RipViewModel.extractInformationalCaption("SINFO:1,0,1,0,\"…\""))
+        XCTAssertNil(RipViewModel.extractInformationalCaption("PRGV:50,100,65535"))
+        XCTAssertNil(RipViewModel.extractInformationalCaption("PRGC:0,0,\"…\""))
+        XCTAssertNil(RipViewModel.extractInformationalCaption("PRGT:0,0,\"…\""))
+    }
+
+    func testCaptionExtractorReturnsNilForMalformed() {
+        XCTAssertNil(RipViewModel.extractInformationalCaption("not-a-msg-line"))
+        XCTAssertNil(RipViewModel.extractInformationalCaption(""))
+    }
+}
+
+// MARK: - Recently-skipped cooldown tests (v3.7.2)
+
+@MainActor
+final class RecentlySkippedCooldownTests: XCTestCase {
+
+    func testEmptyVolumeNameNeverMatches() {
+        let vm = RipViewModel()
+        XCTAssertFalse(vm.isRecentlySkipped(volumeName: ""))
+    }
+
+    func testFreshVolumeNameDoesNotMatch() {
+        let vm = RipViewModel()
+        XCTAssertFalse(vm.isRecentlySkipped(volumeName: "RANDOM_DISC"))
+    }
+}

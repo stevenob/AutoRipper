@@ -203,6 +203,35 @@ struct DiscInfoColumn: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+            // v3.7.2: rip-startup phase label + elapsed counter, shown only
+            // during the dead-zone between Rip click and the first real
+            // progress tick (when MakeMKV is opening + re-walking the disc).
+            // Once startupPhase == .ripping we hide this — PRGV-driven %
+            // takes over.
+            if let startupCaption = startupPhaseCaption {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .controlSize(.mini)
+                    Text(startupCaption)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let elapsed = startupElapsedString {
+                        Text(elapsed)
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let info = ripVM.lastInformationalMakeMKVLine, !info.isEmpty {
+                Text(info)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
         .padding(12)
         .background(phaseTint.opacity(0.10))
@@ -211,6 +240,37 @@ struct DiscInfoColumn: View {
                 .stroke(phaseTint.opacity(0.25), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// Friendly label for the current rip-startup phase, or nil when the
+    /// rip is past startup (PRGV active) or hasn't started yet.
+    private var startupPhaseCaption: String? {
+        switch ripVM.startupPhase {
+        case .notStarted, .ripping:
+            return nil
+        case .startingProcess:
+            return "Starting MakeMKV…"
+        case .openingDrive:
+            return "Authenticating drive…"
+        case .readingDiscStructure:
+            return "Reading disc structure…"
+        case .preparingTitle(let id):
+            return id < 0 ? "Preparing title…" : "Preparing title \(id)…"
+        }
+    }
+
+    /// MM:SS string of "elapsed since rip startup began", refreshing once
+    /// per second via the @Published ripStartedAt + a TimelineView would be
+    /// ideal but to keep this lightweight we just return the snapshot —
+    /// SwiftUI re-renders this view when other published values update,
+    /// which happens at MakeMKV's MSG cadence (multiple per second during
+    /// startup) so it visibly ticks.
+    private var startupElapsedString: String? {
+        guard let started = ripVM.ripStartedAt,
+              ripVM.startupPhase != .notStarted,
+              ripVM.startupPhase != .ripping else { return nil }
+        let elapsed = Int(Date().timeIntervalSince(started))
+        return String(format: "%d:%02d", elapsed / 60, elapsed % 60)
     }
 
     // (rippingBlock from previous version dropped — replaced by hero version above)

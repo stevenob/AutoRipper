@@ -385,6 +385,8 @@ private struct LibraryRefreshPane: View {
     @State private var revealJellyfinKey = false
     @State private var plexStatus: String = ""
     @State private var jellyfinStatus: String = ""
+    @State private var registryCount: Int = 0
+    @State private var showClearConfirm = false
 
     var body: some View {
         Form {
@@ -474,8 +476,52 @@ private struct LibraryRefreshPane: View {
             } header: {
                 Text("Jellyfin")
             }
+
+            Section {
+                Toggle("Skip already-ripped discs in Auto mode", isOn: $config.skipAlreadyRippedInAuto)
+                HStack(alignment: .top) {
+                    Spacer().frame(width: 130)
+                    Text("When Auto detects a disc whose fingerprint is in the registry, it ejects without ripping. Prevents the auto-eject + drive-auto-close re-rip loop on motorized-tray drives. Disable to always rip duplicates.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+                HStack {
+                    Text("Recorded discs:").frame(width: 130, alignment: .trailing)
+                    Text("\(registryCount)")
+                        .font(.body)
+                        .monospacedDigit()
+                    Spacer()
+                    Button("Clear history…") { showClearConfirm = true }
+                        .disabled(registryCount == 0)
+                }
+            } header: {
+                Text("Duplicate detection")
+            }
+            .confirmationDialog(
+                "Clear ripped-disc history?",
+                isPresented: $showClearConfirm
+            ) {
+                Button("Clear all \(registryCount) entries", role: .destructive) {
+                    Task {
+                        await RippedDiscRegistry.shared.clear()
+                        await refreshRegistryCount()
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("AutoRipper will no longer recognize previously-ripped discs as duplicates. This cannot be undone.")
+            }
         }
         .formStyle(.grouped)
+        .task {
+            await refreshRegistryCount()
+        }
+    }
+
+    private func refreshRegistryCount() async {
+        registryCount = await RippedDiscRegistry.shared.all().count
     }
 
     private func plexConfigured(isTV: Bool) -> Bool {
@@ -792,6 +838,7 @@ private struct AdvancedPane: View {
             "plexMoviesSectionId": config.plexMoviesSectionId,
             "plexTvSectionId": config.plexTvSectionId,
             "jellyfinUrl": config.jellyfinUrl,
+            "skipAlreadyRippedInAuto": config.skipAlreadyRippedInAuto,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
@@ -855,5 +902,6 @@ private struct AdvancedPane: View {
         if let v = dict["plexTvSectionId"]      as? String { config.plexTvSectionId = v }
         if let v = dict["jellyfinUrl"]          as? String { config.jellyfinUrl = v }
         if let v = dict["jellyfinApiKey"]       as? String { config.jellyfinApiKey = v }
+        if let v = dict["skipAlreadyRippedInAuto"] as? Bool { config.skipAlreadyRippedInAuto = v }
     }
 }
