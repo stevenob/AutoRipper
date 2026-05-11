@@ -800,6 +800,31 @@ final class RipViewModel: ObservableObject {
 
             if config.autoEject { ejectDisc() }
 
+            // v3.11.1: protect against post-rip re-detect loop. The drive's
+            // hardware auto-close behavior (LG WH16NS40 etc.) can pull the
+            // just-ejected disc back in before the queue's publish step
+            // records its fingerprint in RippedDiscRegistry — leaving a
+            // window where the auto poll loop sees a "new" disc that's
+            // actually the same one we just ripped. Add its volume label
+            // to the in-memory cooldown cache so the poll loop ignores it
+            // until the registry catches up (or the user removes the disc).
+            //
+            // We use the SAME 5-min cooldown window as the existing
+            // recentlySkippedDiscNames cache. By the time it expires, the
+            // queue's publish step (worst case ~30 min on slow NAS but
+            // typically much faster) should have recorded the fingerprint
+            // in the persistent registry, which will then take over as the
+            // duplicate guard.
+            if fullAutoEnabled {
+                let justRippedName = detectedDiscName.isEmpty ? info.name : detectedDiscName
+                if !justRippedName.isEmpty {
+                    recentlySkippedDiscNames.append((name: justRippedName, at: Date()))
+                    pruneRecentlySkipped()
+                    FileLogger.shared.info("rip-vm",
+                        "auto: post-rip cooldown set for \(justRippedName) (5 min)")
+                }
+            }
+
             // Reset UX after a brief delay so the user sees "Rip complete"
             try? await Task.sleep(for: .seconds(3))
             discInfo = nil
