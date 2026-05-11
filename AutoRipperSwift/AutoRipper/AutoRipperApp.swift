@@ -11,6 +11,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         ProcessTracker.shared.terminateAll()
+        // v3.11.4: force-flush UserDefaults before exit. cfprefsd ordinarily
+        // flushes on graceful termination, but the in-app updater's
+        // download-and-install flow puts pressure on the timing — the
+        // update helper script can `kill` AutoRipper before cfprefsd has
+        // had time to persist a recent `defaults.set` (e.g. from a setting
+        // the user just toggled in the update banner). Force-syncing here
+        // guarantees the latest values land on disk before terminate.
+        UserDefaults(suiteName: "group.com.autoripper")?.synchronize()
+        UserDefaults.standard.synchronize()
         FileLogger.shared.info("app", "AutoRipper shutting down")
         log.info("AutoRipper shutting down")
     }

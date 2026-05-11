@@ -183,6 +183,14 @@ final class UpdateService: ObservableObject {
                 try proc.run()
                 FileLogger.shared.info("update", "launched install helper, quitting now")
 
+                // v3.11.4: force-flush UserDefaults before terminate. The
+                // install helper's wait loop polls every 0.5s for 10s for
+                // AutoRipper to exit; meanwhile cfprefsd's async flush of
+                // any settings the user just touched might lag. Explicit
+                // sync here means the next launch of the freshly-replaced
+                // bundle reads the up-to-date values.
+                UserDefaults(suiteName: "group.com.autoripper")?.synchronize()
+                UserDefaults.standard.synchronize()
                 // Brief delay so the helper script is definitely running before we exit.
                 try? await Task.sleep(for: .milliseconds(300))
                 NSApp.terminate(nil)
