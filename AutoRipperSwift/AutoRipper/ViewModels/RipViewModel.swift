@@ -52,6 +52,12 @@ final class RipViewModel: ObservableObject {
     /// makemkvcon re-walks the disc structure (~20–60 s on Blu-ray).
     /// Resets to `.notStarted` between titles and at end of rip.
     @Published var startupPhase: RipStartupPhase = .notStarted
+    /// v3.11.2: true when Auto mode has finished scanning a disc and is
+    /// paused awaiting the user's "Rip" click. Set when
+    /// `config.autoConfirmBeforeRip == true` AND the scan in `fullAuto`
+    /// completed. Cleared as soon as `ripSelected` starts, on abort, or
+    /// on a new scan. Wired into the UI's Rip-button enablement.
+    @Published var awaitingAutoRipConfirm: Bool = false
     /// v3.7.2: most-recent informational MakeMKV log line, surfaced as a
     /// caption beneath the rip status. Filters out high-frequency progress
     /// ticks (PRGV/PRGC/PRGT) and structural data lines (DRV/CINFO/TINFO/SINFO).
@@ -452,6 +458,7 @@ final class RipViewModel: ObservableObject {
         discCandidates = []
         unidentifiedDiscName = nil
         previousRipMatch = nil
+        awaitingAutoRipConfirm = false  // v3.11.2
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -494,6 +501,10 @@ final class RipViewModel: ObservableObject {
 
     func ripSelected() {
         guard !selectedTitles.isEmpty, !isRipping, let info = discInfo else { return }
+        // v3.11.2: clearing the pause flag the moment a rip starts means the
+        // UI's Rip button can return to its standard disabled-while-ripping
+        // state and the auto loop knows the user committed.
+        awaitingAutoRipConfirm = false
         isRipping = true
         if config.preventSleep { SleepAssertion.shared.acquire(reason: "AutoRipper rip in progress") }
         ripProgress = 0
@@ -1048,6 +1059,23 @@ final class RipViewModel: ObservableObject {
                     return
                 }
                 selectedTitles = [best.id]
+
+                // v3.11.2: opt-in "review before rip" pause. When enabled,
+                // Auto stops here and waits for the user to click the big
+                // Rip button. The auto poll loop is paused via the
+                // awaitingAutoRipConfirm flag — once the user presses Rip,
+                // ripSelected runs and the standard post-rip eject + poll
+                // path resumes. The user can also abort (ejects without
+                // ripping) via the Abort button.
+                if config.autoConfirmBeforeRip {
+                    awaitingAutoRipConfirm = true
+                    statusText = "Auto — review titles and press Rip"
+                    FileLogger.shared.info("rip-vm", "auto: paused for user confirmation")
+                    // Don't call ripSelected() — the UI's Rip button will
+                    // invoke it when the user clicks.
+                    return
+                }
+
                 ripSelected()
             } catch {
                 statusText = "Full Auto failed: \(error.localizedDescription)"
@@ -1110,6 +1138,7 @@ final class RipViewModel: ObservableObject {
         // Abort always exits the auto loop. The user must explicitly re-enable
         // Full Auto to resume hands-free behavior.
         fullAutoEnabled = false
+        awaitingAutoRipConfirm = false  // v3.11.2
         activePhase = .idle
         config.inFlightRip = nil
     }

@@ -615,15 +615,24 @@ struct DiscPaneView: View {
             }
 
             if ripVM.discInfo != nil && !ripVM.isRipping && !ripVM.isScanning {
-                Button(ripVM.fullAutoEnabled ? "Rip & Encode" : "Rip") {
-                    ripVM.ripSelected()
-                }
-                .disabled(ripVM.selectedTitles.isEmpty)
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("r", modifiers: .command)
+                // v3.11.2: when Auto is paused awaiting confirmation, show
+                // a more emphatic label so the user knows the loop is
+                // actively waiting on them.
+                Button(ripButtonLabel) { ripVM.ripSelected() }
+                    .disabled(ripVM.selectedTitles.isEmpty)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("r", modifiers: .command)
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// v3.11.2: rip button label varies by state. "Rip Now" makes it obvious
+    /// when Auto is paused waiting for user confirmation.
+    private var ripButtonLabel: String {
+        if ripVM.awaitingAutoRipConfirm { return "Rip Now" }
+        if ripVM.fullAutoEnabled { return "Rip & Encode" }
+        return "Rip"
     }
 }

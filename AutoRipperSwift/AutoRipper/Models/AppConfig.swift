@@ -112,6 +112,16 @@ final class AppConfig: ObservableObject {
     @Published var skipAlreadyRippedInAuto: Bool {
         didSet { defaults.set(skipAlreadyRippedInAuto, forKey: "skipAlreadyRippedInAuto") }
     }
+
+    /// v3.11.2: when on, Auto mode pauses after scanning each disc and waits
+    /// for the user to click the prominent "Rip" button before proceeding.
+    /// Default: false (existing fully-auto behavior preserved). Useful when
+    /// the user wants the auto loop's convenience (next-disc detection, tray
+    /// close, eject) but wants to eyeball each scan before committing to a
+    /// rip — for example to swap the TMDb match for a misidentified disc.
+    @Published var autoConfirmBeforeRip: Bool {
+        didSet { defaults.set(autoConfirmBeforeRip, forKey: "autoConfirmBeforeRip") }
+    }
     /// Structured mid-pipeline state for crash/exit recovery. Set just before
     /// MakeMKV's `ripTitle` (phase = .ripping), updated to .staging while
     /// `StagingService` is copying the rip to its final home, cleared on success
@@ -160,6 +170,7 @@ final class AppConfig: ObservableObject {
         self.jellyfinUrl = d.string(forKey: "jellyfinUrl") ?? ""
         self.jellyfinApiKey = d.string(forKey: "jellyfinApiKey") ?? ""
         self.skipAlreadyRippedInAuto = d.object(forKey: "skipAlreadyRippedInAuto") as? Bool ?? true
+        self.autoConfirmBeforeRip = d.object(forKey: "autoConfirmBeforeRip") as? Bool ?? false
         // One-time migration: legacy `inFlightRipPath` (a directory string) ->
         // structured `inFlightRip` so cleanupOrphanedRip can recognize it. We
         // can't reliably tell which title was being written (the legacy state

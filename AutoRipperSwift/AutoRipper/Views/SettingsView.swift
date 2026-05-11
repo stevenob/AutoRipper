@@ -487,6 +487,16 @@ private struct LibraryRefreshPane: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                 }
+
+                Toggle("Pause for review before each Auto rip", isOn: $config.autoConfirmBeforeRip)
+                HStack(alignment: .top) {
+                    Spacer().frame(width: 130)
+                    Text("After Auto scans a new disc, wait for you to click the Rip Now button before starting. The auto loop still detects the next disc and ejects on completion — but each rip needs explicit confirmation. Useful for reviewing the TMDb identification before committing.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
                 HStack {
                     Text("Recorded discs:").frame(width: 130, alignment: .trailing)
                     Text("\(registryCount)")
@@ -850,6 +860,7 @@ private struct AdvancedPane: View {
             "plexTvSectionId": config.plexTvSectionId,
             "jellyfinUrl": config.jellyfinUrl,
             "skipAlreadyRippedInAuto": config.skipAlreadyRippedInAuto,
+            "autoConfirmBeforeRip": config.autoConfirmBeforeRip,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
@@ -914,5 +925,6 @@ private struct AdvancedPane: View {
         if let v = dict["jellyfinUrl"]          as? String { config.jellyfinUrl = v }
         if let v = dict["jellyfinApiKey"]       as? String { config.jellyfinApiKey = v }
         if let v = dict["skipAlreadyRippedInAuto"] as? Bool { config.skipAlreadyRippedInAuto = v }
+        if let v = dict["autoConfirmBeforeRip"]    as? Bool { config.autoConfirmBeforeRip = v }
     }
 }
