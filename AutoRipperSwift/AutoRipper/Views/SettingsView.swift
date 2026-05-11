@@ -178,6 +178,35 @@ private struct GeneralPane: View {
             }
 
             Toggle(isOn: $config.autoEject) { Text("Auto-eject after rip") }
+
+            // v3.11.3: drive read-speed slider — writes to MakeMKV's
+            // settings.conf io_SingleDriveReadSpeed key. Lower = quieter
+            // drive at the cost of slower rips. Discrete steps so users
+            // pick from sensible values, not arbitrary numbers.
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Drive speed:").frame(width: 130, alignment: .trailing)
+                    Picker("", selection: $config.makemkvReadSpeed) {
+                        Text("MakeMKV default").tag(0)
+                        Text("Quiet (4× — loudest disc \"shhh\")").tag(4)
+                        Text("Balanced (8×)").tag(8)
+                        Text("Fast (16×)").tag(16)
+                        Text("Maximum (32×)").tag(32)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 280)
+                    Spacer()
+                }
+                HStack(alignment: .top) {
+                    Spacer().frame(width: 130)
+                    Text("Caps MakeMKV's drive read speed (writes io_SingleDriveReadSpeed to ~/Library/Application Support/MakeMKV/settings.conf). Lower = quieter drive, longer rip times. No quality difference on clean discs; slower is safer for scratched media. Apply takes effect on the next rip — restart MakeMKV-tied process if needed.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+            }
         }
         .formStyle(.grouped)
     }

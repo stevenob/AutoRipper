@@ -1692,3 +1692,62 @@ final class EditionHintTests: XCTestCase {
                       "label=\(info.titles[1].label)")
     }
 }
+
+// MARK: - MakeMKVConfigService tests (v3.11.3)
+
+final class MakeMKVConfigServiceTests: XCTestCase {
+
+    func testApplySettingAddsNewKey() {
+        let input: [String] = []
+        let out = MakeMKVConfigService.applySetting(lines: input, key: "io_SingleDriveReadSpeed", value: "8")
+        XCTAssertEqual(out, ["io_SingleDriveReadSpeed = \"8\""])
+    }
+
+    func testApplySettingReplacesExistingKey() {
+        let input = [
+            "# top comment",
+            "app_DefaultOutputFileName = \"foo\"",
+            "io_SingleDriveReadSpeed = \"32\"",
+            "app_ExpertMode = \"true\"",
+        ]
+        let out = MakeMKVConfigService.applySetting(lines: input, key: "io_SingleDriveReadSpeed", value: "8")
+        XCTAssertEqual(out.count, 4)
+        XCTAssertEqual(out[2], "io_SingleDriveReadSpeed = \"8\"")
+        // Other lines untouched
+        XCTAssertEqual(out[0], "# top comment")
+        XCTAssertEqual(out[1], "app_DefaultOutputFileName = \"foo\"")
+        XCTAssertEqual(out[3], "app_ExpertMode = \"true\"")
+    }
+
+    func testApplySettingNilRemovesKey() {
+        let input = [
+            "app_KeepTracks = \"true\"",
+            "io_SingleDriveReadSpeed = \"8\"",
+            "app_Verbose = \"true\"",
+        ]
+        let out = MakeMKVConfigService.applySetting(lines: input, key: "io_SingleDriveReadSpeed", value: nil)
+        XCTAssertEqual(out.count, 2)
+        XCTAssertFalse(out.contains { $0.contains("io_SingleDriveReadSpeed") })
+    }
+
+    func testApplySettingDoesNotMatchKeyPrefix() {
+        // io_SingleDriveReadSpeed_Foo must NOT be touched when we update
+        // io_SingleDriveReadSpeed.
+        let input = ["io_SingleDriveReadSpeedFoo = \"bar\""]
+        let out = MakeMKVConfigService.applySetting(lines: input, key: "io_SingleDriveReadSpeed", value: "8")
+        // Expect the existing line preserved AND a new line appended.
+        XCTAssertTrue(out.contains("io_SingleDriveReadSpeedFoo = \"bar\""))
+        XCTAssertTrue(out.contains("io_SingleDriveReadSpeed = \"8\""))
+    }
+
+    func testApplySettingPreservesCommentsThatMentionKey() {
+        let input = [
+            "# io_SingleDriveReadSpeed default is fast",
+            "app_Foo = \"bar\"",
+        ]
+        let out = MakeMKVConfigService.applySetting(lines: input, key: "io_SingleDriveReadSpeed", value: "4")
+        // Comment should still be there.
+        XCTAssertTrue(out[0].hasPrefix("#"))
+        XCTAssertTrue(out.contains("io_SingleDriveReadSpeed = \"4\""))
+    }
+}

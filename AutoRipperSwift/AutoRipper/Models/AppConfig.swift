@@ -122,6 +122,23 @@ final class AppConfig: ObservableObject {
     @Published var autoConfirmBeforeRip: Bool {
         didSet { defaults.set(autoConfirmBeforeRip, forKey: "autoConfirmBeforeRip") }
     }
+
+    /// v3.11.3: cap MakeMKV's drive read speed for noise / longevity. 0 =
+    /// no override (MakeMKV decides). 4 = quietest. 8 = balanced. 16 =
+    /// fast. Above 32 = practically max. Mirrors MakeMKV's
+    /// `io_SingleDriveReadSpeed` setting; writing this property triggers
+    /// `MakeMKVConfigService` to persist the value to MakeMKV's own
+    /// settings.conf so the next rip picks it up.
+    @Published var makemkvReadSpeed: Int {
+        didSet {
+            defaults.set(makemkvReadSpeed, forKey: "makemkvReadSpeed")
+            // Mirror to MakeMKV's config so the underlying CLI sees it
+            // on its next launch. Failure is logged but doesn't surface
+            // here — Settings UI shows the actual MakeMKV-side value
+            // separately via MakeMKVConfigService.currentDriveReadSpeed().
+            MakeMKVConfigService.setDriveReadSpeed(makemkvReadSpeed)
+        }
+    }
     /// Structured mid-pipeline state for crash/exit recovery. Set just before
     /// MakeMKV's `ripTitle` (phase = .ripping), updated to .staging while
     /// `StagingService` is copying the rip to its final home, cleared on success
@@ -171,6 +188,17 @@ final class AppConfig: ObservableObject {
         self.jellyfinApiKey = d.string(forKey: "jellyfinApiKey") ?? ""
         self.skipAlreadyRippedInAuto = d.object(forKey: "skipAlreadyRippedInAuto") as? Bool ?? true
         self.autoConfirmBeforeRip = d.object(forKey: "autoConfirmBeforeRip") as? Bool ?? false
+        // v3.11.3: seed from MakeMKV's existing settings.conf if we haven't
+        // stored our own value yet. That way an existing user who hand-edited
+        // settings.conf sees their current value reflected in the AutoRipper UI
+        // instead of a misleading "default" reading.
+        if let ourStored = d.object(forKey: "makemkvReadSpeed") as? Int {
+            self.makemkvReadSpeed = ourStored
+        } else if let fromMakemkv = MakeMKVConfigService.currentDriveReadSpeed() {
+            self.makemkvReadSpeed = fromMakemkv
+        } else {
+            self.makemkvReadSpeed = 0
+        }
         // One-time migration: legacy `inFlightRipPath` (a directory string) ->
         // structured `inFlightRip` so cleanupOrphanedRip can recognize it. We
         // can't reliably tell which title was being written (the legacy state
