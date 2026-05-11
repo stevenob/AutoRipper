@@ -18,7 +18,10 @@ struct QueueView: View {
             selection: $selection,
             queueVM: queueVM,
             emptyMessage: "Queue is empty",
-            footer: AnyView(DiskSpaceBar(outputDir: AppConfig.shared.outputDir)),
+            footer: AnyView(VStack(spacing: 0) {
+                ResourceSaturationStrip(queueVM: queueVM)
+                DiskSpaceBar(outputDir: AppConfig.shared.outputDir)
+            }),
             groupByDisc: true,
             allowReorder: true
         )
@@ -563,6 +566,90 @@ struct DiskSpaceBar: View {
         let gb = Double(bytes) / 1_073_741_824
         if gb >= 100 { return String(format: "%.0f GB", gb) }
         return String(format: "%.1f GB", gb)
+    }
+}
+
+// MARK: - ResourceSaturationStrip (v3.11.0)
+
+/// Bottom-of-Queue saturation summary: shows what each physical resource
+/// (CPU encoder, NAS publish) is doing right now. Helps the user see at a
+/// glance where time is being spent on a long batch, and whether anything
+/// is sitting idle (e.g. NAS up to date but encoder bottlenecked).
+///
+/// Three slots:
+///   * Encode (HandBrake)
+///   * Publish (NAS upload)
+///   * (Optional in future) Rip — needs RipViewModel injection
+///
+/// Each slot is either a tinted "busy" pill with the disc name + progress,
+/// or a dim "idle" placeholder.
+struct ResourceSaturationStrip: View {
+    @ObservedObject var queueVM: QueueViewModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            slot(label: "Encode",
+                 systemImage: "cpu",
+                 busyTint: .blue,
+                 busyJob: encodingJob)
+            slot(label: "Publish",
+                 systemImage: "externaldrive.connected.to.line.below",
+                 busyTint: .cyan,
+                 busyJob: uploadingJob)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+    }
+
+    @ViewBuilder
+    private func slot(label: String, systemImage: String, busyTint: Color, busyJob: Job?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption2)
+                .foregroundStyle(busyJob == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(busyTint))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(busyJob == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                if let job = busyJob {
+                    HStack(spacing: 4) {
+                        Text(job.mediaResult?.displayTitle ?? job.discName)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("\(job.progress)%")
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("idle")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(busyJob == nil ? Color.gray.opacity(0.05) : busyTint.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(busyJob == nil ? Color.gray.opacity(0.15) : busyTint.opacity(0.30), lineWidth: 1)
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var encodingJob: Job? {
+        queueVM.jobs.first { $0.status == .encoding }
+    }
+
+    private var uploadingJob: Job? {
+        queueVM.jobs.first { $0.status == .uploading }
     }
 }
 
