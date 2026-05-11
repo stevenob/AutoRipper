@@ -262,20 +262,29 @@ actor HandBrakeService {
     }
 
     /// Pick the best HandBrake preset based on video resolution string (e.g. "1920x1080").
+    /// Auto-select a HandBrake preset for `resolution` (formatted "WxH",
+    /// e.g. "720x480"). All sources route through HandBrake's Apple
+    /// VideoToolbox H.265 presets on Apple Silicon — even DVDs at 480p
+    /// encode 5–10x faster via VideoToolbox than via the stock software
+    /// x265 "H.265 MKV 480p30" preset.
+    ///
+    /// The "H.265 Apple VideoToolbox 1080p" preset is `up to 1080p` —
+    /// HandBrake does not upscale by default, so a 480p source still
+    /// produces 480p output. Same for 720p/576p sources. Quality at
+    /// these resolutions is essentially indistinguishable from x265 on
+    /// already-lossy DVD MPEG-2 input.
     static func autoPreset(for resolution: String) -> String? {
         let parts = resolution.lowercased().split(separator: "x")
         guard parts.count == 2, let height = Int(parts[1]) else { return nil }
         if height >= 2160 {
             return "H.265 Apple VideoToolbox 2160p 4K"
-        } else if height >= 1080 {
+        } else if height >= 1 {
+            // All sources up to 1080p use the same VideoToolbox preset.
+            // HandBrake's anamorphic/framerate defaults handle scaling
+            // down to the source resolution automatically.
             return "H.265 Apple VideoToolbox 1080p"
-        } else if height >= 720 {
-            return "H.265 MKV 720p30"
-        } else if height >= 576 {
-            return "H.265 MKV 576p25"
-        } else {
-            return "H.265 MKV 480p30"
         }
+        return nil
     }
 
     /// Throws `HandBrakeError.encodeFailed` if the output volume doesn't have at least

@@ -169,15 +169,17 @@ final class AutoPresetTests: XCTestCase {
     }
 
     func testAutoPreset720p() {
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "1280x720"), "H.265 MKV 720p30")
+        // v3.8.2: all sub-2160p sources now route through Apple VideoToolbox
+        // on Apple Silicon for the 5-10x speed bump over stock x265 presets.
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "1280x720"), "H.265 Apple VideoToolbox 1080p")
     }
 
     func testAutoPreset576p() {
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x576"), "H.265 MKV 576p25")
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x576"), "H.265 Apple VideoToolbox 1080p")
     }
 
     func testAutoPreset480p() {
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x480"), "H.265 MKV 480p30")
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x480"), "H.265 Apple VideoToolbox 1080p")
     }
 
     func testAutoPresetInvalidReturnsNil() {

@@ -33,10 +33,14 @@ final class HandBrakeServiceTests: XCTestCase {
     func testAutoPresetAllResolutions() {
         XCTAssertEqual(HandBrakeService.autoPreset(for: "3840x2160"), "H.265 Apple VideoToolbox 2160p 4K")
         XCTAssertEqual(HandBrakeService.autoPreset(for: "1920x1080"), "H.265 Apple VideoToolbox 1080p")
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "1280x720"), "H.265 MKV 720p30")
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x576"), "H.265 MKV 576p25")
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x480"), "H.265 MKV 480p30")
-        XCTAssertEqual(HandBrakeService.autoPreset(for: "640x360"), "H.265 MKV 480p30")
+        // v3.8.2: 720p / 576p / 480p / 360p all now route through Apple
+        // VideoToolbox H.265 1080p (which means "up to 1080p" — HandBrake
+        // does not upscale). 5-10x faster than the stock x265 presets on
+        // Apple Silicon.
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "1280x720"), "H.265 Apple VideoToolbox 1080p")
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x576"), "H.265 Apple VideoToolbox 1080p")
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "720x480"), "H.265 Apple VideoToolbox 1080p")
+        XCTAssertEqual(HandBrakeService.autoPreset(for: "640x360"), "H.265 Apple VideoToolbox 1080p")
     }
 
     func testAutoPresetEdgeCases() {
