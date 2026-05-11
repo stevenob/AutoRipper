@@ -92,6 +92,7 @@ struct ContentView: View {
             }
             NotificationService.shared.requestPermission()
             updateService.checkForUpdates()
+            updateService.startPeriodicChecks()
         }
     }
 
@@ -202,7 +203,7 @@ struct DiscPaneView: View {
                         .foregroundStyle(Color.accentColor)
                         .disabled(updateService.dmgURL.isEmpty)
                 }
-                Button { updateService.updateAvailable = false } label: {
+                Button { updateService.snoozeDismiss() } label: {
                     Image(systemName: "xmark").foregroundStyle(.white.opacity(0.7))
                 }
                 .buttonStyle(.plain)

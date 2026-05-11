@@ -728,6 +728,7 @@ private struct AdvancedPane: View {
     @ObservedObject var config: AppConfig
     @State private var resetConfirm = false
     @State private var includeSecretsInExport = false
+    @State private var autoCheckUpdates = UpdateService.autoCheckEnabled
 
     var body: some View {
         Form {
@@ -739,6 +740,16 @@ private struct AdvancedPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Toggle(isOn: $autoCheckUpdates) {
+                VStack(alignment: .leading) {
+                    Text("Check for updates automatically")
+                    Text("Checks GitHub Releases on launch and every 6 hours. Dismissing the update banner snoozes it for 24 hours.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .onChange(of: autoCheckUpdates) { _, new in UpdateService.autoCheckEnabled = new }
 
             Toggle(isOn: $config.verboseLogging) {
                 VStack(alignment: .leading) {

@@ -25,7 +25,52 @@ final class UpdateService: ObservableObject {
     @Published var installing: Bool = false
     @Published var installError: String?
 
+    /// v3.9.0: re-check every 6h while the app is running (it's a long-batch
+    /// app, easily left open all day). Stored as a nonisolated unsafe ref
+    /// behind the actor since Timer is best held weakly.
+    private var periodicTimer: Timer?
+
+    /// v3.9.0: how long to suppress the banner after the user dismisses it.
+    /// Persisted in UserDefaults so it survives relaunches.
+    private static let snoozeDuration: TimeInterval = 86_400  // 24h
+    private static let snoozeKey = "updateSnoozedUntil"
+    private static let autoCheckKey = "updateAutoCheckEnabled"
+
+    /// v3.9.0: user-controllable kill switch. Reads from defaults; defaults
+    /// to true (auto-check on, matching prior behavior).
+    static var autoCheckEnabled: Bool {
+        get {
+            let d = UserDefaults(suiteName: "group.com.autoripper")!
+            return d.object(forKey: autoCheckKey) as? Bool ?? true
+        }
+        set {
+            UserDefaults(suiteName: "group.com.autoripper")!.set(newValue, forKey: autoCheckKey)
+        }
+    }
+
     func checkForUpdates() {
+        // v3.9.0: respect the user's "disable auto-check" preference and any
+        // active snooze. Manual checks via the menu bar item bypass the
+        // snooze (force = true), but normal launch / periodic checks honor
+        // both gates.
+        checkForUpdates(force: false)
+    }
+
+    /// `force` = true bypasses both the auto-check toggle and the snooze
+    /// window. Used by the explicit "Check for Updates…" menu item.
+    func checkForUpdates(force: Bool) {
+        if !force {
+            guard Self.autoCheckEnabled else {
+                log.info("auto-check disabled by user")
+                return
+            }
+            if let snoozeUntil = UserDefaults(suiteName: "group.com.autoripper")!
+                .object(forKey: Self.snoozeKey) as? Date,
+               snoozeUntil > Date() {
+                log.info("update check snoozed until \(snoozeUntil)")
+                return
+            }
+        }
         Task {
             guard let url = URL(string: Self.repoAPI) else { return }
             do {
@@ -62,6 +107,40 @@ final class UpdateService: ObservableObject {
                 log.error("Update check failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// v3.9.0: kicks off a periodic re-check timer. Called from
+    /// `ContentView.onAppear` after the initial check.
+    func startPeriodicChecks() {
+        periodicTimer?.invalidate()
+        // 6 hours between checks — long enough to not hammer GitHub's API,
+        // short enough that batch users will see updates the same day
+        // they're published.
+        let interval: TimeInterval = 6 * 3600
+        periodicTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkForUpdates() }
+        }
+        // Tolerate scheduler slop (don't wake the system specifically for
+        // this).
+        periodicTimer?.tolerance = 300
+    }
+
+    /// v3.9.0: dismiss the update banner and suppress re-prompting for the
+    /// configured snooze window. Used by the banner's X button. The user can
+    /// re-trigger via the "Check for Updates…" menu item if they change
+    /// their mind.
+    func snoozeDismiss() {
+        let until = Date().addingTimeInterval(Self.snoozeDuration)
+        UserDefaults(suiteName: "group.com.autoripper")!.set(until, forKey: Self.snoozeKey)
+        updateAvailable = false
+        log.info("update snoozed until \(until)")
+    }
+
+    /// Clear any active snooze. Called by `checkForUpdates(force: true)`
+    /// from the explicit menu item so the user's intent overrides the
+    /// banner-dismiss suppression.
+    static func clearSnooze() {
+        UserDefaults(suiteName: "group.com.autoripper")!.removeObject(forKey: snoozeKey)
     }
 
     /// Downloads the latest DMG, mounts it, schedules a background helper to
