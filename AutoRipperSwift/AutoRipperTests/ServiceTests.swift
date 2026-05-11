@@ -1580,3 +1580,45 @@ final class DiscInfoAutoLabelV380Tests: XCTestCase {
         XCTAssertTrue(info.titles[0].label.contains("Main Feature"))
     }
 }
+
+// MARK: - HistoryStats tests (v3.8.3)
+
+final class HistoryStatsTests: XCTestCase {
+
+    func testFormatsCountAndTimes() {
+        let s = HistoryStats(
+            count: 33,
+            totalPipelineSeconds: 42 * 3600 + 18 * 60,
+            totalRipSeconds: 15 * 3600,
+            averagePerJobSeconds: 77 * 60
+        )
+        let line = s.summaryLine
+        XCTAssertTrue(line.contains("33 discs"), line)
+        XCTAssertTrue(line.contains("42h 18m"), line)
+        XCTAssertTrue(line.contains("1h 17m"), line)
+        XCTAssertTrue(line.contains("avg/job"), line)
+    }
+
+    func testSingularNounForOneDisc() {
+        let s = HistoryStats(count: 1, totalPipelineSeconds: 3600, totalRipSeconds: 1200,
+                             averagePerJobSeconds: 3600)
+        XCTAssertTrue(s.summaryLine.contains("1 disc"), s.summaryLine)
+        XCTAssertFalse(s.summaryLine.contains("1 discs"), s.summaryLine)
+    }
+
+    func testHandlesSubHourValues() {
+        let s = HistoryStats(count: 2, totalPipelineSeconds: 25 * 60, totalRipSeconds: 10 * 60,
+                             averagePerJobSeconds: 12 * 60)
+        let line = s.summaryLine
+        XCTAssertTrue(line.contains("25m"), line)
+        XCTAssertTrue(line.contains("12m"), line)
+        // No "0h" prefix for sub-hour values
+        XCTAssertFalse(line.contains("0h"), line)
+    }
+
+    func testEquatable() {
+        let a = HistoryStats(count: 5, totalPipelineSeconds: 3000, totalRipSeconds: 1000, averagePerJobSeconds: 600)
+        let b = HistoryStats(count: 5, totalPipelineSeconds: 3000, totalRipSeconds: 1000, averagePerJobSeconds: 600)
+        XCTAssertEqual(a, b)
+    }
+}

@@ -808,6 +808,65 @@ final class QueueViewModel: ObservableObject {
             .sorted { ($0.finishedAt ?? $0.createdAt) > ($1.finishedAt ?? $1.createdAt) }
     }
 
+    /// Aggregate stats over completed history jobs, formatted for display
+    /// in the History tab's badge / header. Returns nil when no completed
+    /// jobs exist yet (caller shows the simpler "X completed" badge).
+    ///
+    /// Computed:
+    ///   * count       — completed jobs in history
+    ///   * runtimeHrs  — total wall-clock pipeline time across all jobs
+    ///   * mediaHours  — total content runtime (rip-time as proxy if title
+    ///                   length isn't persisted on Job; in practice rip
+    ///                   time correlates closely with disc runtime)
+    ///   * sizesAvail  — true iff at least one job has rippedFile + encodedFile
+    ///                   on disk so we can compute compression savings
+    ///   * compressionRatio — encoded/raw, only when sizesAvail
+    var historyStats: HistoryStats? {
+        let completed = historyJobs
+        guard !completed.isEmpty else { return nil }
+        let totalPipelineTime = completed.reduce(0.0) { sum, j in
+            sum + j.ripElapsed + j.encodeElapsed + j.organizeElapsed
+                + j.scrapeElapsed + j.nasElapsed
+        }
+        let totalRipTime = completed.reduce(0.0) { $0 + $1.ripElapsed }
+        return HistoryStats(
+            count: completed.count,
+            totalPipelineSeconds: totalPipelineTime,
+            totalRipSeconds: totalRipTime,
+            averagePerJobSeconds: totalPipelineTime / Double(completed.count)
+        )
+    }
+}
+
+/// Aggregate stats over the completed History tab, computed on demand
+/// from `QueueViewModel.jobs`. Lightweight value type so the UI can hold
+/// snapshots in @State without observing the whole queue.
+struct HistoryStats: Sendable, Equatable {
+    let count: Int
+    let totalPipelineSeconds: TimeInterval
+    let totalRipSeconds: TimeInterval
+    let averagePerJobSeconds: TimeInterval
+
+    /// e.g. "33 discs · 42h 18m total processing · ~1h 17m avg/job"
+    var summaryLine: String {
+        let totalHM = Self.formatHM(totalPipelineSeconds)
+        let avgHM = Self.formatHM(averagePerJobSeconds)
+        let noun = count == 1 ? "disc" : "discs"
+        return "\(count) \(noun) · \(totalHM) total processing · ~\(avgHM) avg/job"
+    }
+
+    private static func formatHM(_ seconds: TimeInterval) -> String {
+        let s = max(0, Int(seconds))
+        let h = s / 3600
+        let m = (s % 3600) / 60
+        if h == 0 { return "\(m)m" }
+        return "\(h)h \(m)m"
+    }
+}
+
+extension QueueViewModel {
+    // Helper stub so HistoryStats stays defined at file scope and Sendable.
+
     /// Heuristic estimated remaining time across active jobs in the queue. Returns
     /// nil if no in-flight job has enough data to estimate yet.
     func totalRemainingETA() -> TimeInterval? {

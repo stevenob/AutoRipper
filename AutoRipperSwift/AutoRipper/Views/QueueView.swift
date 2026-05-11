@@ -61,7 +61,7 @@ struct HistoryView: View {
         } else {
             SplitJobView(
                 title: "History",
-                badge: "\(queueVM.historyJobs.count) completed",
+                badge: historyBadge,
                 jobs: jobs,
                 selection: $selection,
                 queueVM: queueVM,
@@ -72,6 +72,16 @@ struct HistoryView: View {
                 allowReorder: false
             )
         }
+    }
+
+    /// v3.8.3: enriched badge showing total time spent + avg per job when
+    /// there's enough history to make the stats meaningful, otherwise the
+    /// simpler "X completed" line.
+    private var historyBadge: String {
+        if let stats = queueVM.historyStats, stats.count >= 2 {
+            return stats.summaryLine
+        }
+        return "\(queueVM.historyJobs.count) completed"
     }
 
     @ViewBuilder
