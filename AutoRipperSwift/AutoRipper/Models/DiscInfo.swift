@@ -124,6 +124,10 @@ struct DiscInfo: Sendable {
     ///   4. Runtime within ±0.5% of main feature & strictly smaller size →
     ///      `alternateAudio`
     ///   5. Otherwise duration-bucketed extras/featurettes/trailers.
+    ///
+    /// v3.10.0: alternate cuts also get a runtime-delta-based edition hint
+    /// appended to the label (e.g. "🎬 Director's Cut (+18 min)") via the
+    /// `editionHintForAlternateCut` helper.
     mutating func autoLabel() {
         guard !titles.isEmpty else { return }
 
@@ -155,6 +159,13 @@ struct DiscInfo: Sendable {
                 } else {
                     cat = .alternateCut
                 }
+            } else if secs >= 3600 && Self.isLikelyAlternateCut(of: secs, vs: mainSeconds) {
+                // v3.10.0: real-world Director's Cuts are often +20-60 min
+                // longer than the theatrical (LoTR Ext +51 min, Donnie Darko
+                // +20 min, Blade Runner Final Cut basically equal). Wider
+                // threshold using an absolute-minute window so very-long
+                // extended cuts of long movies still match.
+                cat = .alternateCut
             } else if secs >= 5400 {                    // ≥ 90 min: probably another full feature
                 cat = .bonusFeature
             } else if secs >= 1800 {                    // 30–90 min
@@ -167,7 +178,16 @@ struct DiscInfo: Sendable {
                 cat = .trailer
             }
             titles[i].category = cat
-            titles[i].label = cat.displayLabel
+            // v3.10.0: enrich .alternateCut labels with a heuristic edition
+            // hint based on runtime delta vs the main feature. Other
+            // categories keep the simple displayLabel.
+            if cat == .alternateCut {
+                titles[i].label = Self.editionHintForAlternateCut(
+                    titleSeconds: secs, mainSeconds: mainSeconds
+                )
+            } else {
+                titles[i].label = cat.displayLabel
+            }
         }
     }
 
@@ -177,6 +197,63 @@ struct DiscInfo: Sendable {
         guard reference > 0 else { return false }
         let delta = Double(abs(value - reference)) / Double(reference)
         return delta <= percent
+    }
+
+    /// v3.10.0: detect an alternate cut by absolute time delta rather than
+    /// pure percentage. Real-world Director's Cuts often add 20-60 min
+    /// (LoTR Extended +51 min, Avatar Special Ed +16 min) which a tight ±5%
+    /// would miss. Title must be feature-length (already enforced upstream
+    /// via the ≥3600s gate) AND its runtime delta from the main feature
+    /// must be ≤ 60 minutes — beyond that it's almost certainly a separate
+    /// movie (double feature) rather than a cut.
+    private static func isLikelyAlternateCut(of titleSeconds: Int, vs mainSeconds: Int) -> Bool {
+        let deltaMin = abs(titleSeconds - mainSeconds) / 60
+        return deltaMin <= 60
+    }
+
+    /// v3.10.0: friendly label for an `.alternateCut` title, based on the
+    /// runtime delta vs the disc's main feature.
+    ///
+    /// Conventional naming for alternate cuts (used by Plex/Jellyfin
+    /// `{edition-X}` tags and most home-media communities):
+    ///   * Within ±2 min of main → "Alt Version" (different angle, audio mix)
+    ///   * Main + 3 to 15 min → "Extended Cut"
+    ///   * Main + 15 to 45 min → "Director's Cut"
+    ///   * Main + 45 min+ → "Ultimate Cut"
+    ///   * Main - 3 to -15 min → "TV Cut"
+    ///   * Main - 15 to -45 min → "Theatrical Cut"
+    ///   * Main - 45 min+ → "Short Cut"
+    ///
+    /// Visible-for-tests so unit tests can lock in the threshold boundaries
+    /// without needing a full DiscInfo.
+    static func editionHintForAlternateCut(titleSeconds: Int, mainSeconds: Int) -> String {
+        let deltaMin = (titleSeconds - mainSeconds) / 60
+        let absDelta = abs(deltaMin)
+        let edition: String
+        if absDelta <= 2 {
+            edition = "Alt Version"
+        } else if deltaMin > 0 {
+            if deltaMin <= 15 {
+                edition = "Extended Cut"
+            } else if deltaMin <= 45 {
+                edition = "Director's Cut"
+            } else {
+                edition = "Ultimate Cut"
+            }
+        } else {
+            if absDelta <= 15 {
+                edition = "TV Cut"
+            } else if absDelta <= 45 {
+                edition = "Theatrical Cut"
+            } else {
+                edition = "Short Cut"
+            }
+        }
+        // Render with the same emoji as TitleCategory.alternateCut so the UI
+        // stays visually consistent.
+        let sign = deltaMin >= 0 ? "+" : "−"
+        let deltaLabel = absDelta == 0 ? "same" : "\(sign)\(absDelta) min"
+        return "🎬 \(edition) (\(deltaLabel))"
     }
 
     /// One-line summary of the title category breakdown — e.g.

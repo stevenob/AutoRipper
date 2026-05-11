@@ -1535,10 +1535,12 @@ final class DiscInfoAutoLabelV380Tests: XCTestCase {
     }
 
     func testBonusFeatureForLong90PlusMinNonMain() {
-        // A second 90+ min movie on a double-feature disc.
+        // A clearly-separate film on a double-feature disc. >60 min runtime
+        // delta from the main is the boundary v3.10.0 uses to distinguish
+        // bonus features from alternate cuts.
         var info = DiscInfo(name: "DOUBLE", type: "dvd", titles: [
-            makeTitle(id: 0, duration: "1:50:00", sizeGB: 4.5),
-            makeTitle(id: 1, duration: "1:35:00", sizeGB: 4.0),  // 95 min, ≥90 → bonus feature
+            makeTitle(id: 0, duration: "3:00:00", sizeGB: 7.5),     // 180 min main
+            makeTitle(id: 1, duration: "1:35:00", sizeGB: 4.0),     // 95 min — 85 min apart
         ])
         info.autoLabel()
         XCTAssertEqual(info.titles[1].category, .bonusFeature)
@@ -1620,5 +1622,73 @@ final class HistoryStatsTests: XCTestCase {
         let a = HistoryStats(count: 5, totalPipelineSeconds: 3000, totalRipSeconds: 1000, averagePerJobSeconds: 600)
         let b = HistoryStats(count: 5, totalPipelineSeconds: 3000, totalRipSeconds: 1000, averagePerJobSeconds: 600)
         XCTAssertEqual(a, b)
+    }
+}
+
+// MARK: - Edition hint heuristic tests (v3.10)
+
+final class EditionHintTests: XCTestCase {
+
+    private func hint(_ titleSec: Int, vsMain mainSec: Int) -> String {
+        DiscInfo.editionHintForAlternateCut(titleSeconds: titleSec, mainSeconds: mainSec)
+    }
+
+    func testAltVersionForSmallDelta() {
+        // Within ±2 min: "Alt Version"
+        XCTAssertTrue(hint(7200, vsMain: 7260).contains("Alt Version"))
+        XCTAssertTrue(hint(7320, vsMain: 7200).contains("Alt Version"))
+    }
+
+    func testExtendedCutForModestLengthening() {
+        let h = hint(7200 + 10*60, vsMain: 7200)  // main + 10 min
+        XCTAssertTrue(h.contains("Extended Cut"), h)
+        XCTAssertTrue(h.contains("+10 min"), h)
+    }
+
+    func testDirectorsCutForSignificantLengthening() {
+        let h = hint(7200 + 25*60, vsMain: 7200)  // main + 25 min
+        XCTAssertTrue(h.contains("Director's Cut"), h)
+        XCTAssertTrue(h.contains("+25 min"), h)
+    }
+
+    func testUltimateCutForExtremeLengthening() {
+        let h = hint(7200 + 60*60, vsMain: 7200)  // main + 60 min
+        XCTAssertTrue(h.contains("Ultimate Cut"), h)
+    }
+
+    func testTVCutForModestShortening() {
+        let h = hint(7200 - 10*60, vsMain: 7200)  // main - 10 min
+        XCTAssertTrue(h.contains("TV Cut"), h)
+        XCTAssertTrue(h.contains("−10 min"), h)
+    }
+
+    func testTheatricalCutForSignificantShortening() {
+        let h = hint(7200 - 25*60, vsMain: 7200)
+        XCTAssertTrue(h.contains("Theatrical Cut"), h)
+    }
+
+    func testBoundaryAtTwoMinutes() {
+        // 2 min exact is Alt Version (inclusive). 3 min is Extended.
+        XCTAssertTrue(hint(7200 + 2*60, vsMain: 7200).contains("Alt Version"))
+        XCTAssertTrue(hint(7200 + 3*60, vsMain: 7200).contains("Extended Cut"))
+    }
+
+    func testEmojiPresent() {
+        XCTAssertTrue(hint(7200 + 10*60, vsMain: 7200).hasPrefix("🎬"))
+    }
+
+    func testAutoLabelAppliesEditionHint() {
+        // Main 120 min + alt at 145 min should become a Director's Cut hint.
+        let main = TitleInfo(id: 0, name: "Main", duration: "2:00:00",
+                             sizeBytes: 30_000_000_000, chapters: 1, fileOutput: "")
+        let alt = TitleInfo(id: 1, name: "Alt", duration: "2:25:00",
+                            sizeBytes: 28_000_000_000, chapters: 1, fileOutput: "")
+        var info = DiscInfo(name: "X", type: "bluray", titles: [main, alt])
+        info.autoLabel()
+        XCTAssertEqual(info.titles[1].category, .alternateCut)
+        XCTAssertTrue(info.titles[1].label.contains("Director's Cut"),
+                      "label=\(info.titles[1].label)")
+        XCTAssertTrue(info.titles[1].label.contains("+25 min"),
+                      "label=\(info.titles[1].label)")
     }
 }
