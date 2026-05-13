@@ -166,14 +166,14 @@ final class RipViewModel: ObservableObject {
         }
     }
 
-    /// v3.11.5: how many MSG:2003 read errors trigger the "try slower drive
+    /// v3.11.6: how many MSG:2003 read errors trigger the "try slower drive
     /// speed" banner. 5 is a reasonable balance — single transient errors
     /// are routine on used media (don't pester the user); persistent
     /// per-sector failures (5+ in one rip) signal a disc or drive issue
     /// worth pausing for.
     static let readErrorSuggestThreshold = 5
 
-    /// v3.11.5: pure check for whether a MakeMKV log line represents a
+    /// v3.11.6: pure check for whether a MakeMKV log line represents a
     /// single read-error event worth counting. MSG:2003 = "Posix error"
     /// raw read failure at a specific offset (one per failed sector).
     /// MSG:2022 = end-of-rip summary ("Encountered N read errors") — we
@@ -181,6 +181,28 @@ final class RipViewModel: ObservableObject {
     /// have already given us the count, and counting both would double.
     static func isReadErrorLine(_ line: String) -> Bool {
         line.hasPrefix("MSG:2003")
+    }
+
+    /// v3.11.6: build the per-disc-unique scratch folder name used during
+    /// rip + encode. Appends a short disc-fingerprint suffix so two
+    /// simultaneously queued rips with the same human-readable name can
+    /// never share a folder (which previously caused a sibling-rip
+    /// wipeout when the first job's publish cleanup touched the shared
+    /// parent dir — see v3.11.6 changelog).
+    ///
+    /// The suffix is enclosed in `[]` rather than `()` to avoid clashing
+    /// with year-bearing names like `Mortal Kombat (1995)`. The final NAS
+    /// destination folder name is **not** affected by this suffix — the
+    /// organize step renames the file to its clean form before publish,
+    /// and PublishService uses the organized dir's name (no suffix).
+    ///
+    /// Suffix length: 12 hex chars = 48 bits of entropy → birthday
+    /// collisions only become non-negligible above a few million queued
+    /// discs in one session, which is well past any realistic workload.
+    static func scratchFolderName(cleanName: String, info: DiscInfo) -> String {
+        let fp = DiscFingerprintService.fingerprint(info)
+        let suffix = String(fp.prefix(12))
+        return "\(cleanName) [\(suffix)]"
     }
 
     /// Pure parser for the rip-startup phase machine. Inputs a current phase
@@ -281,21 +303,28 @@ final class RipViewModel: ObservableObject {
         switch inFlight.phase {
         case .ripping:
             let path = inFlight.ripFile
-            // Legacy migration may pass a directory here (titleId == -1). Walk
-            // it for partial mkvs in that case rather than blindly nuking the
-            // whole tree (which would clobber prior successful titles).
+            // v3.11.6: previously we required `titleId == -1` (legacy
+            // migration) to walk-for-partials. That meant a crash mid-rip
+            // with a real titleId left us blindly doing
+            // `removeItem(atPath: path)` on what is actually the rip
+            // **directory** (we persist the dir as ripFile because the
+            // exact filename isn't known until MakeMKV reports it). This
+            // could wipe successful prior-title rips on a multi-title
+            // disc, or another job's rip if a future scratch-folder
+            // collision occurred. Fix: whenever `path` resolves to a
+            // directory, always walk it for zero-byte partials and never
+            // recursive-delete the dir itself. The narrow file case is
+            // still handled below.
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: path, isDirectory: &isDir) {
-                if isDir.boolValue, inFlight.titleId == -1 {
+                if isDir.boolValue {
                     if let entries = try? fm.contentsOfDirectory(atPath: path) {
-                        // Best-effort: drop any zero-byte mkvs in the dir; leave the
-                        // rest. We can't reliably tell which file was partial.
                         for entry in entries where entry.hasSuffix(".mkv") {
                             let entryPath = (path as NSString).appendingPathComponent(entry)
                             if let attrs = try? fm.attributesOfItem(atPath: entryPath),
                                (attrs[.size] as? Int64) == 0 {
                                 try? fm.removeItem(atPath: entryPath)
-                                FileLogger.shared.warn("rip-vm", "removed zero-byte legacy partial: \(entryPath)")
+                                FileLogger.shared.warn("rip-vm", "removed zero-byte partial after crash: \(entryPath)")
                             }
                         }
                     }
@@ -554,21 +583,33 @@ final class RipViewModel: ObservableObject {
         statusText = "Ripping…"
 
         let titlesToRip = selectedTitles.sorted()
-        // Use TMDb title if available, otherwise clean disc name
-        let folderName = OrganizerService.cleanFilename(
+        // v3.11.6: split the "clean" name (user-visible, used for final
+        // destination + UI labels) from the "scratch" name (per-disc-unique
+        // via a short fingerprint suffix, used only for the temp rip dir
+        // so two simultaneously queued rips can never share a folder).
+        let cleanName = OrganizerService.cleanFilename(
             info.mediaTitle.isEmpty ? info.name : info.mediaTitle
         )
+        let folderName = cleanName  // alias for legacy code paths (UI strings, finalDir, etc.)
+        let scratchFolderName = Self.scratchFolderName(cleanName: cleanName, info: info)
         // Where MakeMKV writes raw rips. Defaults to the legacy in-place path
-        // (`<outputDir>/<folderName>`); falls back to the local scratch dir when
-        // `ripScratchDir` is configured. The `outputDir` local variable name is
-        // preserved so the existing PRGV / size-monitor code (which uses it
-        // heavily below) keeps working unchanged.
+        // (`<outputDir>/<cleanName>`); falls back to the local scratch dir when
+        // `ripScratchDir` is configured. v3.11.6: when staging is on, the
+        // scratch dir uses the per-disc-unique `scratchFolderName` (with
+        // fingerprint suffix) so two queued rips can never share a folder.
+        // When staging is off (legacy in-place rip), we keep the clean
+        // `folderName` so the user's output drive layout stays untouched.
+        // The `outputDir` local variable name is preserved so the existing
+        // PRGV / size-monitor code (which uses it heavily below) keeps
+        // working unchanged.
         let scratchBase = config.ripScratchDir.isEmpty ? config.outputDir : config.ripScratchDir
+        let scratchSubdir = config.ripScratchDir.isEmpty ? folderName : scratchFolderName
         let outputDir = URL(fileURLWithPath: scratchBase)
-            .appendingPathComponent(folderName).path
+            .appendingPathComponent(scratchSubdir).path
         // Where the file ends up after staging. Equals `outputDir` when no
         // scratch dir is configured (no-op staging) — equals
-        // `<config.outputDir>/<folderName>` when staging is on.
+        // `<config.outputDir>/<folderName>` (clean, no fingerprint suffix)
+        // when staging is on.
         let finalDir = URL(fileURLWithPath: config.outputDir)
             .appendingPathComponent(folderName).path
         let stagingEnabled = !config.ripScratchDir.isEmpty

@@ -1449,6 +1449,146 @@ final class RipStartupPhaseTests: XCTestCase {
     }
 }
 
+// MARK: - Scratch folder naming (v3.11.6)
+//
+// Per-disc-unique scratch folder names prevent the v3.11.5 wipeout where
+// two queued rips that resolved to the same human-readable folder name
+// shared a scratch dir, and the first job's publish cleanup deleted the
+// second job's not-yet-encoded source.
+
+@MainActor
+final class ScratchFolderNameTests: XCTestCase {
+
+    private func makeInfo(name: String, titles: [(Int, String, Int64)]) -> DiscInfo {
+        let mapped = titles.map { (id, dur, sz) in
+            TitleInfo(id: id, name: "Title \(id)", duration: dur,
+                      sizeBytes: sz, chapters: 1, fileOutput: "")
+        }
+        return DiscInfo(name: name, type: "bluray", titles: mapped)
+    }
+
+    func testScratchFolderNameIncludesFingerprintSuffix() {
+        let info = makeInfo(name: "MORTAL_KOMBAT", titles: [(0, "1:41:00", 16_000_000_000)])
+        let folder = RipViewModel.scratchFolderName(cleanName: "Mortal Kombat (1995)", info: info)
+        XCTAssertTrue(folder.hasPrefix("Mortal Kombat (1995) ["), "should keep clean name + open bracket: \(folder)")
+        XCTAssertTrue(folder.hasSuffix("]"), "should end with close bracket: \(folder)")
+        // 12-char hex fingerprint suffix (48 bits of entropy)
+        let fp = DiscFingerprintService.fingerprint(info)
+        XCTAssertEqual(folder, "Mortal Kombat (1995) [\(String(fp.prefix(12)))]")
+    }
+
+    func testTwoDifferentDiscsWithSameCleanNameProduceDifferentFolders() {
+        // The exact scenario that caused the v3.11.5 data loss: two
+        // physically distinct discs resolve via TMDb scrape to the same
+        // human-readable folder name. With per-disc-unique scratch names
+        // their scratch folders MUST diverge so cleanup of one cannot
+        // touch the other's rip source.
+        let disc1 = makeInfo(name: "MORTAL_KOMBAT",   titles: [(0, "1:41:00", 16_000_000_000)])
+        let disc2 = makeInfo(name: "MORTAL_COMBAT_2", titles: [(0, "1:35:00", 15_700_000_000)])
+        let f1 = RipViewModel.scratchFolderName(cleanName: "Mortal Kombat II (2026)", info: disc1)
+        let f2 = RipViewModel.scratchFolderName(cleanName: "Mortal Kombat II (2026)", info: disc2)
+        XCTAssertNotEqual(f1, f2, "different discs must NEVER share a scratch folder, even when clean names collide")
+    }
+
+    func testSameDiscReinsertedProducesSameFolder() {
+        // The fingerprint is stable for the same physical disc; the scratch
+        // folder name should also be stable so retry / resume paths land
+        // on the existing partial rip rather than starting a parallel one.
+        let infoA = makeInfo(name: "MORTAL_KOMBAT", titles: [(0, "1:41:00", 16_000_000_000)])
+        let infoB = makeInfo(name: "MORTAL_KOMBAT", titles: [(0, "1:41:00", 16_000_000_000)])
+        let fA = RipViewModel.scratchFolderName(cleanName: "Mortal Kombat (1995)", info: infoA)
+        let fB = RipViewModel.scratchFolderName(cleanName: "Mortal Kombat (1995)", info: infoB)
+        XCTAssertEqual(fA, fB)
+    }
+}
+
+// MARK: - QueueViewModel cleanup safety (v3.11.6)
+//
+// Guards the post-publish and post-done cleanup paths against the
+// sibling-wipeout class of bug. Verifies that the helper only removes
+// files this job explicitly owns and only drops the parent dir if
+// nothing foreign remains.
+
+@MainActor
+final class QueueCleanupSafetyTests: XCTestCase {
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AutoRipperCleanupTests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func touch(_ url: URL, bytes: Int = 4) throws {
+        try Data(repeating: 0xAB, count: bytes).write(to: url)
+    }
+
+    override func tearDown() {
+        // Best-effort cleanup of anything we missed.
+        let parent = FileManager.default.temporaryDirectory
+        if let kids = try? FileManager.default.contentsOfDirectory(atPath: parent.path) {
+            for k in kids where k.hasPrefix("AutoRipperCleanupTests-") {
+                try? FileManager.default.removeItem(at: parent.appendingPathComponent(k))
+            }
+        }
+        super.tearDown()
+    }
+
+    func testRemovesOwnedFilesAndDirWhenEmpty() throws {
+        let dir = tempDir()
+        let owned = dir.appendingPathComponent("rip.mkv")
+        try touch(owned, bytes: 32)
+        QueueViewModel.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: [owned])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "empty dir should be removed")
+    }
+
+    func testKeepsForeignFilesAndDirWhenForeignFilesPresent() throws {
+        // THE regression test for the Mortal Kombat data loss: a sibling
+        // job's rip source sits in the same dir as this job's owned file.
+        // Cleanup must remove only the owned file and leave the foreign
+        // file (and the dir) intact.
+        let dir = tempDir()
+        let owned = dir.appendingPathComponent("organized.mkv")
+        let foreign = dir.appendingPathComponent("sibling-rip-still-needed.mkv")
+        try touch(owned, bytes: 32)
+        try touch(foreign, bytes: 64)
+        QueueViewModel.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: [owned])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path), "owned file should be removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: foreign.path), "foreign file MUST NOT be removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path), "dir must stay because foreign file lives in it")
+    }
+
+    func testIgnoresOwnedFilesNotInsideTargetDir() throws {
+        // Defense in depth: a caller hands us a file URL whose parent is
+        // NOT the target dir. We must not reach across and delete it.
+        let dir = tempDir()
+        let outside = tempDir().appendingPathComponent("not-ours.mkv")
+        try touch(outside)
+        QueueViewModel.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: [outside])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path), "must not delete file outside target dir")
+    }
+
+    func testTreatsHiddenFilesAsNoiseAndRemovesDir() throws {
+        // .DS_Store etc shouldn't keep the dir alive after the owned file
+        // is gone — they're OS noise, not user data.
+        let dir = tempDir()
+        let owned = dir.appendingPathComponent("organized.mkv")
+        let dsStore = dir.appendingPathComponent(".DS_Store")
+        try touch(owned)
+        try touch(dsStore)
+        QueueViewModel.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: [owned])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "dir should be removed even with .DS_Store left")
+    }
+
+    func testNoOpWhenDirDoesNotExist() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("nope-\(UUID())")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
+        // Should not crash, should not throw.
+        QueueViewModel.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: [])
+    }
+}
+
 // MARK: - Recently-skipped cooldown tests (v3.7.2)
 
 @MainActor

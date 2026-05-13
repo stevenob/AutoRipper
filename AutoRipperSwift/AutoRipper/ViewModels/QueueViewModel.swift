@@ -462,9 +462,17 @@ final class QueueViewModel: ObservableObject {
                 // workspace. The PublishService.renamePerFile path already
                 // moves files out (so source is gone for same-volume); for
                 // cross-volume keep-source we do the cleanup here.
-                if FileManager.default.fileExists(atPath: sourceDir.path) {
-                    try? FileManager.default.removeItem(at: sourceDir)
-                }
+                //
+                // v3.11.6: defensive — only remove the source dir if it's
+                // empty *of foreign files*. We enumerate, drop any files
+                // that belong to this job (the organized file + scrape
+                // siblings live here by design), then remove the dir only
+                // if nothing else is left. Protects against a sibling
+                // job's rip source accidentally living in the same dir.
+                Self.cleanupOwnedFilesAndRemoveDirIfEmpty(
+                    dir: sourceDir,
+                    ownedFiles: [jobs[index].organizedFile, jobs[index].rippedFile].compactMap { $0 }
+                )
                 jobs[index].workDir = nil
                 jobs[index].publishPhase = .done
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
@@ -515,11 +523,20 @@ final class QueueViewModel: ObservableObject {
         }
 
         // Done — clean up rip source directory (if it wasn't already removed
-        // by the publish step above)
+        // by the publish step above).
+        //
+        // v3.11.6: this is the high-risk cleanup. Pre-v3.11.6 we did a blind
+        // removeItem(at: ripDir), which wiped the entire scratch parent —
+        // including any sibling job's not-yet-encoded rip source if it
+        // happened to share the same parent. We now remove only files this
+        // job knows about, then drop the parent only if empty.
         let ripDir = jobs[index].rippedFile.deletingLastPathComponent()
         let organizedDir = (jobs[index].organizedFile ?? jobs[index].rippedFile).deletingLastPathComponent()
-        if ripDir.path != organizedDir.path, FileManager.default.fileExists(atPath: ripDir.path) {
-            try? FileManager.default.removeItem(at: ripDir)
+        if ripDir.path != organizedDir.path {
+            Self.cleanupOwnedFilesAndRemoveDirIfEmpty(
+                dir: ripDir,
+                ownedFiles: [jobs[index].rippedFile, jobs[index].encodedFile].compactMap { $0 }
+            )
         }
 
         jobs[index].status = .done
@@ -924,5 +941,58 @@ extension QueueViewModel {
     private func buildFooter(ripElapsed: TimeInterval, encodeElapsed: TimeInterval) -> String {
         let total = ripElapsed + encodeElapsed
         return "Rip: \(formatElapsed(ripElapsed))  •  Encode: \(formatElapsed(encodeElapsed))  •  Total: \(formatElapsed(total))"
+    }
+
+    /// v3.11.6: targeted scratch-dir cleanup. Removes only the files this
+    /// job knows it owns (typically the rip source, encoded output, and/or
+    /// organized output), then drops the parent dir **only** if no foreign
+    /// files remain. Subdirectories are inspected non-recursively (their
+    /// presence keeps the parent alive).
+    ///
+    /// Background: prior to v3.11.6 the post-publish and post-done cleanup
+    /// blindly called `removeItem(at: parentDir)`. When two simultaneously
+    /// queued discs happened to share a scratch folder (e.g. both resolved
+    /// to "Mortal Kombat II (2026)" via TMDb scrape), the first job's
+    /// cleanup wiped the second job's not-yet-encoded rip source. v3.11.6
+    /// fixes the collision at the source (per-disc-unique scratch names)
+    /// AND defends against any future collision by making cleanup file-
+    /// aware instead of dir-aware.
+    ///
+    /// Visible-for-tests as `internal static` so unit tests can exercise
+    /// the file-owning semantics without spinning up a full QueueViewModel.
+    static func cleanupOwnedFilesAndRemoveDirIfEmpty(dir: URL, ownedFiles: [URL]) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: dir.path) else { return }
+        // Canonicalize the target dir once: standardize URL syntax AND
+        // resolve symlinks so we compare against the real on-disk path.
+        // Without symlink resolution, an owned file that lives under an
+        // aliased path could be considered "outside" and skipped, leaving
+        // scratch dirs uncleaned (mostly a false-negative — safer than
+        // false-positives, but still worth handling).
+        let canonicalDir = dir.resolvingSymlinksInPath().standardizedFileURL
+        // Remove only the files we explicitly own. Anything else (e.g. a
+        // sibling job's rip source) stays put.
+        for f in ownedFiles {
+            // Only touch files inside `dir` — never reach across into
+            // unrelated paths. Defense in depth in case a caller passes a
+            // file whose parent isn't `dir`.
+            let canonicalParent = f.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+            guard canonicalParent == canonicalDir else { continue }
+            if fm.fileExists(atPath: f.path) {
+                try? fm.removeItem(at: f)
+            }
+        }
+        // Drop the parent dir only if empty (ignoring hidden dotfiles like
+        // .DS_Store which we consider OS noise, not user data).
+        let contents = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+        let nonHidden = contents.filter { !$0.hasPrefix(".") }
+        if nonHidden.isEmpty {
+            try? fm.removeItem(at: dir)
+        } else {
+            FileLogger.shared.info(
+                "queue",
+                "skip scratch dir cleanup (\(nonHidden.count) foreign file(s) remain): \(dir.path)"
+            )
+        }
     }
 }
