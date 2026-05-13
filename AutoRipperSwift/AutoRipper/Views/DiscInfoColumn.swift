@@ -23,6 +23,15 @@ struct DiscInfoColumn: View {
                 if ripVM.isRipping {
                     rippingHeroBlock
                 }
+                // v3.11.5: read-error banner — appears once the count
+                // crosses the threshold so the user knows the disc is
+                // having problems, with a one-click action to drop to
+                // Quiet (4×). Shows during ripping AND lingers after
+                // (until next scan) so the user can act on it.
+                if ripVM.suggestLowerDriveSpeed {
+                    readErrorBanner
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
                 identityBlock
                 Divider()
                 identifyBlock
@@ -189,6 +198,22 @@ struct DiscInfoColumn: View {
                     .foregroundStyle(phaseTint)
                     .tracking(0.5)
                 Spacer()
+                if ripVM.readErrorCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                        Text("\(ripVM.readErrorCount) read \(ripVM.readErrorCount == 1 ? "error" : "errors")")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .clipShape(Capsule())
+                    .help("MakeMKV reported posix I/O errors while reading the disc. Some are normal on used media; a high count suggests damage or a dirty lens.")
+                }
                 Text("\(Int(ripVM.ripProgress * 100))%")
                     .font(.title3)
                     .fontWeight(.semibold)
@@ -277,6 +302,54 @@ struct DiscInfoColumn: View {
     }
 
     // (rippingBlock from previous version dropped — replaced by hero version above)
+
+    // MARK: - Read-error banner (v3.11.5)
+
+    @ViewBuilder
+    private var readErrorBanner: some View {
+        let current = AppConfig.shared.makemkvReadSpeed
+        // Step the suggested speed down: from 0/auto or 8+ → 4 (Quiet).
+        // If already at 4, suggest 2 (very slow but max-careful) as the
+        // last-ditch retry option.
+        let suggested = (current == 0 || current >= 8) ? 4 : (current == 4 ? 2 : max(current / 2, 2))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "speedometer")
+                    .foregroundStyle(.orange)
+                Text("Read errors detected")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Dismiss") { ripVM.suggestLowerDriveSpeed = false }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+            Text("\(ripVM.readErrorCount) read \(ripVM.readErrorCount == 1 ? "error" : "errors") so far. A slower drive speed often helps with scratched, smudged, or warped discs.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button {
+                    AppConfig.shared.makemkvReadSpeed = suggested
+                    ripVM.suggestLowerDriveSpeed = false
+                } label: {
+                    Label("Set drive to \(suggested)× and try again next rip", systemImage: "tortoise.fill")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Text("Currently: \(current == 0 ? "Auto" : "\(current)×")")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.orange.opacity(0.30), lineWidth: 1)
+        )
+    }
 
     // MARK: - Already-ripped banner (v3.7.1)
 

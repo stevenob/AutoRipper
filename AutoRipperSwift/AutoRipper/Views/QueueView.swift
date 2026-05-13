@@ -805,6 +805,10 @@ private struct JobDetailView: View {
                     Divider()
                     timingsSection
                 }
+                if job.ripReadErrors > 0 {
+                    Divider()
+                    discHealthSection
+                }
                 if !job.error.isEmpty {
                     Divider()
                     errorSection
@@ -1160,6 +1164,27 @@ private struct JobDetailView: View {
         if h > 0 { return String(format: "%dh %02dm %02ds", h, m, sec) }
         if m > 0 { return String(format: "%dm %02ds", m, sec) }
         return String(format: "%ds", sec)
+    }
+
+    // MARK: - Disc health (v3.11.5)
+
+    @ViewBuilder
+    private var discHealthSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Disc health").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("\(job.ripReadErrors) read \(job.ripReadErrors == 1 ? "error" : "errors") during rip")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            Text("MakeMKV reported posix I/O errors while reading the disc. Some are normal on used media; many suggest scratches, smudges, dirt, or warping. Consider cleaning the disc and re-ripping if playback issues occur.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Error / log

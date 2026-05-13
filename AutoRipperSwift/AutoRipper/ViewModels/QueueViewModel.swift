@@ -86,8 +86,8 @@ final class QueueViewModel: ObservableObject {
         FileLogger.shared.info("queue", "loaded \(loaded.count) jobs (interrupted: \(rescued), pruned: \(pruned))")
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle, discFingerprint: discFingerprint)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle, discFingerprint: discFingerprint, ripReadErrors: ripReadErrors)
         jobs.append(job)
         let extra = editionLabel.map { " {edition-\($0)}" } ?? ""
         let ep = (seasonNumber != nil || episodeNumber != nil)

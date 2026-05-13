@@ -1427,6 +1427,26 @@ final class RipStartupPhaseTests: XCTestCase {
         XCTAssertNil(RipViewModel.extractInformationalCaption("not-a-msg-line"))
         XCTAssertNil(RipViewModel.extractInformationalCaption(""))
     }
+
+    // MARK: - Read-error parser (v3.11.5)
+
+    func testReadErrorParserCountsMSG2003() {
+        XCTAssertTrue(RipViewModel.isReadErrorLine("MSG:2003,0,3,\"Error 'Posix error - Input/output error' occurred while reading '/dev/rdisk4' at offset '2083123200'\",\"…\",\"…\",\"…\",\"…\""))
+        XCTAssertTrue(RipViewModel.isReadErrorLine("MSG:2003"))
+    }
+
+    func testReadErrorParserIgnoresSummaryAndUnrelatedLines() {
+        // MSG:2022 is the end-of-rip aggregate ("Encountered N read errors")
+        // and we deliberately don't count it to avoid double-counting.
+        XCTAssertFalse(RipViewModel.isReadErrorLine("MSG:2022,0,1,\"Encountered 3 read errors\""))
+        XCTAssertFalse(RipViewModel.isReadErrorLine("MSG:2010,0,1,\"Optical drive opened\""))
+        XCTAssertFalse(RipViewModel.isReadErrorLine("PRGV:50,100,65535"))
+        XCTAssertFalse(RipViewModel.isReadErrorLine(""))
+    }
+
+    func testReadErrorSuggestThresholdIsFive() {
+        XCTAssertEqual(RipViewModel.readErrorSuggestThreshold, 5)
+    }
 }
 
 // MARK: - Recently-skipped cooldown tests (v3.7.2)

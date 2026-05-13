@@ -49,6 +49,11 @@ struct Job: Identifiable, Sendable, Codable {
     /// Optional for backward compat — old jobs in the store don't have one,
     /// and we just skip recording for them.
     var discFingerprint: String?
+    /// v3.11.5: count of `MSG:2003` read errors MakeMKV reported during the
+    /// rip phase. Persisted so the History tab can surface "rip had 3 read
+    /// errors" alongside the finished file, helping the user decide whether
+    /// to re-rip the disc. Defaults to 0 for old jobs in the store.
+    var ripReadErrors: Int = 0
     var status: JobStatus = .queued
     var error: String = ""
     var progress: Int = 0
@@ -82,7 +87,7 @@ struct Job: Identifiable, Sendable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
-             workDir, publishedFile, publishPhase, discFingerprint,
+             workDir, publishedFile, publishPhase, discFingerprint, ripReadErrors,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
@@ -90,7 +95,7 @@ struct Job: Identifiable, Sendable, Codable {
              logLines, createdAt, finishedAt
     }
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         self.discName = discName
         self.rippedFile = rippedFile
@@ -104,6 +109,7 @@ struct Job: Identifiable, Sendable, Codable {
         self.episodeNumber = episodeNumber
         self.episodeTitle = episodeTitle
         self.discFingerprint = discFingerprint
+        self.ripReadErrors = ripReadErrors
     }
 
     /// Append a streaming log line (capped at 200 to keep JSON small).

@@ -52,6 +52,17 @@ final class RipViewModel: ObservableObject {
     /// makemkvcon re-walks the disc structure (~20–60 s on Blu-ray).
     /// Resets to `.notStarted` between titles and at end of rip.
     @Published var startupPhase: RipStartupPhase = .notStarted
+    /// v3.11.5: count of MakeMKV `MSG:2003` "Posix I/O error" reads emitted
+    /// during the current rip. Reset on new rip / scan. Drives a small
+    /// indicator in the rip hero block and the auto-suggest-quieter-speed
+    /// banner when the count crosses a threshold. Per-job final count
+    /// is also persisted onto `Job.ripReadErrors` for History display.
+    @Published var readErrorCount: Int = 0
+    /// v3.11.5: when on, the disc panel shows a "Try slower drive speed?"
+    /// banner because the read-error count exceeded the threshold. The
+    /// user can dismiss or click the action button. Cleared on new rip /
+    /// scan / dismiss.
+    @Published var suggestLowerDriveSpeed: Bool = false
     /// v3.11.2: true when Auto mode has finished scanning a disc and is
     /// paused awaiting the user's "Rip" click. Set when
     /// `config.autoConfirmBeforeRip == true` AND the scan in `fullAuto`
@@ -106,8 +117,8 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -139,11 +150,37 @@ final class RipViewModel: ObservableObject {
         // Update startup phase from MSG codes. Best-effort: a missed code
         // just means the UI shows a less-specific status, never an error.
         Self.advanceStartupPhase(&startupPhase, fromLine: line)
+        // v3.11.5: count read errors. Pure helper makes this testable.
+        if Self.isReadErrorLine(line) {
+            readErrorCount += 1
+            // Crossing the threshold (default 5) flips the suggest banner.
+            // Idempotent once set — stays true until dismissed or next scan.
+            if readErrorCount >= Self.readErrorSuggestThreshold {
+                suggestLowerDriveSpeed = true
+            }
+        }
         // Capture informational caption lines. Skip raw structure rows
         // (DRV/CINFO/TINFO/SINFO) — too noisy and useless to a casual user.
         if let caption = Self.extractInformationalCaption(line) {
             lastInformationalMakeMKVLine = caption
         }
+    }
+
+    /// v3.11.5: how many MSG:2003 read errors trigger the "try slower drive
+    /// speed" banner. 5 is a reasonable balance — single transient errors
+    /// are routine on used media (don't pester the user); persistent
+    /// per-sector failures (5+ in one rip) signal a disc or drive issue
+    /// worth pausing for.
+    static let readErrorSuggestThreshold = 5
+
+    /// v3.11.5: pure check for whether a MakeMKV log line represents a
+    /// single read-error event worth counting. MSG:2003 = "Posix error"
+    /// raw read failure at a specific offset (one per failed sector).
+    /// MSG:2022 = end-of-rip summary ("Encountered N read errors") — we
+    /// deliberately ignore that one because the per-event MSG:2003 lines
+    /// have already given us the count, and counting both would double.
+    static func isReadErrorLine(_ line: String) -> Bool {
+        line.hasPrefix("MSG:2003")
     }
 
     /// Pure parser for the rip-startup phase machine. Inputs a current phase
@@ -459,6 +496,8 @@ final class RipViewModel: ObservableObject {
         unidentifiedDiscName = nil
         previousRipMatch = nil
         awaitingAutoRipConfirm = false  // v3.11.2
+        readErrorCount = 0  // v3.11.5
+        suggestLowerDriveSpeed = false  // v3.11.5
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -505,6 +544,10 @@ final class RipViewModel: ObservableObject {
         // UI's Rip button can return to its standard disabled-while-ripping
         // state and the auto loop knows the user committed.
         awaitingAutoRipConfirm = false
+        // v3.11.5: reset error counters at rip start so the count reflects
+        // this rip, not whatever happened during the prior scan.
+        readErrorCount = 0
+        suggestLowerDriveSpeed = false
         isRipping = true
         if config.preventSleep { SleepAssertion.shared.acquire(reason: "AutoRipper rip in progress") }
         ripProgress = 0
@@ -737,7 +780,8 @@ final class RipViewModel: ObservableObject {
                         // RippedDiscRegistry can record the publish.
                         let discFp = DiscFingerprintService.fingerprint(info)
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
-                                       assignment?.season, assignment?.episode, assignment?.title, discFp)
+                                       assignment?.season, assignment?.episode, assignment?.title, discFp,
+                                       readErrorCount)
                     }
                 } catch {
                     sizeMonitor.cancel()
@@ -1139,6 +1183,8 @@ final class RipViewModel: ObservableObject {
         // Full Auto to resume hands-free behavior.
         fullAutoEnabled = false
         awaitingAutoRipConfirm = false  // v3.11.2
+        readErrorCount = 0  // v3.11.5
+        suggestLowerDriveSpeed = false  // v3.11.5
         activePhase = .idle
         config.inFlightRip = nil
     }
