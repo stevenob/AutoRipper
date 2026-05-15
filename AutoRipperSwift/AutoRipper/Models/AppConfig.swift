@@ -161,6 +161,28 @@ final class AppConfig: ObservableObject {
         }
     }
 
+    /// v3.11.10: disc fingerprints the user has explicitly marked for
+    /// re-rip from the History tab. When a scanned disc's fingerprint
+    /// is in this set, AutoRipper:
+    ///   * suppresses the "Already ripped on <date>" duplicate banner,
+    ///   * skips the recently-skipped cooldown (so Auto mode will rip
+    ///     instead of auto-skipping), and
+    ///   * removes the entry as soon as the rip actually starts (one-
+    ///     shot — the next insert of the same disc behaves normally
+    ///     again).
+    ///
+    /// Persisted as a JSON-encoded `[String]` so the marker survives
+    /// app restarts (the user might mark several discs, then physically
+    /// clean and re-insert them across multiple sessions).
+    @Published var forceRerripFingerprints: Set<String> {
+        didSet {
+            let arr = Array(forceRerripFingerprints).sorted()
+            if let data = try? JSONEncoder().encode(arr) {
+                defaults.set(data, forKey: "forceRerripFingerprints")
+            }
+        }
+    }
+
     init() {
         let d = UserDefaults(suiteName: "group.com.autoripper")!
         self.outputDir = d.string(forKey: "outputDir") ?? NSHomeDirectory() + "/Desktop/Ripped"
@@ -188,6 +210,14 @@ final class AppConfig: ObservableObject {
         self.jellyfinApiKey = d.string(forKey: "jellyfinApiKey") ?? ""
         self.skipAlreadyRippedInAuto = d.object(forKey: "skipAlreadyRippedInAuto") as? Bool ?? true
         self.autoConfirmBeforeRip = d.object(forKey: "autoConfirmBeforeRip") as? Bool ?? false
+        // v3.11.10: load the force-re-rip set. JSON-encoded sorted array
+        // for deterministic on-disk shape. Defaults to empty if absent.
+        if let data = d.data(forKey: "forceRerripFingerprints"),
+           let arr = try? JSONDecoder().decode([String].self, from: data) {
+            self.forceRerripFingerprints = Set(arr)
+        } else {
+            self.forceRerripFingerprints = []
+        }
         // v3.11.3: seed from MakeMKV's existing settings.conf if we haven't
         // stored our own value yet. That way an existing user who hand-edited
         // settings.conf sees their current value reflected in the AutoRipper UI

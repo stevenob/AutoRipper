@@ -94,6 +94,42 @@ final class AppConfigTests: XCTestCase {
         // Restore
         config.outputDir = NSHomeDirectory() + "/Desktop/Ripped"
     }
+
+    // MARK: - forceRerripFingerprints (v3.11.10)
+
+    func testForceRerripFingerprintsDefaultsEmpty() {
+        let defaults = UserDefaults(suiteName: "group.com.autoripper")!
+        defaults.removeObject(forKey: "forceRerripFingerprints")
+        let config = AppConfig()
+        XCTAssertTrue(config.forceRerripFingerprints.isEmpty)
+    }
+
+    func testForceRerripFingerprintsPersistsAddAndRemove() {
+        let defaults = UserDefaults(suiteName: "group.com.autoripper")!
+        defaults.removeObject(forKey: "forceRerripFingerprints")
+        let config = AppConfig()
+        let fpA = String(repeating: "a", count: 64)
+        let fpB = String(repeating: "b", count: 64)
+
+        config.forceRerripFingerprints.insert(fpA)
+        config.forceRerripFingerprints.insert(fpB)
+        // Snapshot the on-disk JSON: should round-trip through Set semantics.
+        let data = defaults.data(forKey: "forceRerripFingerprints")
+        XCTAssertNotNil(data)
+        let arr = try? JSONDecoder().decode([String].self, from: data!)
+        XCTAssertEqual(arr.map(Set.init), Set([fpA, fpB]))
+
+        // A fresh AppConfig re-reads the value verbatim.
+        let reloaded = AppConfig()
+        XCTAssertEqual(reloaded.forceRerripFingerprints, Set([fpA, fpB]))
+
+        // Remove one — disk reflects.
+        config.forceRerripFingerprints.remove(fpA)
+        let reloaded2 = AppConfig()
+        XCTAssertEqual(reloaded2.forceRerripFingerprints, Set([fpB]))
+
+        defaults.removeObject(forKey: "forceRerripFingerprints")
+    }
 }
 
 // MARK: - DiscInfo Extended Tests

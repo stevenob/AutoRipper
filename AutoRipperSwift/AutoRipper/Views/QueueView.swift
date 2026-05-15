@@ -782,6 +782,7 @@ private struct JobSidebarRow: View {
 private struct JobDetailView: View {
     let job: Job
     let queueVM: QueueViewModel
+    @ObservedObject private var config = AppConfig.shared
     @State private var showIdentify = false
     @State private var identifyQuery: String = ""
     @State private var thumbs: [URL] = []
@@ -1196,6 +1197,42 @@ private struct JobDetailView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // v3.11.10: re-rip button. Only useful for jobs with a
+            // fingerprint AND visible errors — without the fingerprint
+            // we can't suppress the dup banner on the next insert, and
+            // without errors there's nothing to fix. Toggle behavior:
+            // tap to mark, tap again to cancel.
+            if let fp = job.discFingerprint, !fp.isEmpty {
+                let isMarked = config.forceRerripFingerprints.contains(fp)
+                HStack(spacing: 8) {
+                    if isMarked {
+                        Label("Queued for re-rip", systemImage: "arrow.clockwise.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                        Button("Cancel re-rip") {
+                            config.forceRerripFingerprints.remove(fp)
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                    } else {
+                        Button {
+                            config.forceRerripFingerprints.insert(fp)
+                        } label: {
+                            Label("Mark for re-rip", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    Spacer()
+                }
+                .padding(.top, 2)
+                if isMarked {
+                    Text("Insert the disc again. AutoRipper will skip the duplicate banner and re-rip it once.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 

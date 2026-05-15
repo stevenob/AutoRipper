@@ -606,9 +606,18 @@ final class RipViewModel: ObservableObject {
                 // Check duplicate-rip registry. Compute fingerprint and look
                 // it up; surface the prior entry on the model so the UI can
                 // banner-warn the user.
+                //
+                // v3.11.10: if the user explicitly marked this disc for
+                // re-rip from the History tab, suppress the banner — they
+                // know it's a duplicate and want to re-rip anyway.
                 let fp = DiscFingerprintService.fingerprint(info)
+                let forcedRerrip = config.forceRerripFingerprints.contains(fp)
                 let prior = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
-                self.previousRipMatch = prior
+                self.previousRipMatch = forcedRerrip ? nil : prior
+                if forcedRerrip {
+                    FileLogger.shared.info("rip-vm",
+                        "scan: dup banner suppressed because fingerprint is in forceRerripFingerprints (\(info.name))")
+                }
                 let displayName = info.mediaTitle.isEmpty ? info.name : info.mediaTitle
                 statusText = "Scanned: \(displayName) — \(info.titles.count) titles"
                 NotificationService.shared.notify(title: "Scan Complete", message: "\(displayName) — \(info.titles.count) titles")
@@ -633,6 +642,18 @@ final class RipViewModel: ObservableObject {
         readErrorCount = 0
         suggestLowerDriveSpeed = false
         corruptionEventCount = 0  // v3.11.7
+        // v3.11.10: consume any force-re-rip entry for this disc. One-shot
+        // semantics — the next time the user inserts this same disc the
+        // dup banner + auto-skip return to normal. If we don't have a
+        // discInfo yet we just no-op (shouldn't happen since ripSelected
+        // requires a scan, but defensive).
+        if let info = discInfo {
+            let fp = DiscFingerprintService.fingerprint(info)
+            if config.forceRerripFingerprints.remove(fp) != nil {
+                FileLogger.shared.info("rip-vm",
+                    "consumed forceRerrip entry for \(info.name) at rip start")
+            }
+        }
         isRipping = true
         if config.preventSleep { SleepAssertion.shared.acquire(reason: "AutoRipper rip in progress") }
         ripProgress = 0
@@ -1166,14 +1187,21 @@ final class RipViewModel: ObservableObject {
                 await lookupTMDb(for: &info)
                 self.discInfo = info
                 let fp = DiscFingerprintService.fingerprint(info)
-                self.previousRipMatch = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
+                let forcedRerrip = config.forceRerripFingerprints.contains(fp)
+                let prior = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
+                // v3.11.10: same suppression as scanDisc — if the user
+                // marked this disc for re-rip, don't surface the dup
+                // banner and don't auto-skip below.
+                self.previousRipMatch = forcedRerrip ? nil : prior
                 isScanning = false
 
                 // v3.7.2: skip auto-re-rip when the disc is already in the
                 // registry. Prevents the auto-eject + drive-auto-close +
                 // re-scan loop the user hit on the LG WH16NS40. The user
                 // can disable via Settings → Library → "Skip already-ripped".
-                if let prior = self.previousRipMatch, config.skipAlreadyRippedInAuto {
+                // v3.11.10: also bypass when the disc is explicitly
+                // queued for re-rip.
+                if let prior = self.previousRipMatch, config.skipAlreadyRippedInAuto, !forcedRerrip {
                     let dateStr = ISO8601DateFormatter().string(from: prior.date)
                     FileLogger.shared.info("rip-vm",
                         "auto: skipping already-ripped disc \(prior.discName) (originally ripped \(dateStr))")
