@@ -124,6 +124,70 @@ enum DriveHealthAnalyzer {
             return job.ripReadErrors > 0 || job.ripCorruptionEvents > 0
         }
     }
+
+    /// v3.11.12: cluster analysis result over the read-error offsets
+    /// recorded by past rips. Surfaces in the Drive Health UI when
+    /// errors on different physical discs all fire at similar offsets —
+    /// the parsimonious explanation is a drive laser-tracking fault at
+    /// the corresponding radial position.
+    struct OffsetCluster: Sendable, Equatable {
+        /// Number of offsets analysed across all jobs.
+        let sampleSize: Int
+        /// Number of distinct jobs (= discs) contributing offsets.
+        let distinctJobs: Int
+        /// Median offset in bytes. nil when sampleSize == 0.
+        let medianBytes: Int64?
+        /// Min / max offset in bytes. nil when sampleSize == 0.
+        let minBytes: Int64?
+        let maxBytes: Int64?
+        /// True when the cluster is "tight" enough across multiple
+        /// distinct discs to suggest a drive issue. See
+        /// `analyzeOffsetClustering(_:)` for the heuristic.
+        let isCluster: Bool
+    }
+
+    /// Maximum spread (max - min, in bytes) below which offsets across
+    /// multiple discs are considered clustered. 500 MiB is wide enough
+    /// to forgive small variation in disc layout while still flagging
+    /// genuine radial-position faults.
+    static let clusterSpreadThresholdBytes: Int64 = 500 * 1024 * 1024
+
+    /// Minimum number of DISTINCT jobs (= discs) the analyzer needs
+    /// before it will flag a cluster. With only one disc contributing
+    /// offsets, clustering tells you nothing about the drive (the disc
+    /// could be locally damaged in one spot). The phenomenon worth
+    /// surfacing is "different physical discs failing at the same disc-
+    /// radius position", which requires ≥ 2 distinct discs.
+    static let clusterMinDistinctJobs = 2
+
+    /// Aggregate read-error offsets across the supplied jobs and
+    /// determine whether they cluster.
+    static func analyzeOffsetClustering(_ jobs: [Job]) -> OffsetCluster {
+        var distinctJobs = 0
+        var allOffsets: [Int64] = []
+        for job in jobs where !job.readErrorOffsets.isEmpty {
+            distinctJobs += 1
+            allOffsets.append(contentsOf: job.readErrorOffsets)
+        }
+        guard !allOffsets.isEmpty else {
+            return OffsetCluster(sampleSize: 0, distinctJobs: 0,
+                                 medianBytes: nil, minBytes: nil, maxBytes: nil,
+                                 isCluster: false)
+        }
+        let sorted = allOffsets.sorted()
+        let minB = sorted.first!
+        let maxB = sorted.last!
+        let median = sorted[sorted.count / 2]
+        let spread = maxB - minB
+        let cluster = distinctJobs >= clusterMinDistinctJobs
+            && spread <= clusterSpreadThresholdBytes
+        return OffsetCluster(sampleSize: allOffsets.count,
+                             distinctJobs: distinctJobs,
+                             medianBytes: median,
+                             minBytes: minB,
+                             maxBytes: maxB,
+                             isCluster: cluster)
+    }
 }
 
 extension DriveHealthAnalyzer.Verdict {

@@ -1197,6 +1197,12 @@ private struct JobDetailView: View {
                         .fontWeight(.semibold)
                     Spacer()
                 }
+                if !job.readErrorOffsets.isEmpty {
+                    Text("Errors at: \(formatOffsets(job.readErrorOffsets))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             if job.ripCorruptionEvents > 0 {
                 HStack(spacing: 8) {
@@ -1265,6 +1271,18 @@ private struct JobDetailView: View {
         case (false, false):
             return ""
         }
+    }
+
+    /// v3.11.12: format up to 6 of the captured read-error offsets as a
+    /// short comma-separated human-readable list ("2.0 GB, 2.1 GB, 2.0 GB").
+    /// Truncates with "… (+N more)" if the list is longer.
+    private func formatOffsets(_ offsets: [Int64]) -> String {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useGB, .useMB]
+        f.countStyle = .file
+        let preview = offsets.prefix(6).map { f.string(fromByteCount: $0) }
+        let suffix = offsets.count > 6 ? " (+\(offsets.count - 6) more)" : ""
+        return preview.joined(separator: ", ") + suffix
     }
 
     // MARK: - Error / log

@@ -60,6 +60,13 @@ struct Job: Identifiable, Sendable, Codable {
     /// (read errors) vs disc-side (corruption events) failure-mode split
     /// that lets the user pattern-match across discs.
     var ripCorruptionEvents: Int = 0
+    /// v3.11.12: byte offsets where MSG:2003 read errors fired during the
+    /// rip. Capped at `RipViewModel.readErrorOffsetCap` (50) entries.
+    /// Drive Health aggregates these across all jobs to detect offset
+    /// clustering — when errors on different discs all happen at similar
+    /// offsets, the drive's laser tracking at that radius is the
+    /// parsimonious explanation.
+    var readErrorOffsets: [Int64] = []
     /// v3.11.8: explicit folder-name override for the NAS publish step.
     /// Set during the organize step when the local work dir uses a
     /// per-job-unique container (e.g. `<workRoot>/job-abc.../Mortal Kombat (1995)/`).
@@ -102,7 +109,7 @@ struct Job: Identifiable, Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
              workDir, publishedFile, publishPhase, discFingerprint, ripReadErrors,
-             ripCorruptionEvents, publishDestFolderName,
+             ripCorruptionEvents, publishDestFolderName, readErrorOffsets,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
@@ -110,7 +117,7 @@ struct Job: Identifiable, Sendable, Codable {
              logLines, createdAt, finishedAt
     }
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0, ripCorruptionEvents: Int = 0) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0, ripCorruptionEvents: Int = 0, readErrorOffsets: [Int64] = []) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         self.discName = discName
         self.rippedFile = rippedFile
@@ -126,6 +133,7 @@ struct Job: Identifiable, Sendable, Codable {
         self.discFingerprint = discFingerprint
         self.ripReadErrors = ripReadErrors
         self.ripCorruptionEvents = ripCorruptionEvents
+        self.readErrorOffsets = readErrorOffsets
     }
 
     /// Append a streaming log line (capped at 200 to keep JSON small).

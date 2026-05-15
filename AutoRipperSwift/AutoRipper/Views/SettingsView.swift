@@ -907,21 +907,57 @@ private struct DriveHealthPane: View {
     @ViewBuilder
     private func verdictHeader(report: DriveHealthAnalyzer.Report) -> some View {
         let v = report.verdict
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: v.sfSymbol)
-                .font(.title)
-                .foregroundStyle(color(for: v))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(v.headline)
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                Text(v.explanation(report: report))
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: v.sfSymbol)
+                    .font(.title)
+                    .foregroundStyle(color(for: v))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(v.headline)
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                    Text(v.explanation(report: report))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
             }
-            Spacer()
+            // v3.11.12: surface the offset-clustering finding when
+            // present. This is the most diagnostic single statement we
+            // can make about drive-vs-disc — if errors on different
+            // discs all happen at the same byte offset, the drive's
+            // laser tracking at that radial position is the
+            // parsimonious explanation.
+            let cluster = DriveHealthAnalyzer.analyzeOffsetClustering(snapshot)
+            if cluster.isCluster, let median = cluster.medianBytes {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "scope")
+                        .foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Errors cluster at ~\(formatBytes(median))")
+                            .font(.callout)
+                            .fontWeight(.medium)
+                        Text("\(cluster.sampleSize) error\(cluster.sampleSize == 1 ? "" : "s") across \(cluster.distinctJobs) different discs all fired within a narrow range. That's strong evidence the drive's laser has a problem at this radial position — replace the drive and the issue should disappear.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(8)
+                .background(Color.red.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
         }
+    }
+
+    /// Convert a byte count to a short human-readable form like
+    /// "2.0 GB". Used for the offset-cluster headline.
+    private func formatBytes(_ b: Int64) -> String {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useGB, .useMB]
+        f.countStyle = .file
+        return f.string(fromByteCount: b)
     }
 
     @ViewBuilder

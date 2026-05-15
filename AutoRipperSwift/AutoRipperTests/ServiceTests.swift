@@ -1511,6 +1511,35 @@ final class RipStartupPhaseTests: XCTestCase {
         XCTAssertEqual(RipViewModel.readErrorSuggestThreshold, 5)
     }
 
+    // MARK: - Offset parser (v3.11.12)
+
+    func testOffsetParserExtractsValueFromRealMSG2003() {
+        let line = "MSG:2003,0,3,\"Error 'Posix error - Input/output error' occurred while reading '/dev/rdisk4' at offset '2083123200'\",\"Error '%1' occurred while reading '%2' at offset '%3'\",\"Posix error - Input/output error\",\"/dev/rdisk4\",\"2083123200\""
+        XCTAssertEqual(RipViewModel.extractReadErrorOffset(line), 2083123200)
+    }
+
+    func testOffsetParserReturnsNilForNonReadErrorLines() {
+        XCTAssertNil(RipViewModel.extractReadErrorOffset("MSG:2002,0,3,\"corrupt\""))
+        XCTAssertNil(RipViewModel.extractReadErrorOffset("PRGV:50,100,65535"))
+        XCTAssertNil(RipViewModel.extractReadErrorOffset(""))
+    }
+
+    func testOffsetParserReturnsNilForMalformedMSG2003() {
+        XCTAssertNil(RipViewModel.extractReadErrorOffset("MSG:2003,0,3,\"unrelated\""))
+        XCTAssertNil(RipViewModel.extractReadErrorOffset("MSG:2003,0,3,\"at offset '123"))
+        XCTAssertNil(RipViewModel.extractReadErrorOffset("MSG:2003,0,3,\"at offset 'XYZ'\""))
+    }
+
+    func testOffsetParserHandlesLargeValues() {
+        // 32 GB offset — needs Int64
+        let line = "MSG:2003,0,3,\"at offset '34359738368'\""
+        XCTAssertEqual(RipViewModel.extractReadErrorOffset(line), 34_359_738_368)
+    }
+
+    func testOffsetCapIsFifty() {
+        XCTAssertEqual(RipViewModel.readErrorOffsetCap, 50)
+    }
+
     // MARK: - Data-corruption parser (v3.11.7)
 
     func testCorruptionParserMatchesMSG2002() {
@@ -2193,6 +2222,79 @@ final class DriveHealthAnalyzerTests: XCTestCase {
 
     func testAffectedJobsFilterEmptyInput() {
         XCTAssertTrue(DriveHealthAnalyzer.affectedJobsWithFingerprint([]).isEmpty)
+    }
+
+    // MARK: - Offset clustering (v3.11.12)
+
+    private func makeJobWithOffsets(_ offsets: [Int64]) -> Job {
+        Job(discName: "test", rippedFile: URL(fileURLWithPath: "/tmp/x.mkv"),
+            ripReadErrors: offsets.count, readErrorOffsets: offsets)
+    }
+
+    func testOffsetClusteringEmpty() {
+        let r = DriveHealthAnalyzer.analyzeOffsetClustering([])
+        XCTAssertFalse(r.isCluster)
+        XCTAssertEqual(r.sampleSize, 0)
+        XCTAssertEqual(r.distinctJobs, 0)
+        XCTAssertNil(r.medianBytes)
+    }
+
+    func testOffsetClusteringSingleDiscIsNotCluster() {
+        // Only one disc contributing offsets — even if narrowly grouped,
+        // we can't conclude anything about the drive (could just be a
+        // single damaged disc).
+        let jobs = [makeJobWithOffsets([2_000_000_000, 2_050_000_000, 2_100_000_000])]
+        let r = DriveHealthAnalyzer.analyzeOffsetClustering(jobs)
+        XCTAssertFalse(r.isCluster)
+        XCTAssertEqual(r.distinctJobs, 1)
+        XCTAssertEqual(r.sampleSize, 3)
+    }
+
+    func testOffsetClusteringNarrowSpreadAcrossMultipleDiscs() {
+        // The exact scenario the user observed: errors on different discs
+        // all happening at ~2 GB. This should fire the cluster finding.
+        let jobs = [
+            makeJobWithOffsets([2_083_123_200]),
+            makeJobWithOffsets([2_096_381_952]),
+            makeJobWithOffsets([2_100_000_000]),
+        ]
+        let r = DriveHealthAnalyzer.analyzeOffsetClustering(jobs)
+        XCTAssertTrue(r.isCluster, "narrow spread across 3 discs should cluster")
+        XCTAssertEqual(r.distinctJobs, 3)
+        XCTAssertEqual(r.sampleSize, 3)
+    }
+
+    func testOffsetClusteringWideSpreadIsNotCluster() {
+        // Errors scattered across the full disc — not a cluster.
+        let jobs = [
+            makeJobWithOffsets([500_000_000]),     // ~ 500 MB
+            makeJobWithOffsets([8_000_000_000]),   // ~ 8 GB
+            makeJobWithOffsets([15_000_000_000]),  // ~ 15 GB
+        ]
+        let r = DriveHealthAnalyzer.analyzeOffsetClustering(jobs)
+        XCTAssertFalse(r.isCluster, "spread >> 500 MiB should not cluster")
+        XCTAssertEqual(r.distinctJobs, 3)
+    }
+
+    func testOffsetClusteringIgnoresJobsWithNoOffsets() {
+        // Only counts jobs that actually contributed offsets toward
+        // distinctJobs. Three clean jobs alongside two errored ones
+        // should still report distinctJobs = 2.
+        let jobs = [
+            makeJobWithOffsets([2_000_000_000]),
+            makeJobWithOffsets([]),  // clean — should not count
+            makeJobWithOffsets([2_100_000_000]),
+            makeJobWithOffsets([]),
+        ]
+        let r = DriveHealthAnalyzer.analyzeOffsetClustering(jobs)
+        XCTAssertEqual(r.distinctJobs, 2)
+    }
+
+    func testClusterConstantsAreExposed() {
+        // Hand-tuned thresholds — assert them as part of the API
+        // contract so a future tweak isn't accidental.
+        XCTAssertEqual(DriveHealthAnalyzer.clusterSpreadThresholdBytes, 500 * 1024 * 1024)
+        XCTAssertEqual(DriveHealthAnalyzer.clusterMinDistinctJobs, 2)
     }
 }
 

@@ -86,6 +86,14 @@ final class RipViewModel: ObservableObject {
     /// disc at fault. This is exactly the diagnostic a single combined
     /// count can't surface.
     @Published var corruptionEventCount: Int = 0
+    /// v3.11.12: per-event byte offsets where MSG:2003 read errors fired
+    /// during the current rip. Capped at `readErrorOffsetCap` per rip so
+    /// the persisted JSON on `Job` stays bounded for runaway-error
+    /// scenarios. Persisted onto `Job.readErrorOffsets` so the Drive
+    /// Health pane can analyse offset clustering across all discs —
+    /// errors clustering in a narrow range across MULTIPLE different
+    /// discs is the smoking gun for a drive laser-tracking fault.
+    @Published var readErrorOffsets: [Int64] = []
     /// v3.11.2: true when Auto mode has finished scanning a disc and is
     /// paused awaiting the user's "Rip" click. Set when
     /// `config.autoConfirmBeforeRip == true` AND the scan in `fullAuto`
@@ -140,8 +148,8 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors, ripCorruptionEvents)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int, Int) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors, ripCorruptionEvents, readErrorOffsets)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int, Int, [Int64]) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -176,6 +184,12 @@ final class RipViewModel: ObservableObject {
         // v3.11.5: count read errors. Pure helper makes this testable.
         if Self.isReadErrorLine(line) {
             readErrorCount += 1
+            // v3.11.12: also capture the byte offset where the error fired,
+            // up to a cap so a runaway rip can't bloat the persisted Job.
+            if let offset = Self.extractReadErrorOffset(line),
+               readErrorOffsets.count < Self.readErrorOffsetCap {
+                readErrorOffsets.append(offset)
+            }
             // Crossing the threshold (default 5) flips the suggest banner.
             // Idempotent once set — stays true until dismissed or next scan.
             if readErrorCount >= Self.readErrorSuggestThreshold {
@@ -210,6 +224,38 @@ final class RipViewModel: ObservableObject {
     /// have already given us the count, and counting both would double.
     static func isReadErrorLine(_ line: String) -> Bool {
         line.hasPrefix("MSG:2003")
+    }
+
+    /// v3.11.12: how many MSG:2003 offsets we capture per rip before
+    /// dropping further ones. 50 is enough to characterise the pattern
+    /// (cluster vs scatter) without bloating persisted JSON on a runaway
+    /// disc that fires thousands of read errors.
+    static let readErrorOffsetCap = 50
+
+    /// v3.11.12: extract the byte offset from a MSG:2003 line, or nil if
+    /// the line isn't a MSG:2003 or the offset can't be parsed.
+    ///
+    /// MakeMKV emits MSG:2003 lines in this exact shape:
+    ///
+    ///     MSG:2003,0,3,"Error 'Posix error - Input/output error' \
+    ///     occurred while reading '/dev/rdisk4' at offset '2083123200'", \
+    ///     "Error '%1' occurred while reading '%2' at offset '%3'", \
+    ///     "Posix error - Input/output error","/dev/rdisk4","2083123200"
+    ///
+    /// The offset appears twice: once inside the human message (with
+    /// single quotes around it), and once as the last comma-separated
+    /// parameter (also quoted). We parse the human-message instance
+    /// because it's more positionally predictable (always preceded by
+    /// the literal string "at offset '") and forgives reordering of
+    /// trailing parameters in future MakeMKV versions.
+    static func extractReadErrorOffset(_ line: String) -> Int64? {
+        guard line.hasPrefix("MSG:2003") else { return nil }
+        let marker = "at offset '"
+        guard let markerRange = line.range(of: marker) else { return nil }
+        let after = line[markerRange.upperBound...]
+        guard let closeQuote = after.firstIndex(of: "'") else { return nil }
+        let digits = String(after[after.startIndex..<closeQuote])
+        return Int64(digits)
     }
 
     /// v3.11.7: pure check for whether a MakeMKV log line represents a
@@ -582,6 +628,7 @@ final class RipViewModel: ObservableObject {
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
         corruptionEventCount = 0  // v3.11.7
+        readErrorOffsets = []  // v3.11.12
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -642,6 +689,7 @@ final class RipViewModel: ObservableObject {
         readErrorCount = 0
         suggestLowerDriveSpeed = false
         corruptionEventCount = 0  // v3.11.7
+        readErrorOffsets = []  // v3.11.12
         // v3.11.10: consume any force-re-rip entry for this disc. One-shot
         // semantics — the next time the user inserts this same disc the
         // dup banner + auto-skip return to normal. If we don't have a
@@ -899,7 +947,7 @@ final class RipViewModel: ObservableObject {
                         let discFp = DiscFingerprintService.fingerprint(info)
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
                                        assignment?.season, assignment?.episode, assignment?.title, discFp,
-                                       readErrorCount, corruptionEventCount)
+                                       readErrorCount, corruptionEventCount, readErrorOffsets)
                     }
                 } catch {
                     sizeMonitor.cancel()
@@ -1311,6 +1359,7 @@ final class RipViewModel: ObservableObject {
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
         corruptionEventCount = 0  // v3.11.7
+        readErrorOffsets = []  // v3.11.12
         activePhase = .idle
         config.inFlightRip = nil
     }
