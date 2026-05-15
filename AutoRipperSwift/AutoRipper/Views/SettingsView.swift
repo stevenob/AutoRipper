@@ -24,6 +24,8 @@ struct SettingsView: View {
                 .tabItem { Label("Library", systemImage: "play.tv.fill") }
             DiscordPane(config: config)
                 .tabItem { Label("Discord", systemImage: "bubble.left.and.bubble.right") }
+            DriveHealthPane()
+                .tabItem { Label("Drive Health", systemImage: "stethoscope") }
             HistoryPane(config: config)
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
             AdvancedPane(config: config)
@@ -710,6 +712,143 @@ private struct DiscordPane: View {
         case .success: genericTestStatus = "✓ Delivered"
         case .failure(let e): genericTestStatus = "✗ \(e.localizedDescription)"
         }
+    }
+}
+
+// MARK: - Drive Health (v3.11.9)
+
+/// Settings tab that aggregates per-rip drive/disc error counts across
+/// the entire History into a single drive-health verdict. The diagnostic
+/// answer to "is my optical drive going bad?" — built on top of the
+/// v3.11.5 / v3.11.7 per-rip counters that the rip pane already shows.
+///
+/// Snapshots the JobStore on appear (and on a manual Refresh tap) rather
+/// than observing live — the data only changes on rip completion and we
+/// don't need a tight UI update cycle.
+private struct DriveHealthPane: View {
+    @State private var report: DriveHealthAnalyzer.Report?
+    @State private var lastRefreshed: Date?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let report {
+                    verdictHeader(report: report)
+                    Divider()
+                    countersBlock(report: report)
+                    Divider()
+                    actionsBlock(report: report)
+                } else {
+                    ProgressView("Computing…")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 40)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .onAppear(perform: refresh)
+        .navigationTitle("Drive Health")
+    }
+
+    @ViewBuilder
+    private func verdictHeader(report: DriveHealthAnalyzer.Report) -> some View {
+        let v = report.verdict
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: v.sfSymbol)
+                .font(.title)
+                .foregroundStyle(color(for: v))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(v.headline)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Text(v.explanation(report: report))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private func countersBlock(report: DriveHealthAnalyzer.Report) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Across the last \(report.analyzedCount) ripped \(report.analyzedCount == 1 ? "disc" : "discs")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            statRow(label: "Rips with drive-side read errors",
+                    value: "\(report.ripsWithReadErrors)",
+                    detail: "MSG:2003 — laser couldn't physically read sectors")
+            statRow(label: "Rips with disc-side corruption",
+                    value: "\(report.ripsWithCorruption)",
+                    detail: "MSG:2002 / 2017 / 2018 — data read OK but failed validation")
+            statRow(label: "Rips with any issue",
+                    value: "\(report.ripsWithAnyIssue) (\(report.anyIssuePercent)%)",
+                    detail: nil)
+            if report.totalReadErrors > 0 || report.totalCorruptionEvents > 0 {
+                statRow(label: "Total error events",
+                        value: "\(report.totalReadErrors) read · \(report.totalCorruptionEvents) corrupt",
+                        detail: nil)
+            }
+        }
+    }
+
+    private func statRow(label: String, value: String, detail: String?) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.callout)
+                if let detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+            Text(value)
+                .font(.callout)
+                .fontWeight(.medium)
+                .monospacedDigit()
+        }
+    }
+
+    @ViewBuilder
+    private func actionsBlock(report: DriveHealthAnalyzer.Report) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button("Refresh", systemImage: "arrow.clockwise") { refresh() }
+                    .buttonStyle(.bordered)
+                if let lastRefreshed {
+                    Text("Last refreshed \(lastRefreshed, formatter: relativeDateFormatter)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func refresh() {
+        let all = JobStore.shared.load()
+        // Only completed jobs — in-flight ones haven't had their final
+        // counters recorded yet and would skew the report with zeros.
+        let completed = all.filter { $0.status == .done }
+        report = DriveHealthAnalyzer.analyze(jobs: completed)
+        lastRefreshed = Date()
+    }
+
+    private func color(for verdict: DriveHealthAnalyzer.Verdict) -> Color {
+        switch verdict {
+        case .healthy:          return .green
+        case .someIssues:       return .orange
+        case .driveSuspect:     return .red
+        case .insufficientData: return .secondary
+        }
+    }
+
+    private var relativeDateFormatter: RelativeDateTimeFormatter {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
     }
 }
 

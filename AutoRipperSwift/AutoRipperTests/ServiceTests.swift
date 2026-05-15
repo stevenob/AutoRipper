@@ -2053,6 +2053,104 @@ final class HistoryStatsTests: XCTestCase {
     }
 }
 
+// MARK: - DriveHealthAnalyzer tests (v3.11.9)
+//
+// Pure-function aggregator over completed jobs. Verifies that the
+// threshold-based verdict tips correctly between healthy /
+// someIssues / driveSuspect / insufficientData and that the per-
+// counter aggregates are computed right.
+
+final class DriveHealthAnalyzerTests: XCTestCase {
+
+    private func makeJob(readErrors: Int = 0, corruption: Int = 0) -> Job {
+        Job(discName: "test", rippedFile: URL(fileURLWithPath: "/tmp/x.mkv"),
+            ripReadErrors: readErrors, ripCorruptionEvents: corruption)
+    }
+
+    func testInsufficientDataForFewerThanMinimumJobs() {
+        // Single rip can't generalize — even if it had errors.
+        let r1 = DriveHealthAnalyzer.analyze(jobs: [])
+        XCTAssertEqual(r1.verdict, .insufficientData)
+        XCTAssertEqual(r1.analyzedCount, 0)
+
+        let r2 = DriveHealthAnalyzer.analyze(jobs: [makeJob(readErrors: 5)])
+        XCTAssertEqual(r2.verdict, .insufficientData)
+
+        let r3 = DriveHealthAnalyzer.analyze(jobs: [makeJob(), makeJob()])
+        XCTAssertEqual(r3.verdict, .insufficientData)
+    }
+
+    func testHealthyWhenAllJobsClean() {
+        let jobs = (0..<5).map { _ in makeJob() }
+        let r = DriveHealthAnalyzer.analyze(jobs: jobs)
+        XCTAssertEqual(r.verdict, .healthy)
+        XCTAssertEqual(r.ripsWithAnyIssue, 0)
+        XCTAssertEqual(r.anyIssuePercent, 0)
+    }
+
+    func testSomeIssuesBelowThreshold() {
+        // 1 of 10 affected (10%) — well below the 40% suspect threshold.
+        var jobs = (0..<9).map { _ in makeJob() }
+        jobs.append(makeJob(readErrors: 3))
+        let r = DriveHealthAnalyzer.analyze(jobs: jobs)
+        XCTAssertEqual(r.verdict, .someIssues)
+        XCTAssertEqual(r.ripsWithAnyIssue, 1)
+        XCTAssertEqual(r.anyIssuePercent, 10)
+    }
+
+    func testDriveSuspectAtOrAboveThreshold() {
+        // 4 of 10 affected (40%) — exactly the threshold.
+        var jobs: [Job] = []
+        for _ in 0..<4 { jobs.append(makeJob(readErrors: 2)) }
+        for _ in 0..<6 { jobs.append(makeJob()) }
+        let r = DriveHealthAnalyzer.analyze(jobs: jobs)
+        XCTAssertEqual(r.verdict, .driveSuspect)
+        XCTAssertEqual(r.ripsWithAnyIssue, 4)
+        XCTAssertEqual(r.anyIssuePercent, 40)
+    }
+
+    func testCountsReadAndCorruptionSeparately() {
+        // Disjoint sets of jobs with each kind of error + one job that
+        // has both — verifies the union counting in ripsWithAnyIssue.
+        let jobs: [Job] = [
+            makeJob(readErrors: 1),
+            makeJob(readErrors: 2),
+            makeJob(corruption: 3),
+            makeJob(readErrors: 1, corruption: 1),  // counted ONCE in anyIssue
+            makeJob(),
+        ]
+        let r = DriveHealthAnalyzer.analyze(jobs: jobs)
+        XCTAssertEqual(r.ripsWithReadErrors, 3)
+        XCTAssertEqual(r.ripsWithCorruption, 2)
+        XCTAssertEqual(r.ripsWithAnyIssue, 4, "the job with both errors counts once toward anyIssue")
+        XCTAssertEqual(r.totalReadErrors, 4)
+        XCTAssertEqual(r.totalCorruptionEvents, 4)
+    }
+
+    func testVerdictExplanationsAreNonEmptyAndAdapt() {
+        // Each verdict should produce a usable explainer string.
+        let reports: [(DriveHealthAnalyzer.Verdict, DriveHealthAnalyzer.Report)] = [
+            (.healthy, DriveHealthAnalyzer.analyze(jobs: (0..<5).map { _ in makeJob() })),
+            (.someIssues, DriveHealthAnalyzer.analyze(jobs: [makeJob(readErrors: 1)] + (0..<9).map { _ in makeJob() })),
+            (.driveSuspect, DriveHealthAnalyzer.analyze(jobs: (0..<5).map { _ in makeJob(readErrors: 1) } + (0..<5).map { _ in makeJob() })),
+            (.insufficientData, DriveHealthAnalyzer.analyze(jobs: [makeJob()])),
+        ]
+        for (expected, r) in reports {
+            XCTAssertEqual(r.verdict, expected)
+            XCTAssertFalse(r.verdict.explanation(report: r).isEmpty, "explanation must be non-empty for \(expected)")
+            XCTAssertFalse(r.verdict.headline.isEmpty)
+            XCTAssertFalse(r.verdict.sfSymbol.isEmpty)
+        }
+    }
+
+    func testThresholdConstantsMatchDocs() {
+        // Hand-tuned values are part of the API contract — assert them
+        // so a future tweak isn't accidental.
+        XCTAssertEqual(DriveHealthAnalyzer.suspectThresholdPercent, 40)
+        XCTAssertEqual(DriveHealthAnalyzer.minimumSampleSize, 3)
+    }
+}
+
 // MARK: - Edition hint heuristic tests (v3.10)
 
 final class EditionHintTests: XCTestCase {
