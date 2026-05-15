@@ -2149,6 +2149,51 @@ final class DriveHealthAnalyzerTests: XCTestCase {
         XCTAssertEqual(DriveHealthAnalyzer.suspectThresholdPercent, 40)
         XCTAssertEqual(DriveHealthAnalyzer.minimumSampleSize, 3)
     }
+
+    // MARK: - affectedJobsWithFingerprint (v3.11.11)
+
+    private func makeFingerprintedJob(readErrors: Int = 0, corruption: Int = 0, fp: String?) -> Job {
+        Job(discName: "test",
+            rippedFile: URL(fileURLWithPath: "/tmp/x.mkv"),
+            discFingerprint: fp,
+            ripReadErrors: readErrors,
+            ripCorruptionEvents: corruption)
+    }
+
+    func testAffectedJobsFilterIncludesEitherCounter() {
+        let jobs: [Job] = [
+            makeFingerprintedJob(readErrors: 1, fp: "fpA"),
+            makeFingerprintedJob(corruption: 2, fp: "fpB"),
+            makeFingerprintedJob(readErrors: 1, corruption: 3, fp: "fpC"),
+        ]
+        let affected = DriveHealthAnalyzer.affectedJobsWithFingerprint(jobs)
+        XCTAssertEqual(Set(affected.compactMap { $0.discFingerprint }), Set(["fpA", "fpB", "fpC"]))
+    }
+
+    func testAffectedJobsFilterExcludesCleanRips() {
+        let jobs: [Job] = [
+            makeFingerprintedJob(fp: "clean1"),
+            makeFingerprintedJob(fp: "clean2"),
+        ]
+        XCTAssertTrue(DriveHealthAnalyzer.affectedJobsWithFingerprint(jobs).isEmpty)
+    }
+
+    func testAffectedJobsFilterExcludesMissingFingerprint() {
+        // Without a fingerprint we can't suppress the dup banner on
+        // re-insert, so re-ripping is pointless — skip these.
+        let jobs: [Job] = [
+            makeFingerprintedJob(readErrors: 5, fp: nil),
+            makeFingerprintedJob(corruption: 5, fp: ""),
+            makeFingerprintedJob(readErrors: 1, fp: "valid"),
+        ]
+        let affected = DriveHealthAnalyzer.affectedJobsWithFingerprint(jobs)
+        XCTAssertEqual(affected.count, 1)
+        XCTAssertEqual(affected.first?.discFingerprint, "valid")
+    }
+
+    func testAffectedJobsFilterEmptyInput() {
+        XCTAssertTrue(DriveHealthAnalyzer.affectedJobsWithFingerprint([]).isEmpty)
+    }
 }
 
 // MARK: - Edition hint heuristic tests (v3.10)

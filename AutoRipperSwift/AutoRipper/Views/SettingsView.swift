@@ -726,8 +726,13 @@ private struct DiscordPane: View {
 /// than observing live — the data only changes on rip completion and we
 /// don't need a tight UI update cycle.
 private struct DriveHealthPane: View {
+    @ObservedObject private var config = AppConfig.shared
     @State private var report: DriveHealthAnalyzer.Report?
     @State private var lastRefreshed: Date?
+    /// Snapshot of the History jobs we built `report` from. Kept so the
+    /// bulk-mark action can also use it without re-loading from disk.
+    @State private var snapshot: [Job] = []
+    @State private var bulkConfirm = false
 
     var body: some View {
         ScrollView {
@@ -736,6 +741,14 @@ private struct DriveHealthPane: View {
                     verdictHeader(report: report)
                     Divider()
                     countersBlock(report: report)
+                    if !affectedWithFingerprint.isEmpty {
+                        Divider()
+                        bulkActionBlock
+                    }
+                    if !pendingRerripJobs.isEmpty {
+                        Divider()
+                        pendingRerripBlock
+                    }
                     Divider()
                     actionsBlock(report: report)
                 } else {
@@ -748,6 +761,147 @@ private struct DriveHealthPane: View {
         }
         .onAppear(perform: refresh)
         .navigationTitle("Drive Health")
+        .confirmationDialog(
+            "Mark \(affectedWithFingerprint.count) disc\(affectedWithFingerprint.count == 1 ? "" : "s") for re-rip?",
+            isPresented: $bulkConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Mark for re-rip") {
+                for job in affectedWithFingerprint {
+                    if let fp = job.discFingerprint, !fp.isEmpty {
+                        config.forceRerripFingerprints.insert(fp)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("AutoRipper will skip the duplicate banner the next time you insert each of these discs and re-rip it once. Useful when you've cleaned the discs and want to retry the whole batch.")
+        }
+    }
+
+    /// Affected jobs from the most recent snapshot. Computed (not stored)
+    /// so the bulk action button stays in sync if config changes elsewhere.
+    private var affectedWithFingerprint: [Job] {
+        DriveHealthAnalyzer.affectedJobsWithFingerprint(snapshot)
+    }
+
+    /// Subset of the snapshot whose fingerprints are currently queued for
+    /// re-rip. Drives the "Pending re-rips" section.
+    private var pendingRerripJobs: [Job] {
+        snapshot.filter { job in
+            guard let fp = job.discFingerprint else { return false }
+            return config.forceRerripFingerprints.contains(fp)
+        }
+    }
+
+    @ViewBuilder
+    private var bulkActionBlock: some View {
+        let alreadyAllMarked = affectedWithFingerprint.allSatisfy { job in
+            guard let fp = job.discFingerprint else { return false }
+            return config.forceRerripFingerprints.contains(fp)
+        }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Bulk action")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button {
+                    bulkConfirm = true
+                } label: {
+                    Label("Mark \(affectedWithFingerprint.count) affected disc\(affectedWithFingerprint.count == 1 ? "" : "s") for re-rip",
+                          systemImage: "arrow.clockwise.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(alreadyAllMarked)
+                Spacer()
+            }
+            if alreadyAllMarked {
+                Text("All affected discs are already queued for re-rip.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("Queues every History disc with errors that has a fingerprint. After clean + reinsert, each will rip without the duplicate banner.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pendingRerripBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Pending re-rips (\(pendingRerripJobs.count))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear all") {
+                    for job in pendingRerripJobs {
+                        if let fp = job.discFingerprint {
+                            config.forceRerripFingerprints.remove(fp)
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(pendingRerripJobs, id: \.id) { job in
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .foregroundStyle(.blue)
+                            .font(.caption)
+                        Text(job.mediaResult?.title ?? job.discName)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer()
+                        if job.ripReadErrors > 0 || job.ripCorruptionEvents > 0 {
+                            errorBadges(job: job)
+                        }
+                        Button {
+                            if let fp = job.discFingerprint {
+                                config.forceRerripFingerprints.remove(fp)
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                                .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Cancel re-rip for this disc")
+                    }
+                }
+            }
+            // The user might have queued discs that are no longer in
+            // History (pruned via retention). Show a hint with the
+            // residual count so they don't think it's a bug.
+            let extra = config.forceRerripFingerprints.count - pendingRerripJobs.count
+            if extra > 0 {
+                Text("\(extra) more queued fingerprint\(extra == 1 ? "" : "s") are not in current History (older or pruned).")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func errorBadges(job: Job) -> some View {
+        HStack(spacing: 3) {
+            if job.ripReadErrors > 0 {
+                Text("\(job.ripReadErrors)")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.orange)
+            }
+            if job.ripCorruptionEvents > 0 {
+                Text("\(job.ripCorruptionEvents)")
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.red)
+            }
+        }
     }
 
     @ViewBuilder
@@ -832,6 +986,7 @@ private struct DriveHealthPane: View {
         // Only completed jobs — in-flight ones haven't had their final
         // counters recorded yet and would skew the report with zeros.
         let completed = all.filter { $0.status == .done }
+        snapshot = completed
         report = DriveHealthAnalyzer.analyze(jobs: completed)
         lastRefreshed = Date()
     }

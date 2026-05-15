@@ -112,6 +112,18 @@ enum DriveHealthAnalyzer {
             verdict: verdict
         )
     }
+
+    /// v3.11.11: filter helper used by the "Mark all affected for re-rip"
+    /// bulk action on the Drive Health pane. Returns the jobs that have
+    /// EITHER counter > 0 AND a non-empty discFingerprint (without one
+    /// the dup-suppression logic in `RipViewModel` can't recognize the
+    /// disc on re-insert, so re-ripping it does nothing useful).
+    static func affectedJobsWithFingerprint(_ jobs: [Job]) -> [Job] {
+        jobs.filter { job in
+            guard let fp = job.discFingerprint, !fp.isEmpty else { return false }
+            return job.ripReadErrors > 0 || job.ripCorruptionEvents > 0
+        }
+    }
 }
 
 extension DriveHealthAnalyzer.Verdict {

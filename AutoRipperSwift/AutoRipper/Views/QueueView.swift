@@ -660,6 +660,15 @@ private struct JobSidebarRow: View {
     var onReorder: ((String) -> Void)? = nil
     @State private var celebrate = false
     @State private var dropTargeted = false
+    @ObservedObject private var config = AppConfig.shared
+
+    /// v3.11.11: true when this row's disc is currently queued for re-rip.
+    /// Surfaces a small badge so the user can see at a glance which
+    /// History rows are pending — saves drilling into each detail.
+    private var isQueuedForRerrip: Bool {
+        guard let fp = job.discFingerprint, !fp.isEmpty else { return false }
+        return config.forceRerripFingerprints.contains(fp)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -674,6 +683,12 @@ private struct JobSidebarRow: View {
                 pipelineDots
             }
             Spacer()
+            if isQueuedForRerrip {
+                Image(systemName: "arrow.clockwise.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                    .help("Queued for re-rip — insert this disc to re-rip without the duplicate banner")
+            }
             if job.status != .queued && job.status != .done && job.status != .failed {
                 Text("\(job.progress)%")
                     .font(.caption2)
