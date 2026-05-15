@@ -805,7 +805,7 @@ private struct JobDetailView: View {
                     Divider()
                     timingsSection
                 }
-                if job.ripReadErrors > 0 {
+                if job.ripReadErrors > 0 || job.ripCorruptionEvents > 0 {
                     Divider()
                     discHealthSection
                 }
@@ -1166,24 +1166,52 @@ private struct JobDetailView: View {
         return String(format: "%ds", sec)
     }
 
-    // MARK: - Disc health (v3.11.5)
+    // MARK: - Disc health (v3.11.5 + v3.11.7)
 
     @ViewBuilder
     private var discHealthSection: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Disc health").font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text("\(job.ripReadErrors) read \(job.ripReadErrors == 1 ? "error" : "errors") during rip")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                Spacer()
+            if job.ripReadErrors > 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text("\(job.ripReadErrors) read \(job.ripReadErrors == 1 ? "error" : "errors") (drive-side)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Spacer()
+                }
             }
-            Text("MakeMKV reported posix I/O errors while reading the disc. Some are normal on used media; many suggest scratches, smudges, dirt, or warping. Consider cleaning the disc and re-ripping if playback issues occur.")
+            if job.ripCorruptionEvents > 0 {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.octagon.fill")
+                        .foregroundStyle(.red)
+                    Text("\(job.ripCorruptionEvents) corruption event\(job.ripCorruptionEvents == 1 ? "" : "s") (disc-side)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Spacer()
+                }
+            }
+            Text(discHealthExplanation)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Plain-English explainer that adapts to which counters fired. v3.11.7:
+    /// gives the user a starting point for drive-vs-disc diagnosis without
+    /// requiring them to know what MSG codes mean.
+    private var discHealthExplanation: String {
+        switch (job.ripReadErrors > 0, job.ripCorruptionEvents > 0) {
+        case (true, true):
+            return "MakeMKV reported both drive-level read errors (the laser couldn't read sectors) and content-corruption events (data was read but failed validation). If the same disc rips clean on another drive, the drive is at fault; otherwise the disc is damaged."
+        case (true, false):
+            return "MakeMKV reported posix I/O errors — the drive couldn't physically read some sectors. Cleaning the lens, dropping drive speed, or cleaning the disc usually helps. Persistent same-offset failures across multiple different discs point at a drive issue."
+        case (false, true):
+            return "MakeMKV reported data-corruption events — sectors read OK but the data failed hash/structural validation. Usually disc damage: scratches, smudges, or bit-rot. Clean the disc (radial wipe with isopropyl) and re-rip. If multiple different discs corrupt at the same offsets, suspect the drive instead."
+        case (false, false):
+            return ""
         }
     }
 

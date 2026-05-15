@@ -212,7 +212,23 @@ struct DiscInfoColumn: View {
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.15))
                     .clipShape(Capsule())
-                    .help("MakeMKV reported posix I/O errors while reading the disc. Some are normal on used media; a high count suggests damage or a dirty lens.")
+                    .help("MakeMKV reported posix I/O errors while reading the disc (drive-side). Some are normal on used media; a high count suggests damage or a dirty lens.")
+                }
+                if ripVM.corruptionEventCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark.octagon.fill")
+                            .font(.caption2)
+                        Text("\(ripVM.corruptionEventCount) corrupt")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.red.opacity(0.15))
+                    .clipShape(Capsule())
+                    .help("MakeMKV reported data-corruption events (hash failures or invalid offsets). Usually points at disc damage — scratches, smudges, bit-rot. If clustered around the same offsets across multiple different discs, suspect the drive instead.")
                 }
                 Text("\(Int(ripVM.ripProgress * 100))%")
                     .font(.title3)

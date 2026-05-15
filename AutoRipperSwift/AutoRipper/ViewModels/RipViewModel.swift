@@ -63,6 +63,29 @@ final class RipViewModel: ObservableObject {
     /// user can dismiss or click the action button. Cleared on new rip /
     /// scan / dismiss.
     @Published var suggestLowerDriveSpeed: Bool = false
+    /// v3.11.7: count of MakeMKV data-corruption events during the current
+    /// rip. Tracks a *different* failure mode from `readErrorCount` —
+    /// these are cases where the drive returned data successfully but the
+    /// data itself fails validation (MSG:2002 "source file corrupt or
+    /// invalid at offset", MSG:2017 "Hash check failed", MSG:2018 "Too
+    /// many hash check errors"). Persisted onto `Job.ripCorruptionEvents`
+    /// for History display.
+    ///
+    /// Why separate from `readErrorCount`?
+    /// - **Read errors** (MSG:2003) usually point at the **drive** — the
+    ///   laser couldn't physically read a sector. Mitigation: slower drive
+    ///   speed, clean lens, replace drive.
+    /// - **Corruption events** (MSG:2002 / 2017 / 2018) usually point at
+    ///   the **disc** — surface scratches, bit-rot, smudges. Mitigation:
+    ///   clean the disc, replace the disc. A high corruption count on a
+    ///   brand-new disc is more likely a drive problem though.
+    ///
+    /// Tracking them separately lets the user pattern-match across discs:
+    /// "every disc has corruption at offset ~2 GB" = drive at fault;
+    /// "this one disc has corruption everywhere but others are clean" =
+    /// disc at fault. This is exactly the diagnostic a single combined
+    /// count can't surface.
+    @Published var corruptionEventCount: Int = 0
     /// v3.11.2: true when Auto mode has finished scanning a disc and is
     /// paused awaiting the user's "Rip" click. Set when
     /// `config.autoConfirmBeforeRip == true` AND the scan in `fullAuto`
@@ -117,8 +140,8 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors, ripCorruptionEvents)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int, Int) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -159,6 +182,12 @@ final class RipViewModel: ObservableObject {
                 suggestLowerDriveSpeed = true
             }
         }
+        // v3.11.7: count data-corruption events. Same parse-and-bump pattern
+        // but a different failure class — see the corruptionEventCount doc
+        // comment for the drive-vs-disc separation rationale.
+        if Self.isCorruptionLine(line) {
+            corruptionEventCount += 1
+        }
         // Capture informational caption lines. Skip raw structure rows
         // (DRV/CINFO/TINFO/SINFO) — too noisy and useless to a casual user.
         if let caption = Self.extractInformationalCaption(line) {
@@ -181,6 +210,31 @@ final class RipViewModel: ObservableObject {
     /// have already given us the count, and counting both would double.
     static func isReadErrorLine(_ line: String) -> Bool {
         line.hasPrefix("MSG:2003")
+    }
+
+    /// v3.11.7: pure check for whether a MakeMKV log line represents a
+    /// single data-corruption event. Three closely-related MSG codes:
+    ///   * `MSG:2002` — "The source file '...' is corrupt or invalid at
+    ///     offset X, attempting to work around" — fired per discovered
+    ///     bad chunk during decode.
+    ///   * `MSG:2017` — "Hash check failed for file ... at offset Y,
+    ///     file is corrupt" — fired per failed crypto-hash verification.
+    ///   * `MSG:2018` — "Too many hash check errors in file ..." —
+    ///     fired ONCE when MakeMKV gives up retrying that file.
+    ///
+    /// We count all three because they each tell the user something
+    /// different (per-chunk vs hash-failed vs gave-up) and seeing a
+    /// 2018 alone without 2002/2017 leading up to it would be confusing.
+    /// 2018 is rare and bounded so it doesn't materially skew the count.
+    ///
+    /// Intentionally excluded:
+    ///   * `MSG:4009` "Too many AV synchronization issues" — informational,
+    ///     usually downstream of 2002/2017. Counting it would double-count.
+    ///   * `MSG:2003` Posix I/O — see `isReadErrorLine` (drive-side).
+    static func isCorruptionLine(_ line: String) -> Bool {
+        line.hasPrefix("MSG:2002")
+            || line.hasPrefix("MSG:2017")
+            || line.hasPrefix("MSG:2018")
     }
 
     /// v3.11.6: build the per-disc-unique scratch folder name used during
@@ -527,6 +581,7 @@ final class RipViewModel: ObservableObject {
         awaitingAutoRipConfirm = false  // v3.11.2
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
+        corruptionEventCount = 0  // v3.11.7
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -577,6 +632,7 @@ final class RipViewModel: ObservableObject {
         // this rip, not whatever happened during the prior scan.
         readErrorCount = 0
         suggestLowerDriveSpeed = false
+        corruptionEventCount = 0  // v3.11.7
         isRipping = true
         if config.preventSleep { SleepAssertion.shared.acquire(reason: "AutoRipper rip in progress") }
         ripProgress = 0
@@ -822,7 +878,7 @@ final class RipViewModel: ObservableObject {
                         let discFp = DiscFingerprintService.fingerprint(info)
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
                                        assignment?.season, assignment?.episode, assignment?.title, discFp,
-                                       readErrorCount)
+                                       readErrorCount, corruptionEventCount)
                     }
                 } catch {
                     sizeMonitor.cancel()
@@ -1226,6 +1282,7 @@ final class RipViewModel: ObservableObject {
         awaitingAutoRipConfirm = false  // v3.11.2
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
+        corruptionEventCount = 0  // v3.11.7
         activePhase = .idle
         config.inFlightRip = nil
     }

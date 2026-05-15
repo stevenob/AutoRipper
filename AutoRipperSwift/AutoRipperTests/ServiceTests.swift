@@ -1447,6 +1447,56 @@ final class RipStartupPhaseTests: XCTestCase {
     func testReadErrorSuggestThresholdIsFive() {
         XCTAssertEqual(RipViewModel.readErrorSuggestThreshold, 5)
     }
+
+    // MARK: - Data-corruption parser (v3.11.7)
+
+    func testCorruptionParserMatchesMSG2002() {
+        // Per-chunk "corrupt or invalid at offset X, attempting to work around"
+        XCTAssertTrue(RipViewModel.isCorruptionLine(
+            "MSG:2002,0,3,\"The source file '/BDMV/STREAM/00042.m2ts' is corrupt or invalid at offset '2096381952', attempting to work around\",\"…\""
+        ))
+        XCTAssertTrue(RipViewModel.isCorruptionLine("MSG:2002"))
+    }
+
+    func testCorruptionParserMatchesMSG2017AndMSG2018() {
+        // 2017 = "Hash check failed for file ... at offset Y, file is corrupt"
+        XCTAssertTrue(RipViewModel.isCorruptionLine(
+            "MSG:2017,0,3,\"Hash check failed for file 00042.m2ts at offset 2096818176, file is corrupt\",\"…\""
+        ))
+        // 2018 = "Too many hash check errors in file ..."
+        XCTAssertTrue(RipViewModel.isCorruptionLine(
+            "MSG:2018,0,1,\"Too many hash check errors in file 00042.m2ts\",\"…\""
+        ))
+    }
+
+    func testCorruptionParserDoesNotMatchUnrelatedCodes() {
+        // The drive-side read-error code lives in `isReadErrorLine` and MUST
+        // NOT also be picked up by the corruption parser (would double-count).
+        XCTAssertFalse(RipViewModel.isCorruptionLine("MSG:2003,0,3,\"Posix error - Input/output error\",\"…\""))
+        // 4009 (AV sync) is informational, intentionally excluded.
+        XCTAssertFalse(RipViewModel.isCorruptionLine(
+            "MSG:4009,0,2,\"Too many AV synchronization issues in file '00042.m2ts' (title #-), future messages will be printed only to log file\",\"…\""
+        ))
+        XCTAssertFalse(RipViewModel.isCorruptionLine("MSG:2010,0,1,\"Optical drive opened\",\"…\""))
+        XCTAssertFalse(RipViewModel.isCorruptionLine("PRGV:50,100,65535"))
+        XCTAssertFalse(RipViewModel.isCorruptionLine(""))
+    }
+
+    func testReadAndCorruptionParsersAreDisjoint() {
+        // No single MSG line should ever satisfy BOTH parsers — if it did,
+        // appendMakeMKVLog would double-count. This is a defensive invariant.
+        let samples = [
+            "MSG:2002,0,3,\"corrupt or invalid at offset\",\"…\"",
+            "MSG:2003,0,3,\"Posix error\",\"…\"",
+            "MSG:2017,0,3,\"Hash check failed\",\"…\"",
+            "MSG:2018,0,1,\"Too many hash check errors\",\"…\"",
+        ]
+        for s in samples {
+            let a = RipViewModel.isReadErrorLine(s)
+            let b = RipViewModel.isCorruptionLine(s)
+            XCTAssertFalse(a && b, "line counted by BOTH parsers: \(s)")
+        }
+    }
 }
 
 // MARK: - Scratch folder naming (v3.11.6)
