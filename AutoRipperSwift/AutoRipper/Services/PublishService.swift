@@ -46,13 +46,21 @@ actor PublishService {
     }
 
     /// Publishes the directory tree rooted at `localDir` into `libraryRoot`.
-    /// The directory's name (e.g. "Blade Runner (1982)") becomes a child
-    /// folder of `libraryRoot`; files inside are placed into that child
-    /// folder, preserving any existing siblings there.
+    /// By default, the directory's name (e.g. "Blade Runner (1982)") becomes
+    /// a child folder of `libraryRoot`; files inside are placed into that
+    /// child folder, preserving any existing siblings there.
     ///
     /// - Parameters:
     ///   - localDir: organized + scraped local working directory.
     ///   - libraryRoot: NAS library root (e.g. `/Volumes/ServerShare/Movies`).
+    ///   - destFolderName: optional override for the destination folder
+    ///     name on the NAS. When non-nil, the published files land in
+    ///     `libraryRoot/<destFolderName>/...` instead of
+    ///     `libraryRoot/<localDir.lastPathComponent>/...`. This lets
+    ///     callers use a per-job-unique scratch folder name locally
+    ///     (e.g. with a job-id suffix to avoid sibling-job collisions in
+    ///     the organize step) while keeping the final NAS layout clean.
+    ///     Default `nil` preserves legacy behavior.
     ///   - progress: byte-level progress callback for UI. Fires ~once per
     ///     chunk during file copies.
     ///   - phaseUpdate: notified when the publish moves between sub-phases
@@ -63,6 +71,7 @@ actor PublishService {
     func publish(
         localDir: URL,
         libraryRoot: URL,
+        destFolderName: String? = nil,
         progress: ((Int64, Int64) -> Void)? = nil,
         phaseUpdate: ((PublishPhase) -> Void)? = nil
     ) async throws -> URL {
@@ -72,7 +81,10 @@ actor PublishService {
         }
         try fm.createDirectory(at: libraryRoot, withIntermediateDirectories: true)
 
-        let folderName = localDir.lastPathComponent
+        // v3.11.8: allow caller to override the destination folder name so
+        // the local work dir can carry a job-uniqueness suffix without
+        // polluting the NAS layout.
+        let folderName = destFolderName ?? localDir.lastPathComponent
         let destDir = libraryRoot.appendingPathComponent(folderName)
         try fm.createDirectory(at: destDir, withIntermediateDirectories: true)
 
@@ -161,9 +173,13 @@ actor PublishService {
             done += size
             progress?(done, total)
         }
-        // Source dir is now empty (or only has ignored hidden files); try
-        // to drop it. Best-effort.
-        try? fm.removeItem(at: sourceDir)
+        // v3.11.8: source dir may still hold this caller's siblings (the
+        // per-file rename above moved every regular file to dest, but
+        // hidden dotfiles like .DS_Store remain). Use the safer helper
+        // — drops the dir only if no foreign files remain. With v3.11.6
+        // per-disc-unique scratch, foreign files shouldn't occur in
+        // practice, but defense in depth costs nothing.
+        SafeFSCleanup.removeDirIfEmpty(sourceDir)
     }
 
     /// Cross-volume: per-file chunked copy that preserves source files until

@@ -294,40 +294,77 @@ final class QueueViewModel: ObservableObject {
 
         do {
             let source = jobs[index].encodedFile ?? jobs[index].rippedFile
+            // v3.11.8: wrap the organize layout in a per-job container so
+            // two jobs whose TMDb scrape returns the same clean title
+            // (e.g. two physical copies of the same disc, or a TMDb
+            // hiccup) CAN'T collide at the organize step. The publish
+            // step uses an explicit `destFolderName` override so the
+            // NAS layout is unaffected — only the local scratch tree
+            // carries the suffix.
+            //
+            // Suffix is the last 12 chars of the job id (a microsecond
+            // timestamp) — plenty of entropy for a single user's
+            // session, and stable across retry of the same job.
+            let jobIdShort = String(jobs[index].id.suffix(12))
+            let jobContainer = URL(fileURLWithPath: workRoot)
+                .appendingPathComponent("job-\(jobIdShort)")
+                .path
             let dest: URL
             let edition = jobs[index].editionLabel
+            // Track the "clean" destination folder name to pass through
+            // to PublishService.publish — without it, publish would use
+            // the per-job-unique container name as the NAS folder name.
+            let destFolderName: String?
             if let media = tmdbMedia {
                 if media.mediaType == "tv" || jobs[index].intent == .episode {
                     // TV — use job's season/episode/title fields if set, else
                     // fall back to S01E01 placeholder. v3.3.0's picker UI
                     // populates the fields; today they're typically nil.
+                    let seasonNum = jobs[index].seasonNumber ?? 1
                     dest = OrganizerService.buildTvPath(
-                        outputDir: workRoot,
+                        outputDir: jobContainer,
                         show: media.title,
-                        season: jobs[index].seasonNumber ?? 1,
+                        season: seasonNum,
                         episode: jobs[index].episodeNumber ?? 1,
                         episodeName: jobs[index].episodeTitle ?? ""
                     )
+                    // v3.11.8: TV publish lands at `<libraryRoot>/<show>/Season XX/`.
+                    // The localDir we hand to PublishService is the Season XX
+                    // folder, so without an explicit destFolderName the legacy
+                    // fallback would put files at `<libraryRoot>/Season XX/`
+                    // (dropping the show name). Explicitly pass the two-level
+                    // subpath as destFolderName so the NAS layout stays correct.
+                    let cleanShow = OrganizerService.cleanFilename(media.title)
+                    let seasonDir = String(format: "Season %02d", seasonNum)
+                    destFolderName = "\(cleanShow)/\(seasonDir)"
                 } else {
                     dest = OrganizerService.buildMoviePath(
-                        outputDir: workRoot,
+                        outputDir: jobContainer,
                         title: media.title,
                         year: media.year,
                         edition: jobs[index].intent == .edition ? edition : nil
                     )
+                    destFolderName = dest.deletingLastPathComponent().lastPathComponent
                 }
             } else {
                 dest = OrganizerService.buildMoviePath(
-                    outputDir: workRoot,
+                    outputDir: jobContainer,
                     title: OrganizerService.cleanFilename(jobs[index].discName),
                     edition: jobs[index].intent == .edition ? edition : nil
                 )
+                destFolderName = dest.deletingLastPathComponent().lastPathComponent
             }
             let organized = try OrganizerService.organizeFile(source: source, destination: dest)
             jobs[index].organizedFile = organized
             // Record the work directory so cleanup-on-crash can find and
             // remove it if the publish step doesn't complete.
             jobs[index].workDir = organized.deletingLastPathComponent()
+            // v3.11.8: stash the override on the job so the publish step
+            // (which may run later, after retry/resume) can pass the
+            // same destFolderName to PublishService. Stored on Job
+            // rather than as a local so the publish step picks it up
+            // after a crash-recovery resume.
+            jobs[index].publishDestFolderName = destFolderName
             jobs[index].organizeElapsed = Date().timeIntervalSince(organizeStart)
             await card.finish("organize")
         } catch {
@@ -418,9 +455,25 @@ final class QueueViewModel: ObservableObject {
                 let libraryRoot = URL(fileURLWithPath: nasBase)
                 let jobIdx = index
                 let jobId = jobs[index].id
+                // v3.11.8: back-compat fallback for retry/resume of jobs
+                // organized before publishDestFolderName was persisted.
+                // For TV without an explicit override the legacy fallback
+                // (using localDir.lastPathComponent = "Season XX") drops
+                // the show name from the NAS path — derive the correct
+                // two-level subpath from the job's known fields.
+                let resolvedDestFolderName: String? = {
+                    if let stored = jobs[index].publishDestFolderName { return stored }
+                    guard isTV else { return nil }  // movies are fine with the legacy fallback
+                    let showCandidate = jobs[index].mediaResult?.title ?? jobs[index].discName
+                    guard !showCandidate.isEmpty else { return nil }
+                    let cleanShow = OrganizerService.cleanFilename(showCandidate)
+                    let seasonDir = String(format: "Season %02d", jobs[index].seasonNumber ?? 1)
+                    return "\(cleanShow)/\(seasonDir)"
+                }()
                 let publishedDir = try await publishService.publish(
                     localDir: sourceDir,
                     libraryRoot: libraryRoot,
+                    destFolderName: resolvedDestFolderName,
                     progress: { [weak self] copied, total in
                         Task { @MainActor in
                             guard let self, total > 0 else { return }
@@ -473,6 +526,26 @@ final class QueueViewModel: ObservableObject {
                     dir: sourceDir,
                     ownedFiles: [jobs[index].organizedFile, jobs[index].rippedFile].compactMap { $0 }
                 )
+                // v3.11.8: walk up from sourceDir removing empty
+                // intermediate parents until we hit either the per-job
+                // container (`job-<short>`) or the workRoot. Handles
+                // both movie (`<workRoot>/job-XYZ/<title>/`) and TV
+                // (`<workRoot>/job-XYZ/<show>/Season XX/`) layouts.
+                // The walk stops at the job container itself, which we
+                // remove last so cleanup is symmetric with creation.
+                let workRootStr = config.ripScratchDir.isEmpty ? config.outputDir : config.ripScratchDir
+                let workRootURL = URL(fileURLWithPath: workRootStr).standardizedFileURL
+                var cursor = sourceDir.deletingLastPathComponent()
+                while cursor.standardizedFileURL != workRootURL.standardizedFileURL
+                        && cursor.path.count > workRootURL.path.count
+                        && !cursor.lastPathComponent.hasPrefix("job-") {
+                    SafeFSCleanup.removeDirIfEmpty(cursor)
+                    cursor = cursor.deletingLastPathComponent()
+                }
+                if cursor.lastPathComponent.hasPrefix("job-")
+                    && cursor.deletingLastPathComponent().standardizedFileURL == workRootURL.standardizedFileURL {
+                    SafeFSCleanup.removeDirIfEmpty(cursor)
+                }
                 jobs[index].workDir = nil
                 jobs[index].publishPhase = .done
                 jobs[index].nasElapsed = Date().timeIntervalSince(nasStart)
@@ -958,41 +1031,11 @@ extension QueueViewModel {
     /// AND defends against any future collision by making cleanup file-
     /// aware instead of dir-aware.
     ///
-    /// Visible-for-tests as `internal static` so unit tests can exercise
-    /// the file-owning semantics without spinning up a full QueueViewModel.
+    /// v3.11.8: implementation moved to `SafeFSCleanup` so non-MainActor
+    /// services (`PublishService`, `StagingService`) can share the same
+    /// safety guarantees. This shim is kept for callers that already
+    /// invoked the QueueViewModel-scoped form.
     static func cleanupOwnedFilesAndRemoveDirIfEmpty(dir: URL, ownedFiles: [URL]) {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: dir.path) else { return }
-        // Canonicalize the target dir once: standardize URL syntax AND
-        // resolve symlinks so we compare against the real on-disk path.
-        // Without symlink resolution, an owned file that lives under an
-        // aliased path could be considered "outside" and skipped, leaving
-        // scratch dirs uncleaned (mostly a false-negative — safer than
-        // false-positives, but still worth handling).
-        let canonicalDir = dir.resolvingSymlinksInPath().standardizedFileURL
-        // Remove only the files we explicitly own. Anything else (e.g. a
-        // sibling job's rip source) stays put.
-        for f in ownedFiles {
-            // Only touch files inside `dir` — never reach across into
-            // unrelated paths. Defense in depth in case a caller passes a
-            // file whose parent isn't `dir`.
-            let canonicalParent = f.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
-            guard canonicalParent == canonicalDir else { continue }
-            if fm.fileExists(atPath: f.path) {
-                try? fm.removeItem(at: f)
-            }
-        }
-        // Drop the parent dir only if empty (ignoring hidden dotfiles like
-        // .DS_Store which we consider OS noise, not user data).
-        let contents = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
-        let nonHidden = contents.filter { !$0.hasPrefix(".") }
-        if nonHidden.isEmpty {
-            try? fm.removeItem(at: dir)
-        } else {
-            FileLogger.shared.info(
-                "queue",
-                "skip scratch dir cleanup (\(nonHidden.count) foreign file(s) remain): \(dir.path)"
-            )
-        }
+        SafeFSCleanup.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: ownedFiles)
     }
 }

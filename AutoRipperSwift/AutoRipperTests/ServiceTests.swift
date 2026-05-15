@@ -885,6 +885,69 @@ final class PublishServiceTests: XCTestCase {
         let mono = await counter.monotonic
         XCTAssertTrue(mono, "publish progress must be monotonically non-decreasing")
     }
+
+    // MARK: - destFolderName override (v3.11.8)
+    //
+    // The override lets the local scratch folder carry a per-job-unique
+    // suffix while the NAS folder stays clean. Critical for both the
+    // movie case (one-level rename) and the TV case (two-level subpath).
+
+    func testPublishUsesExplicitDestFolderNameForMovie() async throws {
+        // Local dir has a job-unique suffix; NAS should land at the clean
+        // name passed via destFolderName.
+        let library = tmpRoot.appendingPathComponent("Movies")
+        let scratchFolder = tmpRoot.appendingPathComponent("scratch/job-abc123def456/Mortal Kombat (1995)")
+        try writeFile(at: scratchFolder.appendingPathComponent("Mortal Kombat (1995).mkv"), sizeBytes: 1024)
+
+        let svc = PublishService()
+        let published = try await svc.publish(
+            localDir: scratchFolder,
+            libraryRoot: library,
+            destFolderName: "Mortal Kombat (1995)"
+        )
+
+        XCTAssertEqual(published.lastPathComponent, "Mortal Kombat (1995)",
+                       "NAS folder should use the clean override, not the suffixed scratch name")
+        let fm = FileManager.default
+        XCTAssertTrue(fm.fileExists(atPath: library.appendingPathComponent("Mortal Kombat (1995)/Mortal Kombat (1995).mkv").path))
+    }
+
+    func testPublishUsesTwoLevelDestFolderNameForTV() async throws {
+        // TV layout: scratch is .../job-XXX/Show/Season 01/episode.mkv,
+        // and publish should land it under <libraryRoot>/Show/Season 01/.
+        // destFolderName carries the "Show/Season 01" subpath.
+        let library = tmpRoot.appendingPathComponent("TV")
+        let scratchSeasonDir = tmpRoot.appendingPathComponent("scratch/job-xyz789abc/Breaking Bad/Season 01")
+        try writeFile(at: scratchSeasonDir.appendingPathComponent("Breaking Bad - S01E01.mkv"), sizeBytes: 512)
+
+        let svc = PublishService()
+        let published = try await svc.publish(
+            localDir: scratchSeasonDir,
+            libraryRoot: library,
+            destFolderName: "Breaking Bad/Season 01"
+        )
+
+        // Final NAS path: <library>/Breaking Bad/Season 01/...
+        let fm = FileManager.default
+        let expectedEpisode = library.appendingPathComponent("Breaking Bad/Season 01/Breaking Bad - S01E01.mkv")
+        XCTAssertTrue(fm.fileExists(atPath: expectedEpisode.path),
+                      "TV episode should land at <library>/Show/Season XX/...")
+        XCTAssertEqual(published.lastPathComponent, "Season 01")
+    }
+
+    func testPublishLegacyBehaviorWhenDestFolderNameNil() async throws {
+        // Back-compat: when destFolderName is nil, the legacy behavior of
+        // using localDir.lastPathComponent is preserved.
+        let library = tmpRoot.appendingPathComponent("Movies")
+        let scratchFolder = tmpRoot.appendingPathComponent("scratch/Spawn (1997)")
+        try writeFile(at: scratchFolder.appendingPathComponent("Spawn (1997).mkv"), sizeBytes: 256)
+
+        let svc = PublishService()
+        let published = try await svc.publish(localDir: scratchFolder, libraryRoot: library)
+
+        XCTAssertEqual(published.lastPathComponent, "Spawn (1997)",
+                       "nil destFolderName should fall back to localDir.lastPathComponent")
+    }
 }
 
 // MARK: - ScratchReservationService tests
@@ -1636,6 +1699,161 @@ final class QueueCleanupSafetyTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
         // Should not crash, should not throw.
         QueueViewModel.cleanupOwnedFilesAndRemoveDirIfEmpty(dir: dir, ownedFiles: [])
+    }
+}
+
+// MARK: - SafeFSCleanup tests (v3.11.8)
+//
+// Exercises the shared free-function helpers extracted in v3.11.8 so
+// non-MainActor services can use the same ownership-aware cleanup
+// semantics. The QueueViewModel-scoped shim is covered above; these
+// tests target the moved-out implementation directly.
+
+@MainActor
+final class SafeFSCleanupTests: XCTestCase {
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AutoRipperSafeFS-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func touch(_ url: URL, bytes: Int = 4) throws {
+        try Data(repeating: 0xAB, count: bytes).write(to: url)
+    }
+
+    override func tearDown() {
+        let parent = FileManager.default.temporaryDirectory
+        if let kids = try? FileManager.default.contentsOfDirectory(atPath: parent.path) {
+            for k in kids where k.hasPrefix("AutoRipperSafeFS-") {
+                try? FileManager.default.removeItem(at: parent.appendingPathComponent(k))
+            }
+        }
+        super.tearDown()
+    }
+
+    func testRemoveDirIfEmptyRemovesEmptyDir() {
+        let dir = tempDir()
+        SafeFSCleanup.removeDirIfEmpty(dir)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
+    }
+
+    func testRemoveDirIfEmptyKeepsDirWithFiles() throws {
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("foo.mkv"))
+        SafeFSCleanup.removeDirIfEmpty(dir)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path), "dir with files must NOT be removed")
+    }
+
+    func testRemoveDirIfEmptyIgnoresHiddenFiles() throws {
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent(".DS_Store"))
+        SafeFSCleanup.removeDirIfEmpty(dir)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path), "dir with only hidden files should be removed")
+    }
+
+    func testRemoveDirIfEmptyNoOpForMissingDir() {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("missing-\(UUID())")
+        SafeFSCleanup.removeDirIfEmpty(dir)
+        // No crash, no throw.
+    }
+}
+
+// MARK: - MakeMKVService stale-file purge (v3.11.8)
+//
+// The pre-rip and post-retry cleanup paths need to remove any
+// `<media-title>_tNN.mkv` files to avoid hanging on MakeMKV's
+// overwrite prompt. v3.11.8 adds a soft volumeLabel ownership check
+// so foreign-looking files (no token overlap with the disc label)
+// are skipped instead of deleted.
+
+@MainActor
+final class MakeMKVPurgeTests: XCTestCase {
+
+    private func tempDir() -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AutoRipperPurgeTests-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func touch(_ url: URL) throws {
+        try Data().write(to: url)
+    }
+
+    override func tearDown() {
+        let parent = FileManager.default.temporaryDirectory
+        if let kids = try? FileManager.default.contentsOfDirectory(atPath: parent.path) {
+            for k in kids where k.hasPrefix("AutoRipperPurgeTests-") {
+                try? FileManager.default.removeItem(at: parent.appendingPathComponent(k))
+            }
+        }
+        super.tearDown()
+    }
+
+    func testPurgesMatchingTitleId() throws {
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("Mortal Kombat_t00.mkv"))
+        try touch(dir.appendingPathComponent("Mortal Kombat_t01.mkv"))
+        MakeMKVService.purgeStaleTitleFiles(
+            outputDir: dir.path,
+            titleId: 0,
+            volumeLabel: "MORTAL_KOMBAT",
+            log: nil
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Mortal Kombat_t00.mkv").path),
+                       "t00 file should be purged")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Mortal Kombat_t01.mkv").path),
+                      "t01 file (different titleId) must NOT be touched")
+    }
+
+    func testSkipsForeignFilesWhenLabelGiven() throws {
+        // A foreign file in the dir (no token overlap with volumeLabel) MUST
+        // NOT be purged even though the _tNN.mkv suffix matches. This is the
+        // defense-in-depth guard that protects against future scenarios
+        // where two discs' files end up in the same dir.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("Star Wars_t00.mkv"))  // foreign
+        MakeMKVService.purgeStaleTitleFiles(
+            outputDir: dir.path,
+            titleId: 0,
+            volumeLabel: "MORTAL_KOMBAT",
+            log: nil
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Star Wars_t00.mkv").path),
+                      "foreign file (no token overlap) must NOT be purged")
+    }
+
+    func testFallsBackToSuffixOnlyWhenNoLabel() throws {
+        // Legacy behavior: when volumeLabel is nil/empty, suffix match alone
+        // governs deletion. Preserves backward compatibility for any call
+        // site that doesn't have a label available.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("Anything_t00.mkv"))
+        MakeMKVService.purgeStaleTitleFiles(
+            outputDir: dir.path,
+            titleId: 0,
+            volumeLabel: nil,
+            log: nil
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Anything_t00.mkv").path),
+                       "without a label, suffix match alone purges")
+    }
+
+    func testTokenOverlapAcceptsCleanedTitle() throws {
+        // MakeMKV converts "MORTAL_KOMBAT" volume label to "Mortal Kombat"
+        // as the media-title prefix. The token comparison must be tolerant
+        // to underscore/space/case differences.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("Mortal Kombat_t02.mkv"))
+        MakeMKVService.purgeStaleTitleFiles(
+            outputDir: dir.path,
+            titleId: 2,
+            volumeLabel: "MORTAL_KOMBAT",
+            log: nil
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Mortal Kombat_t02.mkv").path))
     }
 }
 

@@ -303,10 +303,14 @@ actor StagingService {
             throw StagingError.copyFailed("rename dir: \(error.localizedDescription)")
         }
 
-        // Source dir's contents have all been deleted by copyAndVerify; the
-        // empty parent itself can go too. Ignore failure (might be non-empty
-        // due to hidden files we skipped).
-        try? fm.removeItem(at: sourceDir)
+        // v3.11.8: source dir's contents have all been deleted by
+        // copyAndVerify (which moves files), so the parent should be
+        // empty by the time we get here. Use the safer helper that only
+        // removes if empty — defends against unrelated foreign files
+        // appearing under sourceDir (paranoia, since v3.11.6 per-disc
+        // scratch makes this very unlikely but the blast radius of a
+        // false positive is full data loss).
+        SafeFSCleanup.removeDirIfEmpty(sourceDir)
 
         log.info("dir copy done: \(destinationDir.path, privacy: .public)")
         return destinationDir

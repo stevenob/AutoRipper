@@ -241,17 +241,22 @@ actor MakeMKVService {
         // matching this title's name pattern, MakeMKV would emit
         //   MSG:5001,776,1,"File … already exist. Do you want to overwrite it?"
         // and hang forever waiting for a yes/no. Delete the stale files first.
-        // MakeMKV's filename pattern is "<media-title>_tNN.mkv" — we don't know the
-        // media title here, so we match by the "_tNN.mkv" suffix.
-        let suffix = String(format: "_t%02d.mkv", titleId)
-        if let names = try? fm.contentsOfDirectory(atPath: outputDir) {
-            for name in names where name.hasSuffix(suffix) {
-                let stale = (outputDir as NSString).appendingPathComponent(name)
-                try? fm.removeItem(atPath: stale)
-                log.info("Removed stale MakeMKV output before re-rip: \(stale)")
-                logCallback?("Removed stale output: \(name)")
+        // MakeMKV's filename pattern is "<media-title>_tNN.mkv". When a
+        // `volumeLabel` is supplied we use it as a soft prefix check to
+        // limit deletion to files that *look like they belong to this disc*
+        // — v3.11.8 hardening to defend against a future scenario where two
+        // disc's files end up in the same scratch dir (post v3.11.6 this
+        // shouldn't happen, but the cost of being wrong here is unrecoverable
+        // data loss).
+        Self.purgeStaleTitleFiles(
+            outputDir: outputDir,
+            titleId: titleId,
+            volumeLabel: volumeLabel,
+            log: { msg in
+                log.info("Removed stale MakeMKV output before re-rip: \(msg)")
+                logCallback?("Removed stale output: \(msg)")
             }
-        }
+        )
 
         let startTime = ContinuousClock.now
         nonisolated(unsafe) var outputFile = ""
@@ -327,12 +332,15 @@ actor MakeMKVService {
                 try await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 attempt += 1
                 // Clean any partial output left behind so the retry has a clean slate.
-                let suffix = String(format: "_t%02d.mkv", titleId)
-                if let names = try? fm.contentsOfDirectory(atPath: outputDir) {
-                    for name in names where name.hasSuffix(suffix) {
-                        try? fm.removeItem(atPath: (outputDir as NSString).appendingPathComponent(name))
-                    }
-                }
+                // v3.11.8: use the same prefix-bounded helper so a foreign file
+                // in the dir (theoretically possible if the user dropped one in
+                // mid-rip) can't be deleted along with our retry artefacts.
+                Self.purgeStaleTitleFiles(
+                    outputDir: outputDir,
+                    titleId: titleId,
+                    volumeLabel: volumeLabel,
+                    log: nil
+                )
                 outputFile = ""
                 continue
             }
@@ -457,6 +465,80 @@ actor MakeMKVService {
 
         ProcessTracker.shared.unregister(proc)
         return (lines.result, status)
+    }
+
+    /// v3.11.8: stale `_tNN.mkv` purge with optional ownership guard.
+    ///
+    /// MakeMKV writes files as `<media-title>_tNN.mkv`. The pre-rip and
+    /// post-retry cleanup paths need to remove any matching files before
+    /// re-ripping (MakeMKV in robot mode hangs on the overwrite prompt).
+    ///
+    /// Pre-v3.11.8 we matched on the `_tNN.mkv` suffix alone. With
+    /// v3.11.6 per-disc-unique scratch this is safe in practice (the dir
+    /// can only ever hold one disc's files), but the blast radius of a
+    /// false positive — irrecoverable data loss — warrants belt-and-
+    /// suspenders. When `volumeLabel` is non-empty, we additionally
+    /// require the filename's stem (the part before `_tNN.mkv`) to share
+    /// at least one alphanumeric token with the label. This is a soft
+    /// check — MakeMKV's media-title isn't always literally the volume
+    /// label — but it rules out clearly unrelated foreign files.
+    ///
+    /// Visible for tests as `internal static`.
+    static func purgeStaleTitleFiles(
+        outputDir: String,
+        titleId: Int,
+        volumeLabel: String?,
+        log: ((String) -> Void)?
+    ) {
+        let fm = FileManager.default
+        let suffix = String(format: "_t%02d.mkv", titleId)
+        guard let names = try? fm.contentsOfDirectory(atPath: outputDir) else { return }
+        let labelTokens = (volumeLabel.map(tokenize) ?? [])
+        for name in names where name.hasSuffix(suffix) {
+            // Strip the "_tNN.mkv" suffix to recover the media-title stem.
+            let stem = String(name.dropLast(suffix.count))
+            // If we have a volumeLabel, require the stem to share at least
+            // one alphanumeric token with it (case-insensitive). Empty
+            // stems pass through — MakeMKV occasionally writes "_tNN.mkv"
+            // without a title prefix and we want those cleaned up too.
+            if !labelTokens.isEmpty, !stem.isEmpty {
+                let stemTokens = tokenize(stem)
+                let overlap = !stemTokens.intersection(labelTokens).isEmpty
+                guard overlap else {
+                    // Foreign-looking — skip and surface a warning so a
+                    // genuine issue isn't silently swallowed.
+                    FileLogger.shared.warn(
+                        "makemkv",
+                        "skip purge of \(name) (no token overlap with volumeLabel=\(volumeLabel ?? "")) in \(outputDir)"
+                    )
+                    continue
+                }
+            }
+            let stale = (outputDir as NSString).appendingPathComponent(name)
+            try? fm.removeItem(atPath: stale)
+            log?(stale)
+        }
+    }
+
+    /// Lowercased alphanumeric tokens from a string. "MORTAL_KOMBAT" and
+    /// "Mortal Kombat (1995)" both yield ["mortal", "kombat"] (plus
+    /// "1995" for the latter). Used by `purgeStaleTitleFiles` to compare
+    /// a filename stem against a disc's volume label without being
+    /// fragile about case, punctuation, or year tags.
+    private static func tokenize(_ s: String) -> Set<String> {
+        let lower = s.lowercased()
+        var current = ""
+        var out = Set<String>()
+        for ch in lower {
+            if ch.isLetter || ch.isNumber {
+                current.append(ch)
+            } else if !current.isEmpty {
+                out.insert(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { out.insert(current) }
+        return out
     }
 }
 

@@ -60,6 +60,14 @@ struct Job: Identifiable, Sendable, Codable {
     /// (read errors) vs disc-side (corruption events) failure-mode split
     /// that lets the user pattern-match across discs.
     var ripCorruptionEvents: Int = 0
+    /// v3.11.8: explicit folder-name override for the NAS publish step.
+    /// Set during the organize step when the local work dir uses a
+    /// per-job-unique container (e.g. `<workRoot>/job-abc.../Mortal Kombat (1995)/`).
+    /// Without this, `PublishService.publish` would default to using the
+    /// local dir's last path component (the year-or-suffixed name) for the
+    /// NAS folder — which we want to be clean. Optional / nil for legacy
+    /// jobs that organized into the un-suffixed layout.
+    var publishDestFolderName: String?
     var status: JobStatus = .queued
     var error: String = ""
     var progress: Int = 0
@@ -94,7 +102,7 @@ struct Job: Identifiable, Sendable, Codable {
     private enum CodingKeys: String, CodingKey {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
              workDir, publishedFile, publishPhase, discFingerprint, ripReadErrors,
-             ripCorruptionEvents,
+             ripCorruptionEvents, publishDestFolderName,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
