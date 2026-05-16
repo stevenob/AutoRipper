@@ -58,6 +58,17 @@ final class AppConfig: ObservableObject {
     @Published var customPresetsFile: String {
         didSet { defaults.set(customPresetsFile, forKey: "customPresetsFile") }
     }
+
+    /// v3.14.0: per-disc rip rules. Applied by `RipViewModel` after
+    /// each successful scan; the first matching rule wins. Persisted
+    /// as a JSON array. Default empty for fresh installs.
+    @Published var discRules: [DiscRule] {
+        didSet {
+            if let data = try? JSONEncoder().encode(discRules) {
+                defaults.set(data, forKey: "discRules")
+            }
+        }
+    }
     @Published var discordWebhook: String {
         didSet { defaults.set(discordWebhook, forKey: "discordWebhook") }
     }
@@ -206,6 +217,15 @@ final class AppConfig: ObservableObject {
         self.defaultPreset = d.string(forKey: "defaultPreset") ?? "HQ 1080p30 Surround"
         self.defaultMediaType = d.string(forKey: "defaultMediaType") ?? "movie"
         self.customPresetsFile = d.string(forKey: "customPresetsFile") ?? ""
+        // v3.14.0: load discRules. JSON-encoded array. Defaults to empty
+        // when absent or unparseable so a corrupt entry doesn't break
+        // startup.
+        if let data = d.data(forKey: "discRules"),
+           let rules = try? JSONDecoder().decode([DiscRule].self, from: data) {
+            self.discRules = rules
+        } else {
+            self.discRules = []
+        }
         self.discordWebhook = d.string(forKey: "discordWebhook") ?? ""
         self.nasMoviesPath = d.string(forKey: "nasMoviesPath") ?? ""
         self.nasTvPath = d.string(forKey: "nasTvPath") ?? ""

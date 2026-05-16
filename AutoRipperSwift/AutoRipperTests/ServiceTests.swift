@@ -310,6 +310,104 @@ final class TrackOrdinalMappingTests: XCTestCase {
     }
 }
 
+// MARK: - DiscRule matching (v3.14.0)
+
+final class DiscRuleTests: XCTestCase {
+
+    func testEmptyRuleNeverMatches() {
+        // A rule with no constraints would match every disc — that's
+        // almost certainly user error. matches() refuses to fire.
+        let rule = DiscRule(name: "empty", enabled: true)
+        XCTAssertFalse(rule.matches(discName: "ANYTHING", mediaTitle: "Anything",
+                                    mediaType: "movie", discType: "dvd"))
+        XCTAssertFalse(rule.hasAnyMatch)
+    }
+
+    func testDisabledRuleNeverMatches() {
+        let rule = DiscRule(name: "off", enabled: false, nameContains: "Star Wars")
+        XCTAssertFalse(rule.matches(discName: "STAR WARS A NEW HOPE",
+                                    mediaTitle: "Star Wars",
+                                    mediaType: "movie",
+                                    discType: "bluray"))
+    }
+
+    func testNameContainsCaseInsensitive() {
+        let rule = DiscRule(name: "sw", nameContains: "Star Wars")
+        XCTAssertTrue(rule.matches(discName: "STAR_WARS_DVD",
+                                   mediaTitle: "",
+                                   mediaType: "movie",
+                                   discType: "dvd"))
+    }
+
+    func testNameContainsAlsoMatchesMediaTitle() {
+        let rule = DiscRule(name: "sw", nameContains: "Star Wars")
+        XCTAssertTrue(rule.matches(discName: "DISC123",
+                                   mediaTitle: "Star Wars: A New Hope",
+                                   mediaType: "movie",
+                                   discType: "bluray"))
+    }
+
+    func testMediaTypeFilterMustMatch() {
+        let rule = DiscRule(name: "tv-only", nameContains: "X", mediaTypeFilter: "tv")
+        XCTAssertTrue(rule.matches(discName: "X", mediaTitle: "", mediaType: "tv", discType: "dvd"))
+        XCTAssertFalse(rule.matches(discName: "X", mediaTitle: "", mediaType: "movie", discType: "dvd"))
+    }
+
+    func testDiscTypeFilterMustMatch() {
+        let rule = DiscRule(name: "bd-only", nameContains: "X", discTypeFilter: "bluray")
+        XCTAssertTrue(rule.matches(discName: "X", mediaTitle: "", mediaType: "movie", discType: "bluray"))
+        XCTAssertFalse(rule.matches(discName: "X", mediaTitle: "", mediaType: "movie", discType: "dvd"))
+    }
+
+    func testAllConstraintsANDed() {
+        // All non-empty fields must match — and only one mismatch
+        // breaks the whole rule.
+        let rule = DiscRule(name: "complex",
+                            nameContains: "Star Wars",
+                            mediaTypeFilter: "movie",
+                            discTypeFilter: "bluray")
+        XCTAssertTrue(rule.matches(discName: "Star Wars Trilogy",
+                                   mediaTitle: "Star Wars",
+                                   mediaType: "movie", discType: "bluray"))
+        // Wrong disc type → no match.
+        XCTAssertFalse(rule.matches(discName: "Star Wars Trilogy",
+                                    mediaTitle: "Star Wars",
+                                    mediaType: "movie", discType: "dvd"))
+    }
+
+    func testFirstMatchTakesPrecedence() {
+        // Earlier rules in the list win over later matching rules.
+        let r1 = DiscRule(name: "first", nameContains: "Star")
+        let r2 = DiscRule(name: "second", nameContains: "Wars")
+        let match = DiscRuleMatcher.firstMatch(
+            in: [r1, r2],
+            discName: "Star Wars",
+            mediaTitle: "",
+            mediaType: "movie",
+            discType: "dvd"
+        )
+        XCTAssertEqual(match?.name, "first")
+    }
+
+    func testFirstMatchReturnsNilWhenNoneMatch() {
+        let rule = DiscRule(name: "x", nameContains: "Nope")
+        XCTAssertNil(DiscRuleMatcher.firstMatch(
+            in: [rule],
+            discName: "Star Wars",
+            mediaTitle: "",
+            mediaType: "movie",
+            discType: "dvd"
+        ))
+    }
+
+    func testHasAnyActionFlags() {
+        XCTAssertFalse(DiscRule(name: "x").hasAnyAction)
+        XCTAssertTrue(DiscRule(name: "x", presetOverride: "HQ").hasAnyAction)
+        XCTAssertTrue(DiscRule(name: "x", intentOverride: "episode").hasAnyAction)
+        XCTAssertTrue(DiscRule(name: "x", driveSpeedOverride: 4).hasAnyAction)
+    }
+}
+
 // MARK: - OrganizerService Extended Tests
 
 final class OrganizerServiceExtendedTests: XCTestCase {

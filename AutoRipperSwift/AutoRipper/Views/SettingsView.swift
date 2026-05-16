@@ -28,6 +28,8 @@ struct SettingsView: View {
                 .tabItem { Label("Drive Health", systemImage: "stethoscope") }
             CleaningGuideView()
                 .tabItem { Label("Cleaning", systemImage: "sparkles") }
+            RulesPane(config: config)
+                .tabItem { Label("Rules", systemImage: "list.bullet.indent") }
             HistoryPane(config: config)
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
             AdvancedPane(config: config)

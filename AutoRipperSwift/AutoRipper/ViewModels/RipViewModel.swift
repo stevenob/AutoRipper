@@ -219,6 +219,37 @@ final class RipViewModel: ObservableObject {
         }
     }
 
+    /// v3.14.0: apply the first matching `DiscRule` from `AppConfig`
+    /// to the just-scanned disc. Mutates RipViewModel + AppConfig
+    /// state in place. No-op when no rule matches. Each action is
+    /// independently guarded so a rule with only a preset override
+    /// doesn't accidentally clobber an intent the user already set.
+    private func applyMatchingRule(for info: DiscInfo) {
+        let mediaType = cachedMediaResult?.mediaType ?? ""
+        guard let rule = DiscRuleMatcher.firstMatch(
+            in: config.discRules,
+            discName: info.name,
+            mediaTitle: info.mediaTitle,
+            mediaType: mediaType,
+            discType: info.type
+        ) else { return }
+        FileLogger.shared.info("rip-vm",
+            "rule matched: '\(rule.name)' for disc '\(info.name)'")
+        if !rule.presetOverride.isEmpty {
+            config.defaultPreset = rule.presetOverride
+        }
+        if !rule.intentOverride.isEmpty,
+           let intent = JobIntent(rawValue: rule.intentOverride) {
+            // Apply to every selected title.
+            for tid in selectedTitles {
+                titleIntents[tid] = intent
+            }
+        }
+        if rule.driveSpeedOverride > 0 {
+            config.makemkvReadSpeed = rule.driveSpeedOverride
+        }
+    }
+
     /// v3.11.6: how many MSG:2003 read errors trigger the "try slower drive
     /// speed" banner. 5 is a reasonable balance — single transient errors
     /// are routine on used media (don't pester the user); persistent
@@ -713,6 +744,10 @@ final class RipViewModel: ObservableObject {
                         selectedSubtitleTracks[title.id] = Set(title.subtitleTracks.map { $0.id })
                     }
                 }
+                // v3.14.0: apply matching per-disc rule (if any) on top
+                // of the default selection state. Pure logic — see
+                // `DiscRuleMatcher.firstMatch`.
+                applyMatchingRule(for: info)
                 // Check duplicate-rip registry. Compute fingerprint and look
                 // it up; surface the prior entry on the model so the UI can
                 // banner-warn the user.
