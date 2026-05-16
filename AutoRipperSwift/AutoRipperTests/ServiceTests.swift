@@ -2298,6 +2298,148 @@ final class DriveHealthAnalyzerTests: XCTestCase {
     }
 }
 
+// MARK: - UpdateService.parseMountPointFromHdiutilPlist (v3.11.13)
+//
+// Fixture-based tests for the hdiutil `-plist` output parser. v3.11.13
+// switched the mount-point extraction from a regex over `-quiet` output
+// (which silently returned empty on macOS 14+) to PropertyListSerialization
+// over `-plist` output. These tests pin the parser's contract so the
+// fix doesn't quietly regress in a future cleanup.
+
+final class HdiutilPlistParserTests: XCTestCase {
+
+    /// Realistic snippet from `hdiutil attach <dmg> -plist`. Two system
+    /// entities: the GPT scheme (no mount-point) and the HFS+ slice
+    /// (which mounts at /Volumes/AutoRipper).
+    private let realisticPlist = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+        <key>system-entities</key>
+        <array>
+            <dict>
+                <key>content-hint</key>
+                <string>GUID_partition_scheme</string>
+                <key>dev-entry</key>
+                <string>/dev/disk6</string>
+            </dict>
+            <dict>
+                <key>content-hint</key>
+                <string>Apple_HFS</string>
+                <key>dev-entry</key>
+                <string>/dev/disk6s1</string>
+                <key>mount-point</key>
+                <string>/Volumes/AutoRipper</string>
+                <key>volume-kind</key>
+                <string>hfs</string>
+            </dict>
+        </array>
+    </dict>
+    </plist>
+    """
+
+    func testParsesRealisticHdiutilOutput() {
+        let data = Data(realisticPlist.utf8)
+        let mount = UpdateService.parseMountPointFromHdiutilPlist(data)
+        XCTAssertEqual(mount, "/Volumes/AutoRipper")
+    }
+
+    func testReturnsFirstNonEmptyMountPointWhenMultiple() {
+        // Edge case: a multi-partition DMG. We just want any valid
+        // mount-point — the first one encountered is fine.
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>system-entities</key>
+            <array>
+                <dict>
+                    <key>mount-point</key>
+                    <string>/Volumes/First</string>
+                </dict>
+                <dict>
+                    <key>mount-point</key>
+                    <string>/Volumes/Second</string>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        """
+        XCTAssertEqual(
+            UpdateService.parseMountPointFromHdiutilPlist(Data(plist.utf8)),
+            "/Volumes/First"
+        )
+    }
+
+    func testSkipsEmptyMountPoint() {
+        // The first entity has an empty mount-point (e.g. the GPT
+        // scheme entry MakeMKV's DMG often includes). Parser should
+        // skip it and return the next non-empty one.
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>system-entities</key>
+            <array>
+                <dict>
+                    <key>mount-point</key>
+                    <string></string>
+                </dict>
+                <dict>
+                    <key>mount-point</key>
+                    <string>/Volumes/Good</string>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        """
+        XCTAssertEqual(
+            UpdateService.parseMountPointFromHdiutilPlist(Data(plist.utf8)),
+            "/Volumes/Good"
+        )
+    }
+
+    func testReturnsNilForMalformedXML() {
+        XCTAssertNil(UpdateService.parseMountPointFromHdiutilPlist(Data("not a plist".utf8)))
+        XCTAssertNil(UpdateService.parseMountPointFromHdiutilPlist(Data()))
+    }
+
+    func testReturnsNilWhenNoSystemEntities() {
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>other-key</key>
+            <string>not what we're looking for</string>
+        </dict>
+        </plist>
+        """
+        XCTAssertNil(UpdateService.parseMountPointFromHdiutilPlist(Data(plist.utf8)))
+    }
+
+    func testReturnsNilWhenNoEntityHasMountPoint() {
+        // Some hdiutil output (rare, e.g. raw block-device images) has
+        // system-entities but no mount-point. Parser returns nil so the
+        // caller falls back to the legacy tabular search.
+        let plist = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+            <key>system-entities</key>
+            <array>
+                <dict>
+                    <key>dev-entry</key>
+                    <string>/dev/disk6</string>
+                </dict>
+            </array>
+        </dict>
+        </plist>
+        """
+        XCTAssertNil(UpdateService.parseMountPointFromHdiutilPlist(Data(plist.utf8)))
+    }
+}
+
 // MARK: - Edition hint heuristic tests (v3.10)
 
 final class EditionHintTests: XCTestCase {

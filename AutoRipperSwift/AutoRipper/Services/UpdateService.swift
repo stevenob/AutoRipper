@@ -88,6 +88,13 @@ final class UpdateService: ObservableObject {
                     latestVersion = remote
                     releaseURL = htmlURL
                     releaseNotes = (json["body"] as? String) ?? ""
+                    // v3.11.13: clear any stale install error from a prior
+                    // failed attempt. Without this, the error string keeps
+                    // appearing under the version label in the update
+                    // banner even when the issue (e.g. a transient hdiutil
+                    // parse failure) has been resolved server-side by a
+                    // subsequent fresh DMG.
+                    installError = nil
                     // Find the AutoRipper-Installer.dmg asset.
                     if let assets = json["assets"] as? [[String: Any]] {
                         for a in assets {
@@ -205,7 +212,14 @@ final class UpdateService: ObservableObject {
     private func mountDMG(at dmgPath: String) throws -> String {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        proc.arguments = ["attach", dmgPath, "-nobrowse", "-quiet"]
+        // v3.11.13: switched from `-quiet` (which suppresses the tabular
+        // device-tree the old parser depended on, breaking the mount-point
+        // extraction on macOS 14+) to `-plist`, which gives us a stable
+        // machine-readable shape. The PropertyListSerialization-based
+        // parser below recovers the mount point from the canonical
+        // system-entities array, and falls back to the legacy substring
+        // search if the plist parse ever fails (defense in depth).
+        proc.arguments = ["attach", dmgPath, "-nobrowse", "-plist"]
         let pipe = Pipe()
         proc.standardOutput = pipe
         proc.standardError = Pipe()
@@ -215,14 +229,43 @@ final class UpdateService: ObservableObject {
             throw NSError(domain: "UpdateService", code: 2, userInfo: [NSLocalizedDescriptionKey: "hdiutil attach failed"])
         }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        if let mount = Self.parseMountPointFromHdiutilPlist(data) {
+            return mount
+        }
+        // Legacy fallback: tabular parse for environments where -plist
+        // output is unparseable for some reason.
         let output = String(data: data, encoding: .utf8) ?? ""
-        // hdiutil prints lines like: "/dev/disk6s1     Apple_HFS     /Volumes/AutoRipper"
         for line in output.components(separatedBy: .newlines) {
             if let range = line.range(of: "/Volumes/") {
                 return String(line[range.lowerBound...]).trimmingCharacters(in: .whitespaces)
             }
         }
         throw NSError(domain: "UpdateService", code: 3, userInfo: [NSLocalizedDescriptionKey: "hdiutil mount point not found in output"])
+    }
+
+    /// v3.11.13: parse `hdiutil attach -plist` output and return the
+    /// first non-empty `mount-point` value from the `system-entities`
+    /// array. Returns nil on any parse failure so the caller can fall
+    /// back to legacy tabular parsing.
+    ///
+    /// Exposed as `nonisolated static` so unit tests can verify the
+    /// parser against fixture plist output without spinning up hdiutil
+    /// or hopping onto the main actor.
+    nonisolated static func parseMountPointFromHdiutilPlist(_ data: Data) -> String? {
+        guard let plist = try? PropertyListSerialization.propertyList(
+            from: data, options: [], format: nil
+        ) as? [String: Any] else {
+            return nil
+        }
+        guard let entities = plist["system-entities"] as? [[String: Any]] else {
+            return nil
+        }
+        for entity in entities {
+            if let mount = entity["mount-point"] as? String, !mount.isEmpty {
+                return mount.trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
     }
 
     private func writeInstallHelper(appInside: String, mountPoint: String, dmgPath: String) throws -> String {
