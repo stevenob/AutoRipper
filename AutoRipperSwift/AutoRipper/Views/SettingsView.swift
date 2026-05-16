@@ -26,6 +26,8 @@ struct SettingsView: View {
                 .tabItem { Label("Discord", systemImage: "bubble.left.and.bubble.right") }
             DriveHealthPane()
                 .tabItem { Label("Drive Health", systemImage: "stethoscope") }
+            CleaningGuideView()
+                .tabItem { Label("Cleaning", systemImage: "sparkles") }
             HistoryPane(config: config)
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
             AdvancedPane(config: config)

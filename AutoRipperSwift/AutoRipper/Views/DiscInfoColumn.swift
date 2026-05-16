@@ -7,6 +7,7 @@ struct DiscInfoColumn: View {
     @ObservedObject var ripVM: RipViewModel
     @ObservedObject var config: AppConfig
     let info: DiscInfo
+    @State private var showCleaningGuide = false
 
     private var media: MediaResult? { ripVM.cachedMediaResult }
     private var displayTitle: String {
@@ -74,6 +75,24 @@ struct DiscInfoColumn: View {
         }
         .frame(minWidth: 280, idealWidth: 340, maxWidth: 380)
         .background(Color.gray.opacity(0.04))
+        .sheet(isPresented: $showCleaningGuide) {
+            // v3.11.16: cleaning-guide modal launched from the scan-health
+            // banner's "Show cleaning steps" button. Wrapped in a Frame
+            // + Close button so the sheet feels deliberate rather than a
+            // dialog accident.
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    Button("Close") { showCleaningGuide = false }
+                        .keyboardShortcut(.cancelAction)
+                }
+                .padding([.top, .horizontal], 12)
+                CleaningGuideView()
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+            }
+            .frame(minWidth: 520, idealWidth: 600, minHeight: 480, idealHeight: 600)
+        }
     }
 
     // MARK: - Sections
@@ -388,6 +407,14 @@ struct DiscInfoColumn: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showCleaningGuide = true
+            } label: {
+                Label("Show cleaning steps", systemImage: "sparkles")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
