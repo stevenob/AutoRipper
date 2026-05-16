@@ -32,6 +32,20 @@ struct DiscInfoColumn: View {
                     readErrorBanner
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                // v3.11.15: scan-time error visibility. When the scan
+                // phase itself produced read errors or corruption
+                // events (drive struggled to read structure / hash
+                // tables) we surface them BEFORE the user clicks Rip,
+                // so they can clean the disc or abort instead of
+                // committing to a long rip that will likely fail
+                // the same way. The pills inside `rippingHeroBlock`
+                // already handle the during-rip view; this banner
+                // is the pre-rip equivalent.
+                if !ripVM.isRipping
+                    && (ripVM.readErrorCount > 0 || ripVM.corruptionEventCount > 0) {
+                    scanHealthBanner
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
                 identityBlock
                 Divider()
                 identifyBlock
@@ -318,6 +332,71 @@ struct DiscInfoColumn: View {
     }
 
     // (rippingBlock from previous version dropped — replaced by hero version above)
+
+    // MARK: - Scan-time health banner (v3.11.15)
+
+    /// Surfaces read-error / corruption-event counts that fired during
+    /// the scan phase. Visible only when not currently ripping (the
+    /// ripping hero block carries the same pills during a rip). Lets
+    /// the user see at a glance whether the disc is going to be
+    /// problematic BEFORE they commit to a long rip.
+    @ViewBuilder
+    private var scanHealthBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "stethoscope")
+                    .foregroundStyle(.orange)
+                Text("Scan reported disc issues")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            HStack(spacing: 10) {
+                if ripVM.readErrorCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                        Text("\(ripVM.readErrorCount) read \(ripVM.readErrorCount == 1 ? "error" : "errors")")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.15))
+                    .clipShape(Capsule())
+                }
+                if ripVM.corruptionEventCount > 0 {
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark.octagon.fill")
+                            .font(.caption2)
+                        Text("\(ripVM.corruptionEventCount) corrupt")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                    }
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.red.opacity(0.15))
+                    .clipShape(Capsule())
+                }
+                Spacer()
+            }
+            Text("MakeMKV hit these problems while reading the disc structure. The rip itself is likely to compound them — consider cleaning the disc (radial wipe with isopropyl) and rescanning before committing.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.07))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.orange.opacity(0.25), lineWidth: 1)
+        )
+    }
 
     // MARK: - Read-error banner (v3.11.5)
 
