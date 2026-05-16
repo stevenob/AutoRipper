@@ -121,7 +121,8 @@ actor HandBrakeService {
         audioTracks: [Int]? = nil,
         subtitleTracks: [Int]? = nil,
         progressCallback: (@Sendable (Int, String) -> Void)? = nil,
-        logCallback: (@Sendable (String) -> Void)? = nil
+        logCallback: (@Sendable (String) -> Void)? = nil,
+        warningCallback: (@Sendable (String) -> Void)? = nil
     ) async throws -> URL {
         let hbPath = try getPath()
 
@@ -189,6 +190,15 @@ actor HandBrakeService {
                     logCallback?(line)
                     tail.append(line)
                 }
+                // v3.11.14: surface HandBrake warning/error lines via a
+                // separate callback so callers can persist the diagnostic
+                // history on the resulting Job. Mirrors the v3.11.5 MSG:2003
+                // pattern for MakeMKV. Heuristic in `isEncodeWarning` —
+                // captures ERROR / WARNING / [hb-error] / failed-style
+                // lines, excludes normal progress chatter.
+                if HandBrakeService.isEncodeWarning(line) {
+                    warningCallback?(line)
+                }
 
                 if let groups = HandBrakeService.match(line, pattern: #"(\d+\.\d+)\s*%"#) {
                     let percent = min(Int(Double(groups[1]) ?? 0), 100)
@@ -230,6 +240,38 @@ actor HandBrakeService {
     }
 
     // MARK: - Helpers
+
+    /// v3.11.14: pure check for whether a HandBrake stdout/stderr line
+    /// represents a warning/error worth surfacing on the Job for the
+    /// History UI. HandBrake's output mixes informational progress noise
+    /// (`Encoding: task ... %`), low-level libhb decoder dumps, and
+    /// genuine diagnostic lines. We want only the last category.
+    ///
+    /// Recognised patterns:
+    ///   * `[hb-error]` — HandBrake's structured error tag
+    ///   * `ERROR:` / `Error:` at line start — generic CLI error pattern
+    ///   * `WARNING:` / `Warning:` at line start — non-fatal heads-up
+    ///   * "failed to ..." / "could not ..." — fallback for libhb's
+    ///     occasional unstructured failure messages
+    ///
+    /// Intentionally excluded:
+    ///   * Progress lines (`Encoding: task X of Y, N%`) — pure noise
+    ///   * libhb verbose decoder traces (`hb_stream_open`, `hb_init`) —
+    ///     normal startup, not diagnostic on their own
+    ///   * `scan: unrecognized file type` — already surfaces via the
+    ///     non-zero exit code + tail buffer in `encodeFailed`.
+    static func isEncodeWarning(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.contains("[hb-error]") { return true }
+        // Match ERROR: / Error: at start (don't trigger on the literal
+        // word "error" inside an unrelated line).
+        if trimmed.hasPrefix("ERROR:") || trimmed.hasPrefix("Error:") { return true }
+        if trimmed.hasPrefix("WARNING:") || trimmed.hasPrefix("Warning:") { return true }
+        // Fallback: libhb's occasional unstructured failure verbiage.
+        let lower = trimmed.lowercased()
+        if lower.hasPrefix("failed to ") || lower.hasPrefix("could not ") { return true }
+        return false
+    }
 
     private func runAndCapture(path: String, arguments: [String]) async throws -> String {
         let proc = Process()

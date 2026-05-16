@@ -56,6 +56,35 @@ final class HandBrakeServiceTests: XCTestCase {
         let failed = HandBrakeError.encodeFailed("bad exit")
         XCTAssertEqual(failed.localizedDescription, "bad exit")
     }
+
+    // MARK: - Encode warning detection (v3.11.14)
+
+    func testIsEncodeWarningMatchesStructuredErrorTag() {
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("[hb-error]: codec init failed"))
+        XCTAssertTrue(HandBrakeService.isEncodeWarning(" [hb-error] something"))
+    }
+
+    func testIsEncodeWarningMatchesERRORAndWARNINGPrefixes() {
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("ERROR: VideoToolbox unavailable"))
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("Error: bad input"))
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("WARNING: falling back to software encoder"))
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("Warning: subtitle track 3 ignored"))
+    }
+
+    func testIsEncodeWarningMatchesUnstructuredFailedPatterns() {
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("failed to allocate buffer"))
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("Could not initialize VideoToolbox"))
+        XCTAssertTrue(HandBrakeService.isEncodeWarning("FAILED TO read input"))  // case-insensitive
+    }
+
+    func testIsEncodeWarningDoesNotMatchProgressOrInfo() {
+        XCTAssertFalse(HandBrakeService.isEncodeWarning("Encoding: task 1 of 1, 45.2 %"))
+        XCTAssertFalse(HandBrakeService.isEncodeWarning("hb_stream_open: ok"))
+        XCTAssertFalse(HandBrakeService.isEncodeWarning("HandBrake 1.11.1 (2026032200)"))
+        XCTAssertFalse(HandBrakeService.isEncodeWarning(""))
+        // Word "error" inside an otherwise informational line shouldn't fire.
+        XCTAssertFalse(HandBrakeService.isEncodeWarning("scan: no error reports for title 1"))
+    }
 }
 
 // MARK: - MakeMKVService Tests

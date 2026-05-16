@@ -729,6 +729,19 @@ final class QueueViewModel: ObservableObject {
                         self.jobs[i].appendLog(line)
                     }
                 }
+            },
+            warningCallback: { [weak self] warning in
+                // v3.11.14: capture HandBrake ERROR/WARNING lines onto
+                // the Job for History display. Capped to avoid bloating
+                // the persisted JSON on a runaway encode that produces
+                // hundreds of warnings.
+                Task { @MainActor in
+                    guard let self else { return }
+                    if let i = self.jobs.firstIndex(where: { $0.id == jobId }),
+                       self.jobs[i].encodeWarnings.count < Job.encodeWarningCap {
+                        self.jobs[i].encodeWarnings.append(warning)
+                    }
+                }
             }
         )
         currentTask = nil

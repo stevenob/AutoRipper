@@ -825,6 +825,10 @@ private struct JobDetailView: View {
                     Divider()
                     discHealthSection
                 }
+                if !job.encodeWarnings.isEmpty {
+                    Divider()
+                    encodeWarningsSection
+                }
                 if !job.error.isEmpty {
                     Divider()
                     errorSection
@@ -1283,6 +1287,39 @@ private struct JobDetailView: View {
         let preview = offsets.prefix(6).map { f.string(fromByteCount: $0) }
         let suffix = offsets.count > 6 ? " (+\(offsets.count - 6) more)" : ""
         return preview.joined(separator: ", ") + suffix
+    }
+
+    // MARK: - Encode warnings (v3.11.14)
+
+    /// HandBrake ERROR / WARNING / "failed to ..." lines captured during
+    /// a successful encode. Surface them so the user knows that a green
+    /// checkmark doesn't necessarily mean a perfect output — HandBrake
+    /// can complete with non-fatal complaints worth investigating.
+    @ViewBuilder
+    private var encodeWarningsSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Encode warnings (\(job.encodeWarnings.count))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(job.encodeWarnings.enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "exclamationmark.bubble.fill")
+                            .foregroundStyle(.yellow)
+                            .font(.caption2)
+                        Text(line)
+                            .font(.system(.caption2, design: .monospaced))
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            Text("HandBrake reported these but the encode completed. Common causes: codec fallback (HW → SW), specific audio tracks dropped, unknown subtitle format passed through.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // MARK: - Error / log

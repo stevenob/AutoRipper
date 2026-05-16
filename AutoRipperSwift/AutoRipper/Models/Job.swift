@@ -67,6 +67,16 @@ struct Job: Identifiable, Sendable, Codable {
     /// offsets, the drive's laser tracking at that radius is the
     /// parsimonious explanation.
     var readErrorOffsets: [Int64] = []
+    /// v3.11.14: HandBrake stderr ERROR/WARNING lines captured during
+    /// the encode phase. Mirrors the v3.11.5 read-error tracking but
+    /// for the encode stage. Capped at `encodeWarningCap` per job.
+    /// Surfaced in the History detail when non-empty so the user knows
+    /// a "successful" encode may have had non-fatal complaints worth
+    /// investigating.
+    var encodeWarnings: [String] = []
+    /// Cap on the persisted `encodeWarnings` array per job. Keeps the
+    /// JSON small even on a runaway encode that floods stderr.
+    static let encodeWarningCap = 20
     /// v3.11.8: explicit folder-name override for the NAS publish step.
     /// Set during the organize step when the local work dir uses a
     /// per-job-unique container (e.g. `<workRoot>/job-abc.../Mortal Kombat (1995)/`).
@@ -110,6 +120,7 @@ struct Job: Identifiable, Sendable, Codable {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
              workDir, publishedFile, publishPhase, discFingerprint, ripReadErrors,
              ripCorruptionEvents, publishDestFolderName, readErrorOffsets,
+             encodeWarnings,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
