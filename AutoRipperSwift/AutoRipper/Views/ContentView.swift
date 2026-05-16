@@ -163,6 +163,8 @@ struct DiscPaneView: View {
     @ObservedObject var queueVM: QueueViewModel
     @ObservedObject var updateService: UpdateService
     @ObservedObject var config: AppConfig
+    /// v3.13.0: cached Drive Health verdict for the header badge.
+    @State private var driveHealth: DriveHealthAnalyzer.Report?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -235,11 +237,67 @@ struct DiscPaneView: View {
 
             Spacer()
 
+            // v3.13.0: Drive Health badge. Hidden when the report is
+            // .insufficientData or unloaded so it doesn't clutter the
+            // header for fresh installs. Click to open Settings.
+            if let report = driveHealth, report.verdict != .insufficientData {
+                driveHealthBadge(report: report)
+            }
+
             Toggle("Auto-Eject", isOn: $config.autoEject)
                 .toggleStyle(.checkbox).font(.caption)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(.bar)
+        .onAppear { refreshDriveHealth() }
+        .onChange(of: queueVM.jobs.count) { _, _ in
+            // Re-aggregate when the job count changes — usually that's
+            // a rip completing and posting its final error counts.
+            refreshDriveHealth()
+        }
+    }
+
+    /// v3.13.0: small clickable badge surfacing the Drive Health verdict
+    /// in the main window header. Click opens Settings (where the user
+    /// can read the full report + take action).
+    @ViewBuilder
+    private func driveHealthBadge(report: DriveHealthAnalyzer.Report) -> some View {
+        let v = report.verdict
+        let color: Color = {
+            switch v {
+            case .healthy:          return .green
+            case .someIssues:       return .orange
+            case .driveSuspect:     return .red
+            case .insufficientData: return .secondary
+            }
+        }()
+        Button {
+            // Standard pre-macOS-14 way to open the Settings window.
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: v.sfSymbol)
+                    .font(.caption)
+                Text(v.headline)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .foregroundStyle(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(color.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Drive Health verdict from your last \(report.analyzedCount) rips. Click for details.")
+    }
+
+    private func refreshDriveHealth() {
+        let completed = JobStore.shared.load().filter { $0.status == .done }
+        driveHealth = DriveHealthAnalyzer.analyze(jobs: completed)
     }
 
     // MARK: - Main content (state-dependent)
