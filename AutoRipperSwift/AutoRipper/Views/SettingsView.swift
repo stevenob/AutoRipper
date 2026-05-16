@@ -753,6 +753,10 @@ private struct DriveHealthPane: View {
                     }
                     Divider()
                     actionsBlock(report: report)
+                    if shouldShowSanityCheck(report: report) {
+                        Divider()
+                        sanityCheckBlock
+                    }
                 } else {
                     ProgressView("Computing…")
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -1016,6 +1020,51 @@ private struct DriveHealthPane: View {
                 }
                 Spacer()
             }
+        }
+    }
+
+    /// v3.12.2: surface the sanity-check workflow when the verdict is
+    /// `someIssues` or `driveSuspect`, OR when the offset-cluster
+    /// finding has fired. Hidden during `healthy` / `insufficientData`
+    /// because the user has nothing to diagnose.
+    private func shouldShowSanityCheck(report: DriveHealthAnalyzer.Report) -> Bool {
+        switch report.verdict {
+        case .someIssues, .driveSuspect: return true
+        case .healthy, .insufficientData: return false
+        }
+    }
+
+    /// v3.12.2: how to A/B-test the drive against a known-good control
+    /// disc. The existing scan-time health banner (v3.11.15) already
+    /// reports per-scan error counts, so this block is just a recipe
+    /// — no new code path required.
+    @ViewBuilder
+    private var sanityCheckBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "testtube.2")
+                    .foregroundStyle(.blue)
+                Text("Run a sanity check")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            Text("To confirm whether the drive or the discs are at fault, scan a control disc and compare:")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("1. Insert a **brand-new** Blu-ray (anything from the last 5 years) — pristine, no smudges.")
+                    .font(.caption2)
+                Text("2. Go to the main window and click **Scan**. Don't rip — the scan alone exercises the drive enough.")
+                    .font(.caption2)
+                Text("3. Watch the disc panel for the scan-health banner.")
+                    .font(.caption2)
+            }
+            Text("If the brand-new control disc ALSO surfaces read errors → the drive is the problem (return it). If the control disc is clean and only your older library throws errors → the discs are damaged, follow the Cleaning guide.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
