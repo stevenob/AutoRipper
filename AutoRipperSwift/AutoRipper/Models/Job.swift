@@ -77,6 +77,15 @@ struct Job: Identifiable, Sendable, Codable {
     /// Cap on the persisted `encodeWarnings` array per job. Keeps the
     /// JSON small even on a runaway encode that floods stderr.
     static let encodeWarningCap = 20
+    /// v3.12.0: HandBrake audio track ordinals (1-indexed) to keep in
+    /// the encode. nil/empty means "all tracks" (HandBrake's default).
+    /// Converted from `RipViewModel.selectedAudioTracks` at rip
+    /// completion: the position-within-kind of each selected MakeMKV
+    /// audio stream becomes its HandBrake ordinal.
+    var audioTrackOrdinals: [Int]?
+    /// v3.12.0: HandBrake subtitle track ordinals (1-indexed). Same
+    /// semantics as `audioTrackOrdinals`.
+    var subtitleTrackOrdinals: [Int]?
     /// v3.11.8: explicit folder-name override for the NAS publish step.
     /// Set during the organize step when the local work dir uses a
     /// per-job-unique container (e.g. `<workRoot>/job-abc.../Mortal Kombat (1995)/`).
@@ -120,7 +129,7 @@ struct Job: Identifiable, Sendable, Codable {
         case id, discName, rippedFile, resolution, encodedFile, organizedFile,
              workDir, publishedFile, publishPhase, discFingerprint, ripReadErrors,
              ripCorruptionEvents, publishDestFolderName, readErrorOffsets,
-             encodeWarnings,
+             encodeWarnings, audioTrackOrdinals, subtitleTrackOrdinals,
              status, error, progress, progressText,
              ripElapsed, encodeElapsed, organizeElapsed, scrapeElapsed, nasElapsed,
              mediaResult, intent, editionLabel,
@@ -128,7 +137,7 @@ struct Job: Identifiable, Sendable, Codable {
              logLines, createdAt, finishedAt
     }
 
-    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0, ripCorruptionEvents: Int = 0, readErrorOffsets: [Int64] = []) {
+    init(discName: String, rippedFile: URL, ripElapsed: TimeInterval = 0, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0, ripCorruptionEvents: Int = 0, readErrorOffsets: [Int64] = [], audioTrackOrdinals: [Int]? = nil, subtitleTrackOrdinals: [Int]? = nil) {
         self.id = "job_\(Int(Date().timeIntervalSince1970 * 1_000_000))"
         self.discName = discName
         self.rippedFile = rippedFile
@@ -145,6 +154,8 @@ struct Job: Identifiable, Sendable, Codable {
         self.ripReadErrors = ripReadErrors
         self.ripCorruptionEvents = ripCorruptionEvents
         self.readErrorOffsets = readErrorOffsets
+        self.audioTrackOrdinals = audioTrackOrdinals
+        self.subtitleTrackOrdinals = subtitleTrackOrdinals
     }
 
     /// Append a streaming log line (capped at 200 to keep JSON small).

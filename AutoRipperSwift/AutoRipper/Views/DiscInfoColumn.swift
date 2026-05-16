@@ -592,7 +592,7 @@ struct DiscInfoColumn: View {
             ForEach(selected) { title in
                 titleTracksRow(title: title)
             }
-            Text("Track selection on a per-title basis is coming in v3.12.1. For now AutoRipper preserves every audio + subtitle track from the source disc through the encode (HandBrake's `--all-audio --all-subtitles`).")
+            Text("Unchecked tracks are excluded from the HandBrake encode (mapped to its --audio / --subtitle filters by ordinal position). The raw rip still preserves every track on the source disc.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -606,34 +606,62 @@ struct DiscInfoColumn: View {
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
-            if !title.audioTracks.isEmpty {
-                ForEach(title.audioTracks) { track in
-                    HStack(spacing: 6) {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.blue.opacity(0.7))
-                        Text(track.displayLabel)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                }
+            ForEach(title.audioTracks) { track in
+                audioTrackToggle(titleId: title.id, track: track)
             }
-            if !title.subtitleTracks.isEmpty {
-                ForEach(title.subtitleTracks) { track in
-                    HStack(spacing: 6) {
-                        Image(systemName: "captions.bubble.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.purple.opacity(0.7))
-                        Text(track.displayLabel)
-                            .font(.caption2)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                }
+            ForEach(title.subtitleTracks) { track in
+                subtitleTrackToggle(titleId: title.id, track: track)
             }
         }
         .padding(.bottom, 2)
+    }
+
+    private func audioTrackToggle(titleId: Int, track: DiscAudioTrack) -> some View {
+        let binding = Binding<Bool>(
+            get: { (ripVM.selectedAudioTracks[titleId] ?? []).contains(track.id) },
+            set: { isOn in
+                var current = ripVM.selectedAudioTracks[titleId] ?? []
+                if isOn { current.insert(track.id) } else { current.remove(track.id) }
+                ripVM.selectedAudioTracks[titleId] = current
+            }
+        )
+        return Toggle(isOn: binding) {
+            HStack(spacing: 6) {
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.blue.opacity(0.7))
+                Text(track.displayLabel)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .controlSize(.mini)
+    }
+
+    private func subtitleTrackToggle(titleId: Int, track: DiscSubtitleTrack) -> some View {
+        let binding = Binding<Bool>(
+            get: { (ripVM.selectedSubtitleTracks[titleId] ?? []).contains(track.id) },
+            set: { isOn in
+                var current = ripVM.selectedSubtitleTracks[titleId] ?? []
+                if isOn { current.insert(track.id) } else { current.remove(track.id) }
+                ripVM.selectedSubtitleTracks[titleId] = current
+            }
+        )
+        return Toggle(isOn: binding) {
+            HStack(spacing: 6) {
+                Image(systemName: "captions.bubble.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.purple.opacity(0.7))
+                Text(track.displayLabel)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .controlSize(.mini)
     }
 
     @ViewBuilder

@@ -86,8 +86,8 @@ final class QueueViewModel: ObservableObject {
         FileLogger.shared.info("queue", "loaded \(loaded.count) jobs (interrupted: \(rescued), pruned: \(pruned))")
     }
 
-    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0, ripCorruptionEvents: Int = 0, readErrorOffsets: [Int64] = []) {
-        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle, discFingerprint: discFingerprint, ripReadErrors: ripReadErrors, ripCorruptionEvents: ripCorruptionEvents, readErrorOffsets: readErrorOffsets)
+    func addJob(discName: String, rippedFile: URL, ripElapsed: TimeInterval, resolution: String = "", card: JobCard? = nil, mediaResult: MediaResult? = nil, intent: JobIntent = .movie, editionLabel: String? = nil, seasonNumber: Int? = nil, episodeNumber: Int? = nil, episodeTitle: String? = nil, discFingerprint: String? = nil, ripReadErrors: Int = 0, ripCorruptionEvents: Int = 0, readErrorOffsets: [Int64] = [], audioTrackOrdinals: [Int]? = nil, subtitleTrackOrdinals: [Int]? = nil) {
+        let job = Job(discName: discName, rippedFile: rippedFile, ripElapsed: ripElapsed, resolution: resolution, card: card, mediaResult: mediaResult, intent: intent, editionLabel: editionLabel, seasonNumber: seasonNumber, episodeNumber: episodeNumber, episodeTitle: episodeTitle, discFingerprint: discFingerprint, ripReadErrors: ripReadErrors, ripCorruptionEvents: ripCorruptionEvents, readErrorOffsets: readErrorOffsets, audioTrackOrdinals: audioTrackOrdinals, subtitleTrackOrdinals: subtitleTrackOrdinals)
         jobs.append(job)
         let extra = editionLabel.map { " {edition-\($0)}" } ?? ""
         let ep = (seasonNumber != nil || episodeNumber != nil)
@@ -701,8 +701,8 @@ final class QueueViewModel: ObservableObject {
             inputPath: input.path,
             outputPath: outputPath,
             preset: preset,
-            audioTracks: nil,
-            subtitleTracks: nil,
+            audioTracks: jobs[index].audioTrackOrdinals,
+            subtitleTracks: jobs[index].subtitleTrackOrdinals,
             progressCallback: { [weak self] pct, text in
                 Task { @MainActor in
                     guard let self else { return }

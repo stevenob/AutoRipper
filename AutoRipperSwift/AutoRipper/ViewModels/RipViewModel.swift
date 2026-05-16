@@ -112,6 +112,16 @@ final class RipViewModel: ObservableObject {
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
+    /// v3.12.0: per-title audio track selection. Outer key is title id,
+    /// inner set holds the MakeMKV stream IDs of audio tracks the user
+    /// wants included in the encode. Empty set means "use HandBrake
+    /// default" (all-audio) — the natural-default starting state until
+    /// the user explicitly toggles something. Reset on scan; populated
+    /// to all-included when a scan reports per-title audio tracks.
+    @Published var selectedAudioTracks: [Int: Set<Int>] = [:]
+    /// v3.12.0: per-title subtitle track selection. Same shape and
+    /// semantics as `selectedAudioTracks`.
+    @Published var selectedSubtitleTracks: [Int: Set<Int>] = [:]
     /// Per-title edition label (e.g. "Theatrical", "Director's Cut"). Used only when intent == .edition.
     @Published var titleEditionLabels: [Int: String] = [:]
     /// Per-title TMDb search override. When set (and intent == .movie), the title is queued
@@ -148,8 +158,8 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors, ripCorruptionEvents, readErrorOffsets)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int, Int, [Int64]) -> Void)?
+    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors, ripCorruptionEvents, readErrorOffsets, audioTrackOrdinals, subtitleTrackOrdinals)
+    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int, Int, [Int64], [Int]?, [Int]?) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -215,6 +225,45 @@ final class RipViewModel: ObservableObject {
     /// per-sector failures (5+ in one rip) signal a disc or drive issue
     /// worth pausing for.
     static let readErrorSuggestThreshold = 5
+
+    /// v3.12.0: convert the user's per-title audio track selection
+    /// (keyed by MakeMKV stream IDs) into the 1-indexed ordinal
+    /// positions HandBrake expects on `--audio`. The ordinal is the
+    /// stream's position within the title's audioTracks array.
+    ///
+    /// Returns nil when:
+    ///   * The title has no audio tracks (don't constrain HandBrake), OR
+    ///   * Every audio track is selected (passing nil lets HandBrake's
+    ///     `--all-audio` auto-fallback handle codec compatibility).
+    ///
+    /// Visible as `internal` so unit tests can validate the mapping.
+    func audioOrdinals(forTitle titleId: Int, in info: DiscInfo) -> [Int]? {
+        guard let title = info.titles.first(where: { $0.id == titleId }) else { return nil }
+        let tracks = title.audioTracks
+        guard !tracks.isEmpty else { return nil }
+        let selectedIds = selectedAudioTracks[titleId] ?? Set(tracks.map { $0.id })
+        if selectedIds.count == tracks.count { return nil }
+        var ordinals: [Int] = []
+        for (idx, track) in tracks.enumerated() where selectedIds.contains(track.id) {
+            ordinals.append(idx + 1)
+        }
+        return ordinals.isEmpty ? nil : ordinals
+    }
+
+    /// v3.12.0: same as `audioOrdinals` but for subtitles.
+    func subtitleOrdinals(forTitle titleId: Int, in info: DiscInfo) -> [Int]? {
+        guard let title = info.titles.first(where: { $0.id == titleId }) else { return nil }
+        let tracks = title.subtitleTracks
+        guard !tracks.isEmpty else { return nil }
+        let selectedIds = selectedSubtitleTracks[titleId] ?? Set(tracks.map { $0.id })
+        if selectedIds.count == tracks.count { return nil }
+        var ordinals: [Int] = []
+        for (idx, track) in tracks.enumerated() where selectedIds.contains(track.id) {
+            ordinals.append(idx + 1)
+        }
+        return ordinals.isEmpty ? nil : ordinals
+    }
+
 
     /// v3.11.6: pure check for whether a MakeMKV log line represents a
     /// single read-error event worth counting. MSG:2003 = "Posix error"
@@ -650,6 +699,20 @@ final class RipViewModel: ObservableObject {
                 for title in info.titles where title.durationSeconds >= config.minDuration {
                     selectedTitles.insert(title.id)
                 }
+                // v3.12.0: default all parsed tracks to included so the
+                // baseline behavior (encode everything) is preserved
+                // until the user explicitly toggles something off. Reset
+                // first to clear stale state from the prior scan.
+                selectedAudioTracks = [:]
+                selectedSubtitleTracks = [:]
+                for title in info.titles {
+                    if !title.audioTracks.isEmpty {
+                        selectedAudioTracks[title.id] = Set(title.audioTracks.map { $0.id })
+                    }
+                    if !title.subtitleTracks.isEmpty {
+                        selectedSubtitleTracks[title.id] = Set(title.subtitleTracks.map { $0.id })
+                    }
+                }
                 // Check duplicate-rip registry. Compute fingerprint and look
                 // it up; surface the prior entry on the model so the UI can
                 // banner-warn the user.
@@ -945,9 +1008,16 @@ final class RipViewModel: ObservableObject {
                         // and thread it through to the queue, so v3.7.1's
                         // RippedDiscRegistry can record the publish.
                         let discFp = DiscFingerprintService.fingerprint(info)
+                        // v3.12.0: compute HandBrake ordinals from the
+                        // user's track selection state. nil result means
+                        // "all tracks included" which maps to HandBrake's
+                        // --all-audio / --all-subtitles default.
+                        let audioOrd = self.audioOrdinals(forTitle: tid, in: info)
+                        let subOrd = self.subtitleOrdinals(forTitle: tid, in: info)
                         onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
                                        assignment?.season, assignment?.episode, assignment?.title, discFp,
-                                       readErrorCount, corruptionEventCount, readErrorOffsets)
+                                       readErrorCount, corruptionEventCount, readErrorOffsets,
+                                       audioOrd, subOrd)
                     }
                 } catch {
                     sizeMonitor.cancel()

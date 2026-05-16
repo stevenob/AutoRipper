@@ -225,6 +225,91 @@ final class TrackDisplayLabelTests: XCTestCase {
     }
 }
 
+// MARK: - RipViewModel track-ordinal mapping (v3.12.0)
+
+@MainActor
+final class TrackOrdinalMappingTests: XCTestCase {
+
+    private func makeTitleWithTracks(audio: Int, subs: Int) -> TitleInfo {
+        var t = TitleInfo(id: 1, name: "x", duration: "1:30:00", sizeBytes: 0,
+                          chapters: 1, fileOutput: "")
+        // Audio stream IDs from MakeMKV often skip the video stream
+        // (which is stream 0). Use realistic 2..N values to verify the
+        // ordinal mapping is by POSITION not by raw stream ID.
+        t.audioTracks = (0..<audio).map { i in
+            DiscAudioTrack(id: i + 2, languageCode: "eng", languageName: "English",
+                           codec: "AC3", channels: "5.1")
+        }
+        t.subtitleTracks = (0..<subs).map { i in
+            DiscSubtitleTrack(id: i + 2 + audio, languageCode: "eng",
+                              languageName: "English", codec: "PGS", forced: false)
+        }
+        return t
+    }
+
+    func testAudioOrdinalsReturnsNilWhenAllSelected() {
+        let vm = RipViewModel()
+        let title = makeTitleWithTracks(audio: 3, subs: 0)
+        let info = DiscInfo(name: "TEST", type: "dvd", titles: [title])
+        // No explicit selection state → defaults to "all included" via
+        // the .scanDisc default-population path. But since we're not
+        // calling scanDisc here, simulate the all-selected state.
+        vm.selectedAudioTracks[1] = Set([2, 3, 4])
+        XCTAssertNil(vm.audioOrdinals(forTitle: 1, in: info),
+                     "all-selected should map to nil (= HandBrake's --all-audio default)")
+    }
+
+    func testAudioOrdinalsReturnsNilForTitleWithNoTracks() {
+        let vm = RipViewModel()
+        let title = TitleInfo(id: 1, name: "x", duration: "0:30", sizeBytes: 0,
+                              chapters: 1, fileOutput: "")
+        let info = DiscInfo(name: "TEST", type: "dvd", titles: [title])
+        XCTAssertNil(vm.audioOrdinals(forTitle: 1, in: info))
+    }
+
+    func testAudioOrdinalsMapsBySelectedPosition() {
+        // Title has 3 audio tracks with stream IDs [2, 3, 4]. User
+        // selected only [3] (middle). HandBrake ordinal should be [2]
+        // (1-indexed position within the title's audio array).
+        let vm = RipViewModel()
+        let title = makeTitleWithTracks(audio: 3, subs: 0)
+        let info = DiscInfo(name: "TEST", type: "dvd", titles: [title])
+        vm.selectedAudioTracks[1] = Set([3])
+        XCTAssertEqual(vm.audioOrdinals(forTitle: 1, in: info), [2])
+    }
+
+    func testAudioOrdinalsMapsMultipleSelectionsInOrder() {
+        // Selected first + third of three. Ordinals should be [1, 3]
+        // — ordered by position even if the Set iteration order is
+        // arbitrary.
+        let vm = RipViewModel()
+        let title = makeTitleWithTracks(audio: 3, subs: 0)
+        let info = DiscInfo(name: "TEST", type: "dvd", titles: [title])
+        vm.selectedAudioTracks[1] = Set([2, 4])
+        XCTAssertEqual(vm.audioOrdinals(forTitle: 1, in: info), [1, 3])
+    }
+
+    func testSubtitleOrdinalsHasSameSemantics() {
+        let vm = RipViewModel()
+        let title = makeTitleWithTracks(audio: 0, subs: 2)
+        let info = DiscInfo(name: "TEST", type: "dvd", titles: [title])
+        // Subtitle stream IDs are [2, 3] (since audio=0 above the helper
+        // uses 2 + audio = 2 for first subtitle).
+        vm.selectedSubtitleTracks[1] = Set([3])
+        XCTAssertEqual(vm.subtitleOrdinals(forTitle: 1, in: info), [2])
+    }
+
+    func testAudioOrdinalsReturnsNilWhenNothingSelected() {
+        // Empty selection — no point sending HandBrake an empty list;
+        // safer to return nil (fall back to --all-audio default).
+        let vm = RipViewModel()
+        let title = makeTitleWithTracks(audio: 2, subs: 0)
+        let info = DiscInfo(name: "TEST", type: "dvd", titles: [title])
+        vm.selectedAudioTracks[1] = []
+        XCTAssertNil(vm.audioOrdinals(forTitle: 1, in: info))
+    }
+}
+
 // MARK: - OrganizerService Extended Tests
 
 final class OrganizerServiceExtendedTests: XCTestCase {
