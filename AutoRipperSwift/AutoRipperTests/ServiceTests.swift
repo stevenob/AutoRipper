@@ -182,6 +182,49 @@ final class MakeMKVServiceTests: XCTestCase {
     }
 }
 
+// MARK: - Track display labels (v3.12.0)
+
+final class TrackDisplayLabelTests: XCTestCase {
+
+    func testAudioTrackDisplayLabelFullDetails() {
+        let t = DiscAudioTrack(id: 1, languageCode: "eng", languageName: "English",
+                               codec: "DTS-HD MA", channels: "7.1")
+        XCTAssertEqual(t.displayLabel, "English · DTS-HD MA · 7.1")
+    }
+
+    func testAudioTrackDisplayLabelFallsBackToCodeWhenNameMissing() {
+        let t = DiscAudioTrack(id: 2, languageCode: "jpn", languageName: "",
+                               codec: "FLAC", channels: "2.0")
+        XCTAssertEqual(t.displayLabel, "JPN · FLAC · 2.0")
+    }
+
+    func testAudioTrackDisplayLabelOmitsMissingCodecOrChannels() {
+        let t = DiscAudioTrack(id: 3, languageCode: "fra", languageName: "French",
+                               codec: "", channels: "")
+        XCTAssertEqual(t.displayLabel, "French")
+    }
+
+    func testSubtitleTrackDisplayLabelMarksForced() {
+        let t = DiscSubtitleTrack(id: 1, languageCode: "eng", languageName: "English",
+                                  codec: "PGS", forced: true)
+        XCTAssertEqual(t.displayLabel, "English · PGS · forced")
+    }
+
+    func testSubtitleTrackDisplayLabelOmitsForcedWhenFalse() {
+        let t = DiscSubtitleTrack(id: 2, languageCode: "spa", languageName: "Spanish",
+                                  codec: "VOBSUB", forced: false)
+        XCTAssertEqual(t.displayLabel, "Spanish · VOBSUB")
+    }
+
+    func testTracksDefaultEmptyOnTitleInfo() {
+        // Older scans / fixtures shouldn't be broken by the new fields.
+        let title = TitleInfo(id: 0, name: "x", duration: "1:30:00", sizeBytes: 0,
+                              chapters: 1, fileOutput: "")
+        XCTAssertTrue(title.audioTracks.isEmpty)
+        XCTAssertTrue(title.subtitleTracks.isEmpty)
+    }
+}
+
 // MARK: - OrganizerService Extended Tests
 
 final class OrganizerServiceExtendedTests: XCTestCase {

@@ -65,6 +65,9 @@ struct DiscInfoColumn: View {
                 }
                 section("Preset") { presetBlock }
                 section("Selected (\(selectedCount) of \(info.titles.count))") { selectedBlock }
+                if anySelectedTitleHasTracks {
+                    section("Tracks") { tracksBlock }
+                }
                 if info.titles.count > 1 {
                     section("Disc contents") { contentsSummaryBlock }
                 }
@@ -566,6 +569,72 @@ struct DiscInfoColumn: View {
     // MARK: - Selected (titles · runtime · raw → encoded estimate)
 
     private var selectedCount: Int { ripVM.selectedTitles.count }
+
+    // MARK: - Tracks (v3.12.0)
+
+    /// Whether any currently-selected title carries parsed audio or
+    /// subtitle metadata. Drives whether to render the Tracks section
+    /// at all — older scans (pre-v3.12.0) or empty-stream titles get
+    /// silently skipped without leaving a stub heading.
+    private var anySelectedTitleHasTracks: Bool {
+        info.titles.contains { title in
+            ripVM.selectedTitles.contains(title.id)
+                && (!title.audioTracks.isEmpty || !title.subtitleTracks.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var tracksBlock: some View {
+        let selected = info.titles
+            .filter { ripVM.selectedTitles.contains($0.id) }
+            .filter { !$0.audioTracks.isEmpty || !$0.subtitleTracks.isEmpty }
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(selected) { title in
+                titleTracksRow(title: title)
+            }
+            Text("Track selection on a per-title basis is coming in v3.12.1. For now AutoRipper preserves every audio + subtitle track from the source disc through the encode (HandBrake's `--all-audio --all-subtitles`).")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func titleTracksRow(title: TitleInfo) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("Title \(title.id) · \(title.audioTracks.count) audio · \(title.subtitleTracks.count) subtitle")
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+            if !title.audioTracks.isEmpty {
+                ForEach(title.audioTracks) { track in
+                    HStack(spacing: 6) {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.blue.opacity(0.7))
+                        Text(track.displayLabel)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+            if !title.subtitleTracks.isEmpty {
+                ForEach(title.subtitleTracks) { track in
+                    HStack(spacing: 6) {
+                        Image(systemName: "captions.bubble.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.purple.opacity(0.7))
+                        Text(track.displayLabel)
+                            .font(.caption2)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            }
+        }
+        .padding(.bottom, 2)
+    }
 
     @ViewBuilder
     private var selectedBlock: some View {

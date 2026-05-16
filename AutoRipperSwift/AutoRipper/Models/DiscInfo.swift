@@ -14,6 +14,13 @@ struct TitleInfo: Identifiable, Sendable {
     /// titles table to group, filter, and select default rips by intent
     /// rather than relying on the emoji label string.
     var category: TitleCategory = .unknown
+    /// v3.12.0: per-track metadata parsed from MakeMKV's SINFO lines.
+    /// Powers the track-selection UI that lets the user trim e.g. a
+    /// 7-language audio bundle down to just English + commentary.
+    /// Defaults to empty arrays so older scans / mocked test fixtures
+    /// keep working unchanged.
+    var audioTracks: [DiscAudioTrack] = []
+    var subtitleTracks: [DiscSubtitleTrack] = []
 
     var durationSeconds: Int {
         let parts = duration.split(separator: ":").compactMap { Int($0) }
@@ -99,6 +106,38 @@ enum TitleCategory: String, Sendable, Codable, CaseIterable {
         case .trailer:        return "trailer"
         case .unknown:        return "title"
         }
+    }
+}
+
+/// v3.12.0: audio-track metadata parsed from MakeMKV's SINFO lines.
+/// Lets the user trim e.g. a multi-language audio bundle in the UI.
+struct DiscAudioTrack: Identifiable, Sendable, Hashable {
+    /// Per-title track id assigned by MakeMKV.
+    let id: Int
+    let languageCode: String
+    let languageName: String
+    let codec: String
+    let channels: String
+    var displayLabel: String {
+        let lang = languageName.isEmpty ? languageCode.uppercased() : languageName
+        let codecPart = codec.isEmpty ? "" : " · \(codec)"
+        let chanPart = channels.isEmpty ? "" : " · \(channels)"
+        return "\(lang)\(codecPart)\(chanPart)".trimmingCharacters(in: .whitespaces)
+    }
+}
+
+/// v3.12.0: subtitle-track metadata parsed from MakeMKV's SINFO lines.
+struct DiscSubtitleTrack: Identifiable, Sendable, Hashable {
+    let id: Int
+    let languageCode: String
+    let languageName: String
+    let codec: String
+    let forced: Bool
+    var displayLabel: String {
+        let lang = languageName.isEmpty ? languageCode.uppercased() : languageName
+        let codecPart = codec.isEmpty ? "" : " · \(codec)"
+        let forcedPart = forced ? " · forced" : ""
+        return "\(lang)\(codecPart)\(forcedPart)".trimmingCharacters(in: .whitespaces)
     }
 }
 

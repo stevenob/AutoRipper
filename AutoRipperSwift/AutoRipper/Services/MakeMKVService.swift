@@ -158,6 +158,10 @@ actor MakeMKVService {
         var discType = "dvd"
         var titlesData: [Int: [Int: String]] = [:]
         var resolutions: [Int: String] = [:]
+        // v3.12.0: collect SINFO track attributes by (titleId, streamId).
+        // streamId 0 is always the video track; audio/subtitle streams
+        // start at 1 and increment. Stream type is reported via attr id 1.
+        var streamData: [Int: [Int: [Int: String]]] = [:]  // [titleId][streamId][attrId] = value
 
         for line in output {
             if let groups = Self.match(line, pattern: #"CINFO:(\d+),\d+,"(.+)""#) {
@@ -172,13 +176,17 @@ actor MakeMKVService {
                 let attrId = Int(groups[2])!
                 let value = groups[3]
                 titlesData[tid, default: [:]][attrId] = value
-            } else if let groups = Self.match(line, pattern: #"SINFO:(\d+),\d+,(\d+),\d+,"(.+)""#) {
+            } else if let groups = Self.match(line, pattern: #"SINFO:(\d+),(\d+),(\d+),\d+,"(.+)""#) {
                 let tid = Int(groups[1])!
-                let attrId = Int(groups[2])!
-                let value = groups[3]
+                let streamId = Int(groups[2])!
+                let attrId = Int(groups[3])!
+                let value = groups[4]
+                // Resolution (attr 19) lives on the video stream (streamId 0).
+                // Capture it once per title for the existing UI.
                 if attrId == 19 && resolutions[tid] == nil {
                     resolutions[tid] = value
                 }
+                streamData[tid, default: [:]][streamId, default: [:]][attrId] = value
             }
         }
 
@@ -201,6 +209,38 @@ actor MakeMKVService {
                 fileOutput: attrs[27] ?? ""
             )
             title.resolution = resolutions[tid] ?? ""
+            // v3.12.0: extract audio + subtitle tracks from the per-stream
+            // SINFO data. Stream type lives at attr 1: "Video", "Audio",
+            // "Subtitles". Stream id 0 is the video stream; audio/subs
+            // get IDs 1..N in MakeMKV's enumeration order.
+            let streams = streamData[tid] ?? [:]
+            for sid in streams.keys.sorted() {
+                let s = streams[sid]!
+                let kind = (s[1] ?? "").lowercased()
+                // Attr 3 = lang code, 4 = lang name, 6 = codec short,
+                // 7 = channel layout, 30 = forced flag (subtitles).
+                let langCode = s[3] ?? ""
+                let langName = s[4] ?? ""
+                let codec = s[6] ?? ""
+                if kind == "audio" {
+                    title.audioTracks.append(DiscAudioTrack(
+                        id: sid,
+                        languageCode: langCode,
+                        languageName: langName,
+                        codec: codec,
+                        channels: s[7] ?? ""
+                    ))
+                } else if kind == "subtitles" {
+                    let forced = (s[38] ?? "").lowercased() == "true"
+                    title.subtitleTracks.append(DiscSubtitleTrack(
+                        id: sid,
+                        languageCode: langCode,
+                        languageName: langName,
+                        codec: codec,
+                        forced: forced
+                    ))
+                }
+            }
             titles.append(title)
         }
 
