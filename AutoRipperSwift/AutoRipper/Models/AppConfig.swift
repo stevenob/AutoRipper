@@ -47,6 +47,17 @@ final class AppConfig: ObservableObject {
     @Published var defaultMediaType: String {
         didSet { defaults.set(defaultMediaType, forKey: "defaultMediaType") }
     }
+    /// v3.13.1: optional path to a HandBrake preset JSON file imported
+    /// by the user. When set, AutoRipper passes `--preset-import-file
+    /// <path>` to every HandBrakeCLI invocation, making the user's
+    /// custom presets available alongside the built-in HandBrake ones.
+    /// The user creates the preset using HandBrake.app's full GUI
+    /// editor (way better tooling than we could build in SwiftUI), then
+    /// exports it as JSON and imports the file here. Empty string =
+    /// no custom presets active.
+    @Published var customPresetsFile: String {
+        didSet { defaults.set(customPresetsFile, forKey: "customPresetsFile") }
+    }
     @Published var discordWebhook: String {
         didSet { defaults.set(discordWebhook, forKey: "discordWebhook") }
     }
@@ -194,6 +205,7 @@ final class AppConfig: ObservableObject {
         self.autoEject = d.object(forKey: "autoEject") as? Bool ?? true
         self.defaultPreset = d.string(forKey: "defaultPreset") ?? "HQ 1080p30 Surround"
         self.defaultMediaType = d.string(forKey: "defaultMediaType") ?? "movie"
+        self.customPresetsFile = d.string(forKey: "customPresetsFile") ?? ""
         self.discordWebhook = d.string(forKey: "discordWebhook") ?? ""
         self.nasMoviesPath = d.string(forKey: "nasMoviesPath") ?? ""
         self.nasTvPath = d.string(forKey: "nasTvPath") ?? ""

@@ -38,7 +38,15 @@ actor HandBrakeService {
         if let cached = cachedPresets { return cached }
 
         let hbPath = try getPath()
-        let output = try await runAndCapture(path: hbPath, arguments: ["--preset-list"])
+        var args = ["--preset-list"]
+        // v3.13.1: surface custom presets imported from a HandBrake.app
+        // JSON export. HandBrakeCLI accepts --preset-import-file which
+        // merges the file's presets into the listing.
+        let customFile = AppConfig.shared.customPresetsFile
+        if !customFile.isEmpty, FileManager.default.fileExists(atPath: customFile) {
+            args.insert(contentsOf: ["--preset-import-file", customFile], at: 0)
+        }
+        let output = try await runAndCapture(path: hbPath, arguments: args)
 
         var presets: [String] = []
         for line in output.components(separatedBy: .newlines) {
@@ -149,6 +157,13 @@ actor HandBrakeService {
         try Self.preflightDiskSpace(inputPath: inputPath, outputPath: outURL.path)
 
         var cmd = [hbPath, "-i", inputPath, "-o", outURL.path, "--preset", preset]
+        // v3.13.1: make custom presets visible to this invocation.
+        // Inserted before --preset so HandBrake has the preset
+        // available by name.
+        let customFile = AppConfig.shared.customPresetsFile
+        if !customFile.isEmpty, FileManager.default.fileExists(atPath: customFile) {
+            cmd.insert(contentsOf: ["--preset-import-file", customFile], at: cmd.count - 2)
+        }
         if let audio = audioTracks, !audio.isEmpty {
             cmd += ["--audio", audio.map(String.init).joined(separator: ",")]
         } else {

@@ -261,8 +261,66 @@ private struct ToolsPane: View {
                 }
                 Spacer()
             }
+
+            // v3.13.1: custom HandBrake preset file. Lets the user keep
+            // their preset library in HandBrake.app (where the full
+            // editor lives) and just import the exported JSON here so
+            // it's available in AutoRipper's preset picker.
+            Divider()
+            customPresetsSection
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var customPresetsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Custom presets:").frame(width: 130, alignment: .trailing)
+                if config.customPresetsFile.isEmpty {
+                    Text("None imported")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(config.customPresetsFile)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+            }
+            HStack {
+                Spacer().frame(width: 130)
+                Button("Import preset file…") { browsePresetFile() }
+                    .controlSize(.small)
+                if !config.customPresetsFile.isEmpty {
+                    Button("Clear") { config.customPresetsFile = "" }
+                        .controlSize(.small)
+                }
+                Spacer()
+            }
+            HStack {
+                Spacer().frame(width: 130)
+                Text("Create the preset in HandBrake.app (full GUI editor), export it as JSON, then import here. AutoRipper passes the file to HandBrakeCLI via `--preset-import-file` on every encode.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+        }
+    }
+
+    private func browsePresetFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            config.customPresetsFile = url.path
+            FileLogger.shared.info("settings", "custom presets file set to \(url.path)")
+        }
     }
 
     private func autoDetect() -> String {
@@ -1279,6 +1337,7 @@ private struct AdvancedPane: View {
             // tuning — definitely worth preserving across reinstalls.
             "genericWebhookURL": config.genericWebhookURL,
             "makemkvReadSpeed": config.makemkvReadSpeed,
+            "customPresetsFile": config.customPresetsFile,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
@@ -1348,5 +1407,6 @@ private struct AdvancedPane: View {
         // ignored, so importing an old export file still works fine.
         if let v = dict["genericWebhookURL"]    as? String { config.genericWebhookURL = v }
         if let v = dict["makemkvReadSpeed"]     as? Int    { config.makemkvReadSpeed = v }
+        if let v = dict["customPresetsFile"]    as? String { config.customPresetsFile = v }
     }
 }
