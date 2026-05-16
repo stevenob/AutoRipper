@@ -1222,6 +1222,14 @@ private struct AdvancedPane: View {
             "jellyfinUrl": config.jellyfinUrl,
             "skipAlreadyRippedInAuto": config.skipAlreadyRippedInAuto,
             "autoConfirmBeforeRip": config.autoConfirmBeforeRip,
+            // v3.12.1: include the newer settings that have shipped
+            // since this exporter was first written. genericWebhookURL
+            // is not a secret (it's just a URL) so it's safe in the
+            // non-secrets export. makemkvReadSpeed is the v3.11.3
+            // drive-quietness preference that the user just spent time
+            // tuning — definitely worth preserving across reinstalls.
+            "genericWebhookURL": config.genericWebhookURL,
+            "makemkvReadSpeed": config.makemkvReadSpeed,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
@@ -1287,5 +1295,9 @@ private struct AdvancedPane: View {
         if let v = dict["jellyfinApiKey"]       as? String { config.jellyfinApiKey = v }
         if let v = dict["skipAlreadyRippedInAuto"] as? Bool { config.skipAlreadyRippedInAuto = v }
         if let v = dict["autoConfirmBeforeRip"]    as? Bool { config.autoConfirmBeforeRip = v }
+        // v3.12.1: import the newer keys too. Missing keys are silently
+        // ignored, so importing an old export file still works fine.
+        if let v = dict["genericWebhookURL"]    as? String { config.genericWebhookURL = v }
+        if let v = dict["makemkvReadSpeed"]     as? Int    { config.makemkvReadSpeed = v }
     }
 }
