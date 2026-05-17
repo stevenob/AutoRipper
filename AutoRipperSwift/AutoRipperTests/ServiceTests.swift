@@ -2042,6 +2042,72 @@ final class SafeFSCleanupTests: XCTestCase {
         SafeFSCleanup.removeDirIfEmpty(dir)
         // No crash, no throw.
     }
+
+    // MARK: - cleanupOwnedFilesAndScrubArtifacts (v4.0.1)
+
+    func testScrubArtifactsRemovesArtworkAndNFO() throws {
+        // The exact bug the user reported: post-publish, a movie folder
+        // has only fanart.jpg + movie.nfo + poster.jpg remaining. The
+        // .mkv has already been published to NAS. Scrub helper should
+        // remove the orphans AND the now-empty dir.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("fanart.jpg"))
+        try touch(dir.appendingPathComponent("movie.nfo"))
+        try touch(dir.appendingPathComponent("poster.jpg"))
+        SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(dir: dir, ownedFiles: [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path),
+                       "scrape-artifact-only dir should be removed")
+    }
+
+    func testScrubArtifactsRemovesOwnedFilesPlusArtifacts() throws {
+        // Combined path: owned .mkv (organized file) + scraper artwork.
+        // After cleanup, all should be gone and dir removed.
+        let dir = tempDir()
+        let owned = dir.appendingPathComponent("Movie.mkv")
+        try touch(owned, bytes: 32)
+        try touch(dir.appendingPathComponent("poster.jpg"))
+        try touch(dir.appendingPathComponent("movie.nfo"))
+        SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(dir: dir, ownedFiles: [owned])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
+    }
+
+    func testScrubArtifactsLeavesUnknownFilesUntouched() throws {
+        // A user-dropped .txt that's NOT a recognised artifact extension
+        // should keep the dir alive — never silently delete user data.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("fanart.jpg"))
+        try touch(dir.appendingPathComponent("user-notes.txt"))
+        SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(dir: dir, ownedFiles: [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("fanart.jpg").path),
+                       "artifact should be removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("user-notes.txt").path),
+                      "unknown extension must NOT be removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path),
+                      "dir must stay alive because foreign file remains")
+    }
+
+    func testScrubArtifactsCaseInsensitive() throws {
+        // Some scrapers / image sources use .JPG vs .jpg. Match either.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("FANART.JPG"))
+        try touch(dir.appendingPathComponent("POSTER.PNG"))
+        try touch(dir.appendingPathComponent("Movie.NFO"))
+        SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(dir: dir, ownedFiles: [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path))
+    }
+
+    func testScrubArtifactsDoesNotTouchMkv() throws {
+        // .mkv is user data — if not in ownedFiles, leave it alone. The
+        // .mkv keeps the dir alive too.
+        let dir = tempDir()
+        try touch(dir.appendingPathComponent("Movie.mkv"))
+        try touch(dir.appendingPathComponent("fanart.jpg"))
+        SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(dir: dir, ownedFiles: [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Movie.mkv").path),
+                      "unscoped .mkv must NOT be removed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("fanart.jpg").path),
+                       "artifact still gets removed")
+    }
 }
 
 // MARK: - MakeMKVService stale-file purge (v3.11.8)

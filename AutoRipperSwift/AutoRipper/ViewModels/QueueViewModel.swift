@@ -522,7 +522,14 @@ final class QueueViewModel: ObservableObject {
                 // siblings live here by design), then remove the dir only
                 // if nothing else is left. Protects against a sibling
                 // job's rip source accidentally living in the same dir.
-                Self.cleanupOwnedFilesAndRemoveDirIfEmpty(
+                // v3.11.6 + v4.0.1: defensive — remove the source dir
+                // only if it's empty *of foreign files*. v4.0.1 also
+                // scrubs known scrape-artifact extensions (jpg/nfo/png)
+                // that PublishService copied to NAS but left as
+                // duplicates in scratch — without this the user's
+                // scratch dir slowly fills up with stale poster.jpg /
+                // movie.nfo orphans.
+                SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(
                     dir: sourceDir,
                     ownedFiles: [jobs[index].organizedFile, jobs[index].rippedFile].compactMap { $0 }
                 )
