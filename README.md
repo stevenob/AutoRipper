@@ -1,68 +1,32 @@
 # AutoRipper 🎬
 
-Insert a disc. Click one button. Walk away.
+**Insert a disc. Click one button. Walk away.**
 
-AutoRipper is a native macOS app that automates DVD and Blu-ray ripping — scan, rip, encode, organize, scrape artwork, copy to NAS, and eject. All hands-free.
+A native macOS app that automates the entire DVD / Blu-ray → Plex pipeline: scan, rip, encode, organize, scrape artwork, publish to NAS, eject — then poll for the next disc. Feed it a stack and walk away.
 
 Built with Swift and SwiftUI for macOS 14+.
 
-## What It Does
+---
 
-| | |
-|---|---|
-| ⚡ **Auto** | One toggle: insert disc → app rips, encodes, organizes, scrapes, uploads, ejects → polls for the next disc → repeat. Feed it a stack and walk away. |
-| ⏯️ **Auto-close tray** | Drop a disc on the open tray and walk away — app sends `drutil tray close` on scan/auto and during the auto-mode poll loop. No-op on drives without soft-close. |
-| 🎬 **Smart Detection** | Auto-detects DVD or Blu-ray, labels Main Feature / Alternate Cut / Alt Audio / Episode / Bonus Feature / Featurette / Extra / Trailer based on runtime + size structure |
-| 🎯 **Per-Title Intent** | Mark each title as Movie / Episode / Edition / Extra — collections, double features, and director's cuts all handled correctly |
-| 🎞️ **Editions** | Theatrical / Unrated / Director's Cut / Extended / Final Cut → Plex/Jellyfin `{edition-X}` filenames in a shared movie folder |
-| 🔍 **TMDb Lookup** | Identifies each title independently — collection discs (Saw 1+2+3) get per-title TMDb search |
-| 🎚️ **H.265 Encoding** | Auto-selects preset by resolution with Apple VideoToolbox HW acceleration. Disk-space pre-flight check. |
-| 🔊 **All Tracks** | Keeps all audio + subtitle tracks (soft/passthrough, never burned in) |
-| 📂 **Auto-Organize** | Movies → `Movie (Year)/Movie (Year).mkv`. Editions share the parent folder. |
-| 📋 **Persistent Queue + History** | Survives restarts, mid-flight jobs auto-recover as failed, retry with one click |
-| 🔬 **Per-Job Logs** | HandBrake stdout/stderr captured per job; tap any row to expand and diagnose failures |
-| 💬 **Discord** | Live-updating job card per title + notifications |
-| 💾 **NAS Upload** | Copies to NAS, cleans up local files |
-| 📺 **Library refresh** | Optional Plex / Jellyfin webhooks fired after publish so newly ripped media shows up in clients within seconds, not minutes |
-| 🔁 **Duplicate detection** | Each scanned disc is fingerprinted (title structure + sizes); re-inserting a previously-ripped disc surfaces an "Already ripped on \<date\>" banner |
-| ⛔ **Auto-skip duplicates** | In Auto mode, already-ripped discs eject without re-ripping — prevents the auto-eject + drive-auto-close re-rip loop on motorized-tray drives |
-| 🚥 **Phase-aware rip startup** | Real-time status during the 20–60 s `makemkvcon mkv` startup gap (drive auth → reading structure → preparing title → ripping) so the UI doesn't look frozen |
-| 🚧 **Rip Scratch Dir** | Optional local-SSD scratch dir for slow-NAS setups — keeps bandwidth-hungry rips off the network |
-| 🔔 **Notifications** | macOS + Discord alerts for scan, rip, and failures |
-| 🔄 **Update Checker** | Checks GitHub Releases on launch |
+## Highlights
 
-## How It Works
+- **Auto mode** — one toggle, ripping continues disc-after-disc until you stop it
+- **TV-on-disc done right** — matches each disc title to its TMDb episode by runtime, lands as `Show/Season 01/Show - S01E01.mkv` (Plex/Jellyfin convention) without manual mapping
+- **Drive health diagnostics** — separates drive-side I/O errors from disc-side corruption events, detects offset-clustering across multiple discs to call out a failing drive automatically
+- **Bulk re-rip workflow** — mark damaged discs for re-rip, clean them, re-insert; AutoRipper bypasses the duplicate-detection banner once per marked disc
+- **Per-disc rules** — match on disc name / type, override preset / intent / drive speed
+- **Cleaning guide** built into Settings with concrete disc + lens steps
+- **Local-encode pipeline** — encode/organize/scrape all on a local SSD scratch dir, then a single verified copy to NAS at the end (avoids saturating slow Wi-Fi / SMB with the bandwidth-hungry rip stage)
+- **Track selection** — per-title audio + subtitle checkboxes feed directly to HandBrake's `--audio` / `--subtitle` filters
+- **Library refresh** — Plex / Jellyfin webhooks fired after publish so new media shows up in seconds
 
-```
-Insert Disc → App detects DVD/Blu-ray
-                    │
-        ┌── Auto ON ─────→ Scan → Rip selected titles
-        │                       → Per-title: encode → organize → scrape → publish to NAS
-        │                       → Eject + notify
-        │                       → Poll for next disc → repeat
-        │
-        └── Auto OFF ────→ Scan → Tag intent per title → Rip
-```
-
-**v3.6.0 — Local-encode pipeline.** When `Rip Scratch Dir` is configured, encode/organize/scrape all run on local SSD and a single move/copy publishes the finished folder to the NAS at the end. Pre-flight free-space check (`2× source + 1 GB safety`) fails the job up-front if local SSD is too small. Same-volume publishes are server-side renames (instant); cross-volume publishes use byte-verified chunked copy that **preserves the local source** until the swap completes.
-
-### Auto-Selected Presets
-
-| Disc | Preset |
-|------|--------|
-| DVD 480p | H.265 MKV 480p30 |
-| DVD PAL 576p | H.265 MKV 576p25 |
-| Blu-ray 720p | H.265 MKV 720p30 |
-| Blu-ray 1080p | H.265 Apple VideoToolbox 1080p ⚡ |
-| 4K UHD 2160p | H.265 Apple VideoToolbox 2160p 4K ⚡ |
-
-Preset names are validated against `HandBrakeCLI --preset-list` before encoding starts.
+---
 
 ## Install
 
 1. Download **AutoRipper-Installer.dmg** from the [latest release](https://github.com/stevenob/AutoRipper/releases/latest)
 2. Drag **AutoRipper** to **Applications**
-3. First launch: right-click → **Open**
+3. First launch: right-click → **Open** (Gatekeeper warning, current builds are dev-signed not notarized — see [Updates/SPARKLE.md](Updates/SPARKLE.md) for the v4.0 notarization roadmap)
 
 ### Dependencies
 
@@ -76,132 +40,240 @@ brew install handbrake
 
 Open **Settings** (⌘,):
 
-1. Enter your **TMDb API key** ([free](https://www.themoviedb.org/settings/api))
-2. Verify **MakeMKV** and **HandBrake CLI** paths
-3. Set **output directory**
-4. Optionally set a **Rip Scratch Dir** (recommended when output lives on a slow NAS — see below)
-5. Optionally add **Discord webhook** and **NAS paths**
+1. **General** — output directory, optional **Rip Scratch Dir** (recommended for slow-NAS setups)
+2. **Tools** — verify MakeMKV + HandBrake CLI paths (Auto-detect button), optional custom HandBrake preset JSON import
+3. **TMDb** — paste your [free API key](https://www.themoviedb.org/settings/api)
+4. **NAS** — movies + TV paths, optional extras-to-NAS toggle
+5. **Library** (optional) — Plex / Jellyfin auto-refresh webhooks
+6. **Discord** (optional) — live job cards + failure alerts
 
-Settings save instantly.
+Settings save instantly. **Settings → Advanced** has full export / import to JSON for backing up your config or migrating to a new Mac.
 
-### Library refresh (Plex / Jellyfin)
-
-After every successful publish, AutoRipper can ping Plex or Jellyfin to immediately scan for the new file — saves the wait for the periodic library sweep.
-
-Settings → **Library** pane:
-
-**Plex**
-- URL — e.g., `http://192.168.1.10:32400`
-- X-Plex-Token — find in Plex Web → Settings → "View XML" of any item
-- Movies / TV Section IDs — open Settings → Manage → Libraries; the URL reads `?source=N`
-
-**Jellyfin**
-- URL — e.g., `http://192.168.1.10:8096`
-- API Key — Dashboard → API Keys → Generate
-
-Both have **Test refresh** buttons. Empty URLs are silently no-op'd; failures are logged but never block a successful publish.
-
-### Rip Scratch Dir (slow-NAS workaround) + Local-encode pipeline (v3.6.0)
-
-When **Output Directory** lives on a NAS / network share, the raw rip step can be bottlenecked by the network. MakeMKV reads Blu-rays at ~50–70 MB/s and 4K UHD even faster — beyond what a typical Wi-Fi-backed SMB share can absorb, triggering MakeMKV's `MSG:2008` "writes too slow" warnings and throttling.
-
-Setting **Rip Scratch Dir** to a fast local directory (e.g., `~/Movies/RipScratch` or an external SSD) decouples the bandwidth-hungry rip from the network. **As of v3.6.0 the entire pipeline runs locally** when scratch is configured: rip → encode → organize → scrape all happen on local SSD, then a single move/copy publishes the finished folder to the NAS library at the end. Pre-flight free-space check (`2× source + 1 GB safety`) fails the job up-front if local SSD is too small.
-
-Recommended layout for NAS-backed setups:
-
-| Setting | Example | Role |
-|---|---|---|
-| `Rip Scratch Dir` | `/Volumes/RipSSD` (1 TB external M.2) | Local SSD — entire post-rip pipeline runs here |
-| `Output Directory` | `~/Desktop/Ripped` (or any local) | Default landing for rips when scratch is empty |
-| `NAS Movies Path` | `/Volumes/ServerShare/Movies` | NAS library — final published location |
-| `NAS TV Path` | `/Volumes/ServerShare/TV` | NAS TV library |
-
-Leave `Rip Scratch Dir` empty to keep the legacy behavior (rip writes directly to `Output Directory` and pipeline runs in place).
+---
 
 ## Usage
 
-### Auto
+### Auto mode (the headline feature)
 
-1. Insert disc — app detects type and name
-2. Check **☑ Auto**, set **Skip under** duration
-3. Click the big button
-4. Walk away. The app rips → stages → encodes → organizes → scrapes → uploads → ejects, then polls for the next disc and does it all again. Click **Abort** to stop the loop.
+1. Insert disc — app detects type + name + tray-closes the drive
+2. Check **☑ Auto**
+3. Click **Scan & Auto-Rip**
+4. Walk away. AutoRipper rips → encodes → organizes → scrapes artwork → publishes to NAS → ejects → polls for the next disc and does it all again
 
-### Manual: collections, editions, double features
+For TV-on-disc, Auto mode picks every clustered-runtime title and auto-numbers them by TMDb episode runtime (see TV story below).
+
+### Manual mode (collections, editions, double features)
 
 1. Uncheck Auto
-2. Click **Scan DVD** / **Scan Blu-ray**
-3. For each title, set the **Intent** column:
-   - **Movie** — type a search override in the inline field if it's a different movie than the disc name (collection discs)
-   - **Edition** — pick the edition label (Theatrical / Unrated / Director's Cut / Extended / Final Cut). All editions of the same movie share one folder.
-   - **Episode** — current placeholder; full TV support coming in v3.1
-   - **Extra** — keeps raw rip, skips encode/organize/scrape
-4. Click **Rip & Encode**
+2. Click **Scan**
+3. Per title, set the **Intent** column:
+   - **Movie** — type a search override if it's a different movie than the disc name (collection discs like *Saw 1+2+3*)
+   - **Edition** — pick the label (Theatrical / Unrated / Director's Cut / Extended / Final Cut). All editions of the same movie share one folder via Plex/Jellyfin `{edition-X}` tags
+   - **Episode** — pick the season / episode via TV picker (or let TMDb runtime-matching do it for you)
+   - **Extra** — keeps raw rip; published to `<Movie or Show>/extras/` on NAS
+4. Per title, optionally untick individual audio / subtitle tracks under the **Tracks** section
+5. Click **Rip & Encode**
 
-### Queue & History
+### Auto-selected presets
+
+| Disc | Default Preset |
+|------|----------------|
+| DVD 480p | H.265 MKV 480p30 |
+| DVD PAL 576p | H.265 MKV 576p25 |
+| Blu-ray 720p / 1080p | H.265 Apple VideoToolbox 1080p ⚡ |
+| 4K UHD 2160p | H.265 Apple VideoToolbox 2160p 4K ⚡ |
+
+**Custom presets** (Settings → Tools): export from HandBrake.app, import the JSON, AutoRipper passes `--preset-import-file` to every encode. The custom presets show up in the preset picker alongside the built-ins.
+
+---
+
+## Drive Health story
+
+Insert enough damaged discs (or an aging drive) and you'll start seeing MakeMKV errors. AutoRipper splits them into two categories so you can diagnose drive vs disc:
+
+| Category | MakeMKV codes | What it means |
+|---|---|---|
+| **Read errors** (drive-side) | `MSG:2003` | Laser couldn't read sectors. Slow down drive speed, clean lens, replace drive. |
+| **Corruption events** (disc-side) | `MSG:2002`, `MSG:2017`, `MSG:2018` | Data read but failed validation. Clean disc, replace disc. |
+
+### What AutoRipper does with that data
+
+1. **Per-rip pills** in the disc panel — `⚠ 3 read errors` / `✕ 5 corrupt` capsules appear in real-time during a rip
+2. **Auto-suggest slower drive speed** when read errors cross a threshold (5), with one-click action button
+3. **Per-disc History detail** preserves the counts + the actual byte offsets where errors fired
+4. **Settings → Drive Health** aggregates everything across your full History into a single verdict (`healthy` / `someIssues` / `driveSuspect` / `insufficientData`)
+5. **Offset clustering finding** — if errors on **multiple different discs** all happen at similar byte offsets, AutoRipper surfaces a red `Errors cluster at ~X GB` card explaining this is strong evidence of a drive laser-tracking fault at that radial position
+6. **Main window header badge** mirrors the verdict so you don't have to drill into Settings
+7. **Settings → Cleaning** has a built-in step-by-step guide for cleaning discs (microfiber + isopropyl, radial wipe) and the drive lens (commercial lens-cleaning disc)
+
+### Re-rip workflow
+
+When a disc has known errors:
+
+1. Open **History** detail for the problem disc → **Mark for re-rip** (or **Drive Health → Mark all affected discs**)
+2. Clean the disc physically
+3. Re-insert. AutoRipper suppresses the "Already ripped" banner once, re-rips cleanly, then resumes normal duplicate-detection behavior
+
+---
+
+## TV-on-disc → Plex layout
+
+Discs don't contain standardized season / episode info, but TMDb does. AutoRipper uses it:
+
+1. Disc scan auto-categorizes clustered-runtime titles (18–90 min, 3+ of them) as `.episode`
+2. After TMDb resolves the show, AutoRipper fetches the season's episode list **with runtimes**
+3. `TVEpisodeMatcher` greedy-pairs each disc title to its closest-duration episode (within 4 min tolerance)
+4. Unmatched disc titles auto-demote to `.extra` so they ride the extras-to-NAS path instead of colliding with real episodes
+5. Final NAS layout (Plex/Jellyfin convention):
+
+```
+<NAS TV path>/<Show Title>/
+├── Season 01/
+│   ├── <Show> - S01E01.mkv
+│   ├── <Show> - S01E02.mkv
+│   └── ...
+└── extras/
+    ├── <Show> - extra-1.mkv
+    └── ...
+```
+
+Movies follow the same convention: `<Movie Title> (Year)/<Movie Title> (Year).mkv` with editions sharing the parent folder via the `{edition-X}` filename tag. Extras land at `<Movie Title> (Year)/extras/...`.
+
+---
+
+## Per-disc rules
+
+**Settings → Rules** lets you define overrides triggered by disc context. Each rule combines optional match constraints (ANDed) with optional actions (applied):
+
+| Match on | Override |
+|---|---|
+| Disc name contains `<string>` | HandBrake preset |
+| Media type (movie / TV) | Title intent (movie / episode / edition / extra) |
+| Disc type (DVD / Blu-ray) | MakeMKV drive read speed |
+
+Order = priority. Two-pane editor with drag-to-reorder.
+
+Example: a rule with `nameContains: "anime"`, `discTypeFilter: "bluray"`, preset override `H.265 MKV 1080p30 Anime` will fire on every anime BD scan and use your custom anime preset automatically.
+
+---
+
+## Local-encode pipeline + slow-NAS setups
+
+MakeMKV reads Blu-rays at ~50–70 MB/s, 4K UHD faster — beyond what most Wi-Fi-backed SMB shares can absorb. Triggers MakeMKV's `MSG:2008` "writes too slow" warnings.
+
+Set **Rip Scratch Dir** to a local SSD path and the entire pipeline (rip → encode → organize → scrape) runs locally. A single verified copy publishes the finished folder to NAS at the end. Pre-flight free-space check refuses the job if local SSD doesn't have `2× source + 1 GB` headroom.
+
+Same-volume publishes are server-side renames (instant); cross-volume publishes use byte-verified chunked copy that **preserves the local source** until the final swap completes — crash-safe.
+
+Recommended layout:
+
+| Setting | Example | Role |
+|---|---|---|
+| `Rip Scratch Dir` | `/Volumes/RipSSD` | Local SSD — entire pipeline runs here |
+| `Output Directory` | `~/Desktop/Ripped` | Default landing when scratch is empty |
+| `NAS Movies Path` | `/Volumes/ServerShare/Movies` | Final published location |
+| `NAS TV Path` | `/Volumes/ServerShare/TV Shows` | TV library |
+
+---
+
+## Queue + History
 
 The sidebar has three tabs:
 
 - **Disc** — scan and rip
-- **Queue** — live progress per job, tap to expand HandBrake log, retry failed jobs
-- **History** — searchable past jobs, filter by status, reveal in Finder, remove from history
+- **Queue** — live progress per job, tap to expand pipeline status + HandBrake log, retry failed jobs
+- **History** — searchable past jobs, filter by status, reveal in Finder, mark-for-re-rip, remove from history
 
-History retention is configurable (default 30 days).
+History retention is configurable (Settings → History; default 30 days). All state survives restarts via atomic JSON writes; in-flight jobs auto-recover as failed on next launch so you can retry.
 
-### Keyboard Shortcuts
+---
+
+## Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
 | ⌘R | Rip |
 | ⌘D | Eject |
-| ⌘. | Abort (also exits Batch Mode) |
+| ⌘. | Abort (also exits Auto mode) |
 | ⌘, | Settings |
 | ⇧⌘O | Open Ripped folder |
+
+---
 
 ## Logs
 
 Persistent log: `~/Library/Logs/AutoRipper/autoripper.log` (rotates at 5 MB).
 
-Per-job logs are also captured into the queue/history rows — tap to expand.
+Per-job logs are also captured into the queue / history rows — tap to expand.
 
-## Build from Source
+---
+
+## Build from source
 
 ```bash
 git clone https://github.com/stevenob/AutoRipper.git
 cd AutoRipper
 bash build-swift.sh
-# Tests → release build → sign → DMG → GitHub release
+# Runs tests → release build → sign → DMG → GitHub release
 ```
+
+Requires Xcode command-line tools + Apple Development cert in keychain. See [Updates/SPARKLE.md](Updates/SPARKLE.md) for the Sparkle + notarization migration plan.
+
+---
 
 ## Architecture
 
 ```
 AutoRipperSwift/AutoRipper/
 ├── AutoRipperApp.swift      App entry, quit-on-close, menu
-├── Models/                  AppConfig, DiscInfo, Job (Codable, intent + edition),
-│                            JobIntent, MediaResult, InFlightRip (crash-recovery state)
-├── Services/                MakeMKV, HandBrake (preset validate, disk-space pre-flight,
-│                            stderr-tail on failure), TMDb, Discord, Artwork,
-│                            Organizer ({edition-X} naming), Notifications,
-│                            ProcessTracker, UpdateService, FileLogger, JobStore,
-│                            StagingService (copy+verify cross-volume transfer)
-├── ViewModels/              RipViewModel (per-title intents, batch mode, scratch->output staging),
-│                            QueueViewModel (persistent, retry, per-job logs)
-└── Views/                   ContentView (NavigationSplitView sidebar),
-                             QueueView, HistoryView, SettingsView
+├── Models/                  AppConfig, DiscInfo (incl. DiscAudioTrack /
+│                            DiscSubtitleTrack), Job (Codable), JobIntent,
+│                            MediaResult, EpisodeInfo, DiscRule,
+│                            InFlightRip (crash-recovery state)
+├── Services/                MakeMKV, HandBrake, TMDb, Artwork, Organizer
+│                            ({edition-X} naming), Discord, Notifications,
+│                            ProcessTracker, UpdateService, FileLogger,
+│                            JobStore, StagingService, PublishService
+│                            (sibling-preserving per-file publish),
+│                            ScratchReservationService (concurrency-safe
+│                            disk-space ledger), MakeMKVConfigService
+│                            (drive-speed persistence), RippedDiscRegistry
+│                            (fingerprint dedup), LibraryNotifierService
+│                            (Plex/Jellyfin webhooks), SafeFSCleanup
+│                            (ownership-aware scratch teardown),
+│                            DriveHealthAnalyzer, TVEpisodeMatcher,
+│                            DiscFingerprintService
+├── ViewModels/              RipViewModel (per-title intents + tracks,
+│                            auto-episode numbering, scan→stage→encode),
+│                            QueueViewModel (persistent queue, retry,
+│                            per-job logs, per-disc workspace isolation)
+└── Views/                   ContentView (NavigationSplitView sidebar,
+                             Drive Health badge), DiscInfoColumn (scan
+                             health banner, track checkboxes), QueueView,
+                             SettingsView (10 tabs), CleaningGuideView,
+                             RulesPane, TVEpisodePicker
 ```
 
-State persistence: `~/Library/Application Support/AutoRipper/jobs.json` (atomic writes on every change).
+State persistence: `~/Library/Application Support/AutoRipper/jobs.json` (atomic writes on every change). User preferences in standard `UserDefaults` under suite `group.com.autoripper`. Custom presets, rules, and re-rip queue all round-trip through the JSON settings export.
+
+300+ unit tests cover the pure logic — parsers, analyzers, file-system safety helpers, rule matching.
+
+---
 
 ## Requirements
 
-- macOS 14+ (Apple Silicon recommended)
+- macOS 14+ (Apple Silicon recommended; Apple VideoToolbox HW acceleration is a meaningful win)
 - [MakeMKV](https://www.makemkv.com/) + [HandBrake CLI](https://handbrake.fr/)
 - [TMDb API key](https://www.themoviedb.org/settings/api) (free)
+- Optional: NAS for library publish, Plex / Jellyfin for auto-refresh, Discord for job cards
+
+---
 
 ## Roadmap
 
-- **v3.1** — Real TV series support (show/season/episode picker, episode-level TMDb), Sparkle in-app updates, generic outbound webhooks, disc fingerprinting for duplicate detection.
+See [Updates/SPARKLE.md](Updates/SPARKLE.md) for the deferred Sparkle + Apple notarization work. The current `UpdateService.swift` ships updates reliably until that lands.
+
+Other candidates: multi-drive support (parallel rip queues), full HandBrake preset GUI editor.
 
 ## License
 
