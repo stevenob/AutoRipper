@@ -273,38 +273,100 @@ final class RipViewModel: ObservableObject {
         }
     }
 
-    /// v4.0.2: walk titles, find .episode-categorized ones, assign
-    /// sequential S01EXX numbers by disc title order, and mark intent
-    /// as .episode. The user can override per-title via TVEpisodePicker
-    /// before clicking Rip.
+    /// v4.0.2 + v4.0.4: walk titles, find .episode-categorized ones,
+    /// assign sequential SxxExx numbers by disc title order, mark
+    /// intent as .episode. The user can override per-title via
+    /// TVEpisodePicker before clicking Rip.
     ///
-    /// Why this is needed: the QueueViewModel's TV publish path falls
-    /// back to `seasonNumber ?? 1, episodeNumber ?? 1` per title.
-    /// Without explicit assignments, all titles produce
-    /// `Show - S01E01.mkv` and trample each other at publish — leaving
-    /// only the last one on NAS. This bug was visible on the Mortal
-    /// Kombat Legacy 16-episode disc that the user reported.
+    /// v4.0.4 enhancement: when the TMDb media result is a TV show,
+    /// fetch the season episode list and use TVEpisodeMatcher to pair
+    /// each disc title to its closest-runtime episode. Hugely better
+    /// than naive sequential numbering when the disc interleaves
+    /// extras/featurettes between episodes (very common — see the
+    /// Mortal Kombat Legacy disc that prompted v4.0.4: 16 disc
+    /// titles, 9 actual episodes, extras scattered throughout).
+    ///
+    /// Falls back to the v4.0.2 sequential-by-title-order behavior
+    /// when:
+    ///   * No TMDb match was found
+    ///   * Match is for a movie, not TV
+    ///   * Episode list is empty or has no runtime metadata
+    ///   * Matcher couldn't pair any disc title to an episode
+    ///     (all deltas > maxDeltaSeconds)
     private func autoAssignTvEpisodeNumbers(from info: DiscInfo) {
         let episodeTitles = info.titles.filter { $0.category == .episode }
         guard !episodeTitles.isEmpty else { return }
-        // Number sequentially by disc title order (= sorted title id),
-        // matching the order MakeMKV reports them which is also the
-        // order they're physically pressed on the disc — for most TV
-        // discs this matches the broadcast / streaming episode order.
+
+        // v4.0.4: try TMDb-runtime matching first.
+        if let media = cachedMediaResult, media.mediaType == "tv" {
+            let season = 1  // disc-detected season default; user can override
+            // We need an async API but this function is sync. Spin a
+            // Task to fetch the episode list, then come back to MainActor
+            // to apply. Keep the sequential fallback in the meantime so
+            // the UI doesn't show "no assignments" while the TMDb call
+            // is in flight.
+            applySequentialAssignment(episodeTitles: episodeTitles, info: info)
+            Task { [weak self] in
+                guard let self else { return }
+                let tmdb = TMDbService(config: config)
+                let episodes = await tmdb.getSeasonEpisodes(tvId: media.tmdbId, season: season)
+                guard !episodes.isEmpty else { return }
+                await MainActor.run {
+                    self.applyRuntimeMatchedAssignment(
+                        episodeTitles: info.titles.filter { $0.category == .episode },
+                        episodes: episodes
+                    )
+                }
+            }
+            return
+        }
+
+        // No TMDb TV match — fall back to sequential.
+        applySequentialAssignment(episodeTitles: episodeTitles, info: info)
+    }
+
+    /// v4.0.2 sequential fallback: number disc titles by title id order.
+    private func applySequentialAssignment(episodeTitles: [TitleInfo], info: DiscInfo) {
         let sorted = episodeTitles.sorted { $0.id < $1.id }
         for (idx, title) in sorted.enumerated() {
-            // Skip if user / earlier rule already set an explicit
-            // assignment for this title — respect their override.
             guard titleEpisodeAssignments[title.id] == nil else { continue }
             titleEpisodeAssignments[title.id] = TitleEpisodeAssignment(
                 season: 1,
                 episode: idx + 1,
-                title: ""  // TMDb episode name lookup deferred to TVEpisodePicker
+                title: ""
             )
             titleIntents[title.id] = .episode
         }
         FileLogger.shared.info("rip-vm",
-            "auto-assigned S01E01..\(sorted.count) for \(sorted.count) episode-categorized titles")
+            "sequential-assigned S01E01..\(sorted.count) for \(sorted.count) episode-categorized titles")
+    }
+
+    /// v4.0.4 runtime-matched assignment: replace any existing
+    /// assignments with TMDb-runtime-closest pairings. Disc titles
+    /// that didn't find a match within the matcher's tolerance keep
+    /// their sequential fallback (so they still flow through the TV
+    /// publish pipeline rather than silently disappearing).
+    private func applyRuntimeMatchedAssignment(episodeTitles: [TitleInfo], episodes: [EpisodeInfo]) {
+        let matches = TVEpisodeMatcher.match(titles: episodeTitles, episodes: episodes)
+        guard !matches.isEmpty else { return }
+        for match in matches {
+            titleEpisodeAssignments[match.discTitleId] = TitleEpisodeAssignment(
+                season: match.episode.seasonNumber,
+                episode: match.episode.episodeNumber,
+                title: match.episode.name
+            )
+            titleIntents[match.discTitleId] = .episode
+        }
+        // Disc titles NOT matched: demote intent from .episode to .extra
+        // so they get extras-to-NAS treatment (v4.0.3) instead of being
+        // queued as a phantom episode that collides with a real one.
+        let matchedTitleIds = Set(matches.map { $0.discTitleId })
+        for title in episodeTitles where !matchedTitleIds.contains(title.id) {
+            titleEpisodeAssignments.removeValue(forKey: title.id)
+            titleIntents[title.id] = .extra
+        }
+        FileLogger.shared.info("rip-vm",
+            "runtime-matched \(matches.count) of \(episodeTitles.count) episode titles via TMDb (avg Δ = \(matches.map(\.deltaSeconds).reduce(0, +) / max(matches.count, 1))s); \(episodeTitles.count - matches.count) unmatched -> .extra")
     }
 
     /// v3.14.0: apply the first matching `DiscRule` from `AppConfig`

@@ -212,7 +212,8 @@ struct TMDbService {
                 EpisodeInfo(
                     seasonNumber: ep.seasonNumber ?? season,
                     episodeNumber: ep.episodeNumber ?? 0,
-                    name: ep.name ?? ""
+                    name: ep.name ?? "",
+                    runtimeMinutes: ep.runtime
                 )
             }
             TMDbCache.shared.storeEpisodes(tvId: tvId, season: season, eps)
@@ -291,9 +292,13 @@ private struct TMDbEpisodeItem: Codable {
     let seasonNumber: Int?
     let episodeNumber: Int?
     let name: String?
+    /// v4.0.4: TMDb provides runtime in minutes. Optional because some
+    /// older shows have null runtime metadata.
+    let runtime: Int?
 
     enum CodingKeys: String, CodingKey {
         case name
+        case runtime
         case seasonNumber = "season_number"
         case episodeNumber = "episode_number"
     }

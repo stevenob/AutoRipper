@@ -367,6 +367,177 @@ final class TrackOrdinalMappingTests: XCTestCase {
     }
 }
 
+// MARK: - TVEpisodeMatcher (v4.0.4)
+
+final class TVEpisodeMatcherTests: XCTestCase {
+
+    private func makeTitle(id: Int, durationSeconds: Int) -> TitleInfo {
+        var t = TitleInfo(id: id, name: "Title \(id)",
+                          duration: String(format: "0:%02d:%02d", durationSeconds / 60, durationSeconds % 60),
+                          sizeBytes: 1_000_000_000,
+                          chapters: 1, fileOutput: "")
+        t.category = .episode
+        return t
+    }
+
+    private func makeEp(_ ep: Int, runtimeMin: Int?) -> EpisodeInfo {
+        EpisodeInfo(seasonNumber: 1, episodeNumber: ep,
+                    name: "Episode \(ep)", runtimeMinutes: runtimeMin)
+    }
+
+    func testEmptyInputs() {
+        XCTAssertTrue(TVEpisodeMatcher.match(titles: [], episodes: []).isEmpty)
+        XCTAssertTrue(TVEpisodeMatcher.match(
+            titles: [makeTitle(id: 0, durationSeconds: 600)],
+            episodes: []
+        ).isEmpty)
+        XCTAssertTrue(TVEpisodeMatcher.match(
+            titles: [],
+            episodes: [makeEp(1, runtimeMin: 10)]
+        ).isEmpty)
+    }
+
+    func testIgnoresEpisodesWithoutRuntime() {
+        // TMDb sometimes returns null runtime. Skip those rather than
+        // pairing them by zero-runtime nonsense.
+        let title = makeTitle(id: 0, durationSeconds: 600)
+        let result = TVEpisodeMatcher.match(
+            titles: [title],
+            episodes: [makeEp(1, runtimeMin: nil)]
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testIgnoresNonEpisodeTitles() {
+        // Only .episode-categorized titles play (the matcher trusts
+        // DiscInfo.autoLabel did the filtering of menus/trailers).
+        var nonEp = makeTitle(id: 0, durationSeconds: 600)
+        nonEp.category = .trailer
+        let result = TVEpisodeMatcher.match(
+            titles: [nonEp],
+            episodes: [makeEp(1, runtimeMin: 10)]
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testMatchesClosestDurationGreedily() {
+        // The Mortal Kombat Legacy scenario in miniature: 5 disc
+        // titles with 2 extras mixed in. TMDb has 3 episodes.
+        let titles = [
+            makeTitle(id: 0, durationSeconds: 11 * 60),  // matches E01 (11 min)
+            makeTitle(id: 1, durationSeconds: 25 * 60),  // extra (way too long for any ep)
+            makeTitle(id: 2, durationSeconds: 9 * 60),   // matches E02 (9 min)
+            makeTitle(id: 3, durationSeconds: 30 * 60),  // extra (way too long)
+            makeTitle(id: 4, durationSeconds: 10 * 60),  // matches E03 (10 min)
+        ]
+        let episodes = [
+            makeEp(1, runtimeMin: 11),
+            makeEp(2, runtimeMin: 9),
+            makeEp(3, runtimeMin: 10),
+        ]
+        let matches = TVEpisodeMatcher.match(titles: titles, episodes: episodes)
+        XCTAssertEqual(matches.count, 3, "all 3 episodes should match a disc title")
+        let map = Dictionary(uniqueKeysWithValues: matches.map { ($0.episode.episodeNumber, $0.discTitleId) })
+        XCTAssertEqual(map[1], 0)
+        XCTAssertEqual(map[2], 2)
+        XCTAssertEqual(map[3], 4)
+        // The extras (titles 1 and 3) should NOT be in the result.
+        XCTAssertFalse(matches.contains(where: { $0.discTitleId == 1 }))
+        XCTAssertFalse(matches.contains(where: { $0.discTitleId == 3 }))
+    }
+
+    func testRejectsMatchesBeyondToleranceWindow() {
+        // 22-min episode vs 30-min title → 8 min delta > 4 min tolerance
+        // → no match.
+        let title = makeTitle(id: 0, durationSeconds: 30 * 60)
+        let result = TVEpisodeMatcher.match(
+            titles: [title],
+            episodes: [makeEp(1, runtimeMin: 22)]
+        )
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testEachEpisodeMatchedOnce() {
+        // Two disc titles equally close to E01 → only the first
+        // (smallest title id given equal delta) wins. The other
+        // title goes unmatched.
+        let titles = [
+            makeTitle(id: 0, durationSeconds: 10 * 60),
+            makeTitle(id: 1, durationSeconds: 10 * 60),
+        ]
+        let result = TVEpisodeMatcher.match(
+            titles: titles,
+            episodes: [makeEp(1, runtimeMin: 10)]
+        )
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.episode.episodeNumber, 1)
+    }
+
+    func testTieBreakerPrefersLowerEpisodeNumber() {
+        // One title equidistant from E03 and E07. With delta tied,
+        // prefer the lower episode number.
+        let title = makeTitle(id: 0, durationSeconds: 10 * 60)
+        let result = TVEpisodeMatcher.match(
+            titles: [title],
+            episodes: [makeEp(7, runtimeMin: 10), makeEp(3, runtimeMin: 10)]
+        )
+        XCTAssertEqual(result.first?.episode.episodeNumber, 3)
+    }
+
+    func testMortalKombatLegacyShape() {
+        // Real-world fixture from the user's session. Disc has 11
+        // episode-candidate titles (size > 500 MB); TMDb S1 has 9
+        // episodes ranging 8:14 to 11:36. With TMDb's integer-minute
+        // runtimes, the matcher pairs 8 of 9 episodes — E07 at 8 min
+        // gets squeezed out because the two closest disc titles
+        // (t12 7:55 and t13 8:17) both go to closer-by-delta E02 /
+        // E06 first via greedy assignment. The user would see 8
+        // episodes correctly placed + 1 manually-fixable hole, which
+        // is dramatically better than v4.0.2's all-collide-on-E01
+        // behavior and accurate enough to ship.
+        let titles: [TitleInfo] = [
+            makeTitle(id: 1, durationSeconds: 10 * 60 + 33),   // ~E09 10:32
+            makeTitle(id: 3, durationSeconds: 9 * 60 + 9),     // ~E03/E04 9:00
+            makeTitle(id: 4, durationSeconds: 12 * 60 + 39),   // ~E01/E05 (within tol)
+            makeTitle(id: 6, durationSeconds: 11 * 60 + 41),   // ~E05 11:36
+            makeTitle(id: 7, durationSeconds: 15 * 60 + 34),   // EXTRA (out of tol)
+            makeTitle(id: 10, durationSeconds: 10 * 60 + 3),   // ~E08 10:01
+            makeTitle(id: 11, durationSeconds: 10 * 60 + 20),  // ~E09/E08
+            makeTitle(id: 12, durationSeconds: 7 * 60 + 55),   // ~E02 8:14
+            makeTitle(id: 13, durationSeconds: 8 * 60 + 17),   // ~E07 8:21
+            makeTitle(id: 14, durationSeconds: 9 * 60 + 2),    // ~E03/E04
+            makeTitle(id: 15, durationSeconds: 12 * 60 + 18),  // ~E01 11:24 (within tol)
+        ]
+        let episodes: [EpisodeInfo] = [
+            makeEp(1, runtimeMin: 11),
+            makeEp(2, runtimeMin: 8),
+            makeEp(3, runtimeMin: 9),
+            makeEp(4, runtimeMin: 9),
+            makeEp(5, runtimeMin: 11),
+            makeEp(6, runtimeMin: 8),
+            makeEp(7, runtimeMin: 8),
+            makeEp(8, runtimeMin: 10),
+            makeEp(9, runtimeMin: 10),
+        ]
+        let matches = TVEpisodeMatcher.match(titles: titles, episodes: episodes)
+        // 8 episodes get matched. One (E07) loses out to closer-delta
+        // candidates for E02 and E06 (all three are 8-min episodes
+        // and there are only 2 disc titles at ~8 min).
+        XCTAssertGreaterThanOrEqual(matches.count, 8,
+            "should match at least 8 of 9 episodes — got \(matches.count)")
+        // The 15:34 outlier MUST be unmatched (>4 min from any episode).
+        let matchedIds = Set(matches.map { $0.discTitleId })
+        XCTAssertFalse(matchedIds.contains(7),
+            "_t07 (15:34) too far from any episode")
+        // Sanity: every match should have a delta within tolerance.
+        for m in matches {
+            XCTAssertLessThanOrEqual(m.deltaSeconds,
+                                     TVEpisodeMatcher.maxDeltaSeconds,
+                                     "match \(m) exceeds tolerance")
+        }
+    }
+}
+
 // MARK: - DiscRule matching (v3.14.0)
 
 final class DiscRuleTests: XCTestCase {

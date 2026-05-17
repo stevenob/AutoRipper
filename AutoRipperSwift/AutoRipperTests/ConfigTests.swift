@@ -232,7 +232,7 @@ final class MediaResultExtendedTests: XCTestCase {
     }
 
     func testEpisodeInfoCodable() throws {
-        let original = EpisodeInfo(seasonNumber: 3, episodeNumber: 5, name: "Pilot")
+        let original = EpisodeInfo(seasonNumber: 3, episodeNumber: 5, name: "Pilot", runtimeMinutes: nil)
 
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(EpisodeInfo.self, from: data)
