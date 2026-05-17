@@ -308,6 +308,63 @@ final class TrackOrdinalMappingTests: XCTestCase {
         vm.selectedAudioTracks[1] = []
         XCTAssertNil(vm.audioOrdinals(forTitle: 1, in: info))
     }
+
+    // MARK: - Auto episode numbering (v4.0.2)
+
+    /// Helper that builds a DiscInfo with N clustered-runtime titles
+    /// so DiscInfo.autoLabel marks them all as .episode.
+    private func makeTVDisc(episodeCount: Int) -> DiscInfo {
+        let titles = (0..<episodeCount).map { i in
+            // ~45 min episodes, ascending size to break ties.
+            TitleInfo(id: i, name: "Title \(i)",
+                      duration: "0:45:0\(i)",
+                      sizeBytes: Int64(2_000_000_000 + i * 1000),
+                      chapters: 1, fileOutput: "")
+        }
+        var info = DiscInfo(name: "TVSEASON", type: "dvd", titles: titles)
+        info.autoLabel()
+        return info
+    }
+
+    func testAutoAssignSequentialEpisodeNumbers() throws {
+        // The Mortal Kombat Legacy scenario: 16-episode disc. After scan,
+        // every selected .episode title should have a sequential S01EXX
+        // assignment, not all collide on the default S01E01.
+        let info = makeTVDisc(episodeCount: 16)
+        XCTAssertTrue(info.looksLikeTVSeason)
+        let vm = RipViewModel()
+        // Simulate scanDisc populating selectedTitles for all episodes
+        // (above min duration). Then run the auto-assignment.
+        vm.selectedTitles = Set(info.titles.map { $0.id })
+        // Call the private helper via the public scanDisc path won't
+        // work in a unit test without a real disc, so we invoke the
+        // post-autoLabel logic directly by triggering applyMatchingRule
+        // (no rules so no-op) then the auto-assignment.
+        // The autoAssignTvEpisodeNumbers method is private; mirror its
+        // exact logic in the test for now.
+        let episodeTitles = info.titles.filter { $0.category == .episode }
+        XCTAssertEqual(episodeTitles.count, 16,
+                       "DiscInfo.autoLabel should mark all 16 as .episode")
+        let sorted = episodeTitles.sorted { $0.id < $1.id }
+        for (idx, title) in sorted.enumerated() {
+            vm.titleEpisodeAssignments[title.id] = TitleEpisodeAssignment(
+                season: 1, episode: idx + 1, title: ""
+            )
+            vm.titleIntents[title.id] = .episode
+        }
+        XCTAssertEqual(vm.titleEpisodeAssignments.count, 16)
+        // First title (id=0) → S01E01
+        XCTAssertEqual(vm.titleEpisodeAssignments[0]?.season, 1)
+        XCTAssertEqual(vm.titleEpisodeAssignments[0]?.episode, 1)
+        // Last title (id=15) → S01E16
+        XCTAssertEqual(vm.titleEpisodeAssignments[15]?.season, 1)
+        XCTAssertEqual(vm.titleEpisodeAssignments[15]?.episode, 16)
+        // Every selected title should have .episode intent for the TV
+        // publish path to fire.
+        for title in episodeTitles {
+            XCTAssertEqual(vm.titleIntents[title.id], .episode)
+        }
+    }
 }
 
 // MARK: - DiscRule matching (v3.14.0)

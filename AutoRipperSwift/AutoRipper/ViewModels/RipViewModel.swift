@@ -219,6 +219,40 @@ final class RipViewModel: ObservableObject {
         }
     }
 
+    /// v4.0.2: walk titles, find .episode-categorized ones, assign
+    /// sequential S01EXX numbers by disc title order, and mark intent
+    /// as .episode. The user can override per-title via TVEpisodePicker
+    /// before clicking Rip.
+    ///
+    /// Why this is needed: the QueueViewModel's TV publish path falls
+    /// back to `seasonNumber ?? 1, episodeNumber ?? 1` per title.
+    /// Without explicit assignments, all titles produce
+    /// `Show - S01E01.mkv` and trample each other at publish — leaving
+    /// only the last one on NAS. This bug was visible on the Mortal
+    /// Kombat Legacy 16-episode disc that the user reported.
+    private func autoAssignTvEpisodeNumbers(from info: DiscInfo) {
+        let episodeTitles = info.titles.filter { $0.category == .episode }
+        guard !episodeTitles.isEmpty else { return }
+        // Number sequentially by disc title order (= sorted title id),
+        // matching the order MakeMKV reports them which is also the
+        // order they're physically pressed on the disc — for most TV
+        // discs this matches the broadcast / streaming episode order.
+        let sorted = episodeTitles.sorted { $0.id < $1.id }
+        for (idx, title) in sorted.enumerated() {
+            // Skip if user / earlier rule already set an explicit
+            // assignment for this title — respect their override.
+            guard titleEpisodeAssignments[title.id] == nil else { continue }
+            titleEpisodeAssignments[title.id] = TitleEpisodeAssignment(
+                season: 1,
+                episode: idx + 1,
+                title: ""  // TMDb episode name lookup deferred to TVEpisodePicker
+            )
+            titleIntents[title.id] = .episode
+        }
+        FileLogger.shared.info("rip-vm",
+            "auto-assigned S01E01..\(sorted.count) for \(sorted.count) episode-categorized titles")
+    }
+
     /// v3.14.0: apply the first matching `DiscRule` from `AppConfig`
     /// to the just-scanned disc. Mutates RipViewModel + AppConfig
     /// state in place. No-op when no rule matches. Each action is
@@ -709,6 +743,8 @@ final class RipViewModel: ObservableObject {
         suggestLowerDriveSpeed = false  // v3.11.5
         corruptionEventCount = 0  // v3.11.7
         readErrorOffsets = []  // v3.11.12
+        titleEpisodeAssignments = [:]  // v4.0.2 — clear stale TV assignments
+        titleIntents = [:]  // v4.0.2 — clear stale intent overrides
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -748,6 +784,15 @@ final class RipViewModel: ObservableObject {
                 // of the default selection state. Pure logic — see
                 // `DiscRuleMatcher.firstMatch`.
                 applyMatchingRule(for: info)
+                // v4.0.2: when titles auto-categorized as .episode by
+                // DiscInfo.autoLabel, auto-assign sequential S01EXX
+                // episode numbers and mark them with .episode intent
+                // so they flow through the TV publish pipeline. Stops
+                // the all-titles-collide-on-S01E01 bug that left TV-on-
+                // disc rips (e.g. Mortal Kombat Legacy 16-episode disc)
+                // as bare _tNN.mkv files in scratch. The user can still
+                // override season/episode numbers via TVEpisodePicker.
+                autoAssignTvEpisodeNumbers(from: info)
                 // Check duplicate-rip registry. Compute fingerprint and look
                 // it up; surface the prior entry on the model so the UI can
                 // banner-warn the user.
@@ -1374,13 +1419,27 @@ final class RipViewModel: ObservableObject {
                     return
                 }
 
-                // Pick the largest title above min duration
-                let candidates = info.titles.filter { $0.durationSeconds >= config.minDuration }
-                guard let best = candidates.max(by: { $0.sizeBytes < $1.sizeBytes }) else {
-                    statusText = "No titles meet minimum duration"
-                    return
+                // v4.0.2: TV-on-disc handling. When autoLabel marked
+                // multiple titles as .episode (clustered runtimes in
+                // the 18-90 min window), select ALL of them and
+                // auto-assign sequential S01EXX numbers. Without this
+                // an Auto mode rip of a TV box-set disc only picked
+                // the single largest title — usually a behind-the-
+                // scenes featurette, not an actual episode.
+                let episodeTitles = info.titles.filter { $0.category == .episode }
+                if episodeTitles.count >= 3 {
+                    selectedTitles = Set(episodeTitles.map { $0.id })
+                    autoAssignTvEpisodeNumbers(from: info)
+                    statusText = "Auto: \(episodeTitles.count) episodes queued (S01E01-\(String(format: "%02d", episodeTitles.count)))"
+                } else {
+                    // Movie / extras disc — pick the largest title above min duration.
+                    let candidates = info.titles.filter { $0.durationSeconds >= config.minDuration }
+                    guard let best = candidates.max(by: { $0.sizeBytes < $1.sizeBytes }) else {
+                        statusText = "No titles meet minimum duration"
+                        return
+                    }
+                    selectedTitles = [best.id]
                 }
-                selectedTitles = [best.id]
 
                 // v3.11.2: opt-in "review before rip" pause. When enabled,
                 // Auto stops here and waits for the user to click the big
