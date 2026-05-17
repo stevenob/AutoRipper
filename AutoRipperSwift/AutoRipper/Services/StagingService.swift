@@ -452,6 +452,19 @@ actor StagingService {
     /// `copyDirectoryAndVerifyKeepingSource`. Stripped-down version of
     /// `copyAndVerify` without source-deletion so the public-facing single-file
     /// API keeps its existing destructive contract for the v3.4.6 staging path.
+    /// v4.0.3: same-file copy that keeps the source intact and verifies
+    /// the destination by size after writing. Used for one-shot
+    /// extras-to-NAS publishing. Internal (was private) so `RipViewModel`
+    /// can call it directly for the .extra title path without depending
+    /// on the directory-copy machinery built for the publish step.
+    func copyFileKeepingSource(
+        from source: URL,
+        to destination: URL,
+        progress: ((Int64) -> Void)? = nil
+    ) async throws {
+        try await copyOneFileKeepingSource(from: source, to: destination, progress: progress)
+    }
+
     private func copyOneFileKeepingSource(
         from source: URL,
         to destination: URL,

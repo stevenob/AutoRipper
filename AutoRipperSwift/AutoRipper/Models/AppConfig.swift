@@ -69,6 +69,15 @@ final class AppConfig: ObservableObject {
             }
         }
     }
+    /// v4.0.3: when on, .extra titles get copied to NAS under the
+    /// matching media folder's `extras/` subfolder (Plex convention)
+    /// in addition to the existing local-output staging. Without this
+    /// flag, extras live only on the user's local output drive and
+    /// never reach the library. Default ON so the user's library
+    /// captures everything they rip.
+    @Published var publishExtrasToNAS: Bool {
+        didSet { defaults.set(publishExtrasToNAS, forKey: "publishExtrasToNAS") }
+    }
     @Published var discordWebhook: String {
         didSet { defaults.set(discordWebhook, forKey: "discordWebhook") }
     }
@@ -226,6 +235,8 @@ final class AppConfig: ObservableObject {
         } else {
             self.discRules = []
         }
+        // v4.0.3: extras-to-NAS toggle. Default on for new installs.
+        self.publishExtrasToNAS = d.object(forKey: "publishExtrasToNAS") as? Bool ?? true
         self.discordWebhook = d.string(forKey: "discordWebhook") ?? ""
         self.nasMoviesPath = d.string(forKey: "nasMoviesPath") ?? ""
         self.nasTvPath = d.string(forKey: "nasTvPath") ?? ""

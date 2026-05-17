@@ -219,6 +219,60 @@ final class RipViewModel: ObservableObject {
         }
     }
 
+    /// v4.0.3: copy a freshly-staged .extra raw rip to the NAS extras
+    /// folder. Best-effort — failure is logged but doesn't fail the
+    /// rip (the file is still on local output, the user just has to
+    /// manually move it).
+    ///
+    /// Destination layout (Plex convention):
+    ///   * Movies: `<nasMoviesPath>/<Movie Title (Year)>/extras/<file>.mkv`
+    ///   * TV     : `<nasTvPath>/<Show Title>/extras/<file>.mkv`
+    ///
+    /// Falls back to `<nasPath>/<cleanDiscName>/extras/<file>.mkv`
+    /// when TMDb didn't resolve, so the file still lands SOMEWHERE
+    /// on NAS rather than getting stranded.
+    private func publishExtraToNAS(localFile: URL, info: DiscInfo) async {
+        let isTV = info.looksLikeTVSeason
+            || cachedMediaResult?.mediaType == "tv"
+        let nasBase = isTV ? config.nasTvPath : config.nasMoviesPath
+        guard !nasBase.isEmpty else {
+            FileLogger.shared.warn("rip-vm",
+                "extras-to-NAS: no \(isTV ? "TV" : "movies") NAS path configured, skipping")
+            return
+        }
+        // Folder name: prefer TMDb media title; fall back to cleaned
+        // disc name. Movies get `Title (Year)`; TV gets just the show name.
+        let folderName: String
+        if let media = cachedMediaResult {
+            if isTV {
+                folderName = OrganizerService.cleanFilename(media.title)
+            } else if let year = media.year, year > 0 {
+                folderName = "\(OrganizerService.cleanFilename(media.title)) (\(year))"
+            } else {
+                folderName = OrganizerService.cleanFilename(media.title)
+            }
+        } else {
+            folderName = OrganizerService.cleanFilename(
+                info.mediaTitle.isEmpty ? info.name : info.mediaTitle
+            )
+        }
+        let destDir = URL(fileURLWithPath: nasBase)
+            .appendingPathComponent(folderName)
+            .appendingPathComponent("extras")
+        let dest = destDir.appendingPathComponent(localFile.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: destDir, withIntermediateDirectories: true)
+            FileLogger.shared.info("rip-vm",
+                "extras-to-NAS: copying \(localFile.path) -> \(dest.path)")
+            try await stagingService.copyFileKeepingSource(from: localFile, to: dest)
+            FileLogger.shared.info("rip-vm",
+                "extras-to-NAS: done -> \(dest.path)")
+        } catch {
+            FileLogger.shared.error("rip-vm",
+                "extras-to-NAS: copy failed (\(error.localizedDescription)) — file remains on local at \(localFile.path)")
+        }
+    }
+
     /// v4.0.2: walk titles, find .episode-categorized ones, assign
     /// sequential S01EXX numbers by disc title order, and mark intent
     /// as .episode. The user can override per-title via TVEpisodePicker
@@ -1061,6 +1115,19 @@ final class RipViewModel: ObservableObject {
                         }
                     } else {
                         file = rippedFile
+                    }
+
+                    // v4.0.3: for .extra titles in Full Auto, ALSO copy the
+                    // staged raw rip to the NAS extras folder so it actually
+                    // makes it to the user's library. .extra bypasses the
+                    // encode/organize/publish pipeline by design (raw rip,
+                    // no transcoding), and pre-v4.0.3 the file just sat on
+                    // local output forever. The Plex convention is to put
+                    // extras under `<Movie or Show>/extras/` so we'll go
+                    // there.
+                    if fullAutoEnabled, titleIntent == .extra,
+                       config.publishExtrasToNAS, config.nasUploadEnabled {
+                        await publishExtraToNAS(localFile: file, info: info)
                     }
 
                     let titleElapsed = Date().timeIntervalSince(titleStart)

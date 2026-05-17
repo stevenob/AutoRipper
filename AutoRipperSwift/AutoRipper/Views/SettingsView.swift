@@ -415,6 +415,23 @@ private struct NASPane: View {
                 .disabled(!config.nasUploadEnabled)
                 .opacity(config.nasUploadEnabled ? 1 : 0.5)
 
+            // v4.0.3: extras-to-NAS toggle. Default on so the user's
+            // library captures behind-the-scenes / featurette / trailer
+            // titles marked as .extra during scan.
+            Toggle(isOn: $config.publishExtrasToNAS) {
+                Text("Also upload .extra titles to NAS").font(.callout)
+            }
+            .disabled(!config.nasUploadEnabled)
+            .opacity(config.nasUploadEnabled ? 1 : 0.5)
+            HStack {
+                Spacer().frame(width: 130)
+                Text("Extras land at <Movie or Show>/extras/<file>.mkv (Plex convention). Without this they stay only on local output.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+
             HStack {
                 Spacer().frame(width: 130)
                 Button("Check reachability") { Task { await checkBoth() } }
@@ -1340,6 +1357,7 @@ private struct AdvancedPane: View {
             "genericWebhookURL": config.genericWebhookURL,
             "makemkvReadSpeed": config.makemkvReadSpeed,
             "customPresetsFile": config.customPresetsFile,
+            "publishExtrasToNAS": config.publishExtrasToNAS,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
@@ -1410,5 +1428,6 @@ private struct AdvancedPane: View {
         if let v = dict["genericWebhookURL"]    as? String { config.genericWebhookURL = v }
         if let v = dict["makemkvReadSpeed"]     as? Int    { config.makemkvReadSpeed = v }
         if let v = dict["customPresetsFile"]    as? String { config.customPresetsFile = v }
+        if let v = dict["publishExtrasToNAS"]   as? Bool   { config.publishExtrasToNAS = v }
     }
 }
