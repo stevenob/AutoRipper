@@ -165,11 +165,14 @@ struct TMDbService {
             let (data, _) = try await session.data(from: url)
             let item = try JSONDecoder().decode(TMDbMovieDetail.self, from: data)
             let year = item.releaseDate.flatMap { $0.count >= 4 ? Int($0.prefix(4)) : nil }
-            let result = MediaResult(
+            var result = MediaResult(
                 title: item.title, year: year, mediaType: "movie",
                 tmdbId: item.id, overview: item.overview ?? "",
                 posterPath: item.posterPath, backdropPath: item.backdropPath
             )
+            // v4.0.6: populate runtime so autoLabel can match the
+            // closest-duration disc title to .mainFeature.
+            result.runtimeMinutes = item.runtime
             TMDbCache.shared.storeMovie(tmdbId, result)
             return result
         } catch {
@@ -259,9 +262,13 @@ private struct TMDbMovieDetail: Codable {
     let overview: String?
     let posterPath: String?
     let backdropPath: String?
+    /// v4.0.6: TMDb provides runtime in minutes on the movie detail
+    /// endpoint. Used by `DiscInfo.autoLabel` to pick the disc title
+    /// whose duration matches.
+    let runtime: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, overview
+        case id, title, overview, runtime
         case releaseDate = "release_date"
         case posterPath = "poster_path"
         case backdropPath = "backdrop_path"

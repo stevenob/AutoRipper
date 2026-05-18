@@ -54,6 +54,17 @@ struct DiscInfoColumn: View {
                     alreadyRippedBanner(prior: prior)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                // v4.0.6: TMDb runtime sanity check. Surfaced when the
+                // size-based main feature pick is far from TMDb's
+                // theatrical runtime AND a closer disc title exists.
+                // Common case: a long featurette accidentally outweighed
+                // the actual movie. The user can also see this for
+                // Extended-Edition discs (where the longer cut IS the
+                // main feature) — dismiss is one click.
+                if let mismatch = ripVM.mainFeatureRuntimeMismatch {
+                    mainFeatureMismatchBanner(mismatch: mismatch)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
                 if info.looksLikeTVSeason && !ripVM.titleIntents.values.contains(.episode) {
                     TVDetectBanner(ripVM: ripVM)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -523,6 +534,57 @@ struct DiscInfoColumn: View {
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .full
         return f
+    }
+
+    // MARK: - Main-feature / TMDb runtime mismatch banner (v4.0.6)
+
+    /// Surfaced when the size-based main-feature pick is far from
+    /// TMDb's known movie runtime. The user can:
+    ///   * Click "Use closer match" to swap categories (picked →
+    ///     .alternateCut, suggested → .mainFeature)
+    ///   * Click "Keep" to dismiss (Extended-Edition cases where the
+    ///     longer cut on the disc IS the main feature)
+    @ViewBuilder
+    private func mainFeatureMismatchBanner(mismatch: MainFeatureMismatch) -> some View {
+        let pickedMin = mismatch.pickedRuntimeSeconds / 60
+        let suggestedMin = mismatch.suggestedRuntimeSeconds / 60
+        let tmdbMin = mismatch.tmdbRuntimeSeconds / 60
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.circle.fill")
+                    .foregroundStyle(.blue)
+                Text("TMDb runtime mismatch")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Keep") { ripVM.dismissMainFeatureMismatch() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+            }
+            Text("Main feature picked is \(pickedMin) min, but TMDb says this movie is \(tmdbMin) min. A \(suggestedMin)-min title on this disc is closer.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Use \(suggestedMin)-min title as main") {
+                    ripVM.acceptMainFeatureMismatchSuggestion()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Spacer()
+            }
+            Text("Tip: dismiss if this is an Extended / Director's / Unrated Edition disc — TMDb only knows the theatrical runtime.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.blue.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.blue.opacity(0.30), lineWidth: 1)
+        )
     }
 
     // MARK: - Preset

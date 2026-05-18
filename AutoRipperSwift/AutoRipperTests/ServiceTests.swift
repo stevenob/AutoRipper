@@ -538,6 +538,147 @@ final class TVEpisodeMatcherTests: XCTestCase {
     }
 }
 
+// MARK: - Main feature / TMDb runtime mismatch detection (v4.0.6)
+
+/// `RipViewModel.detectMainFeatureMismatch` is the pure function that
+/// powers the "TMDb runtime mismatch" banner. These cover:
+///   * The happy paths (no mismatch when size + TMDb agree, or when
+///     no TMDb runtime is available)
+///   * The pathological "play-all featurette outweighed the movie"
+///     case that v4.0.6 was built for
+///   * The LOTR Extended-Edition tradeoff — when only one cut is on
+///     the disc, even a 50-min gap shouldn't trigger if there's no
+///     theatrical-length title to suggest swapping to.
+final class MainFeaturePickerTests: XCTestCase {
+
+    private func makeTitle(id: Int, durationSeconds: Int, sizeBytes: Int64) -> TitleInfo {
+        TitleInfo(id: id, name: "Title \(id)",
+                  duration: String(format: "%d:%02d:%02d",
+                                   durationSeconds / 3600,
+                                   (durationSeconds % 3600) / 60,
+                                   durationSeconds % 60),
+                  sizeBytes: sizeBytes,
+                  chapters: 1, fileOutput: "")
+    }
+
+    /// Build a disc + autoLabel so .mainFeature is set by largest-by-size.
+    private func makeDisc(_ specs: [(id: Int, durationSeconds: Int, sizeBytes: Int64)]) -> DiscInfo {
+        let titles = specs.map { makeTitle(id: $0.id, durationSeconds: $0.durationSeconds, sizeBytes: $0.sizeBytes) }
+        var info = DiscInfo(name: "TESTDISC", type: "bluray", titles: titles)
+        info.autoLabel()
+        return info
+    }
+
+    func testNoTMDbRuntimeReturnsNil() {
+        let info = makeDisc([
+            (0, 6300, 25_000_000_000),  // 105 min, largest → .mainFeature
+            (1, 600, 1_000_000_000),
+        ])
+        XCTAssertNil(RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: nil))
+    }
+
+    func testZeroTMDbRuntimeReturnsNil() {
+        let info = makeDisc([
+            (0, 6300, 25_000_000_000),
+            (1, 600, 1_000_000_000),
+        ])
+        XCTAssertNil(RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 0))
+    }
+
+    func testWithinToleranceNoBanner() {
+        // Disc main = 105 min, TMDb = 107 min. Within 5-min tolerance.
+        let info = makeDisc([
+            (0, 6300, 25_000_000_000),  // 105 min
+            (1, 600, 1_000_000_000),
+        ])
+        XCTAssertNil(RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 107))
+    }
+
+    func testFeaturetteOutweighedMovieTriggersBanner() {
+        // The case v4.0.6 exists for: a bonus disc has a 90-min
+        // "making of" doc that's larger than the 100-min movie.
+        // autoLabel picks the doc as main; TMDb says 100 min.
+        // We should suggest swapping to title id=1.
+        let info = makeDisc([
+            (0, 5400, 30_000_000_000),  // 90 min doc, biggest
+            (1, 6000, 20_000_000_000),  // 100 min movie
+        ])
+        guard let mismatch = RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 100) else {
+            XCTFail("Expected mismatch banner to fire")
+            return
+        }
+        XCTAssertEqual(mismatch.pickedTitleId, 0)
+        XCTAssertEqual(mismatch.suggestedTitleId, 1)
+        XCTAssertEqual(mismatch.tmdbRuntimeSeconds, 6000)
+    }
+
+    func testExtendedEditionOnlyOnDiscDoesNotTrigger() {
+        // LOTR EE-only Blu-ray: disc has just the 228-min extended cut
+        // plus extras. TMDb says theatrical = 178 min. Mismatch IS
+        // 50 min, BUT there's no other movie-length title on the disc
+        // to suggest swapping to. Banner stays silent.
+        let info = makeDisc([
+            (0, 13680, 45_000_000_000),  // 228 min extended (largest)
+            (1, 1200, 2_000_000_000),    // 20 min behind-the-scenes
+            (2, 600, 1_000_000_000),     // 10 min trailer
+        ])
+        XCTAssertNil(RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 178),
+            "No theatrical-length title on disc → nothing to suggest")
+    }
+
+    func testExtendedEditionWithBothCutsSuggestsTheatrical() {
+        // Rare Blu-ray release: BOTH theatrical and extended on the
+        // same disc. autoLabel picks the larger extended as main.
+        // TMDb says theatrical. Banner fires — and the user usually
+        // dismisses ("I want the extended cut") but the suggestion
+        // is correct: it IS the theatrical version.
+        let info = makeDisc([
+            (0, 13680, 45_000_000_000),  // 228 min extended (largest)
+            (1, 10680, 38_000_000_000),  // 178 min theatrical
+            (2, 1200, 2_000_000_000),
+        ])
+        guard let mismatch = RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 178) else {
+            XCTFail("Expected banner to fire with both cuts present")
+            return
+        }
+        XCTAssertEqual(mismatch.pickedTitleId, 0)
+        XCTAssertEqual(mismatch.suggestedTitleId, 1)
+    }
+
+    func testCommentaryTrackSameRuntimeIsIgnored() {
+        // A commentary audio-track replicated as its own title would
+        // have the same runtime as the movie but smaller size. autoLabel
+        // already picks the larger as main, so this doesn't trigger;
+        // but make sure detectMainFeatureMismatch ALSO doesn't suggest
+        // a swap to the commentary when the picked main is fine.
+        let info = makeDisc([
+            (0, 6000, 25_000_000_000),  // 100 min movie (largest)
+            (1, 6000, 800_000_000),     // 100 min commentary, tiny
+        ])
+        XCTAssertNil(RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 100))
+    }
+
+    func testDeltaTooSmallToBeWorthSwap() {
+        // Picked is 7 min off (just past the 5-min tolerance), but
+        // the "closer" alt is only 1 min closer. Not worth surfacing.
+        let info = makeDisc([
+            (0, 6420, 25_000_000_000),  // 107 min, largest
+            (1, 6360, 20_000_000_000),  // 106 min
+        ])
+        XCTAssertNil(RipViewModel.detectMainFeatureMismatch(
+            in: info, tmdbRuntimeMinutes: 100,
+            toleranceSeconds: 5 * 60),
+            "Only 1-min improvement on 7-min miss → no suggestion")
+    }
+}
+
 // MARK: - DiscRule matching (v3.14.0)
 
 final class DiscRuleTests: XCTestCase {

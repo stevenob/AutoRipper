@@ -132,6 +132,17 @@ final class RipViewModel: ObservableObject {
     /// is in the main window toolbar so the user can set it before
     /// the scan starts.
     @Published var scanMode: DiscScanMode = .auto
+    /// v4.0.6: when the size-based main-feature pick is far from
+    /// TMDb's runtime for this movie AND a closer title exists on
+    /// the disc, surface a banner so the user can confirm. We don't
+    /// auto-override — for Extended-Edition releases the longer cut
+    /// IS the main feature and TMDb's theatrical runtime would
+    /// (correctly!) flag a mismatch. The user decides which is right.
+    ///
+    /// Populated in `scanDisc` after both `autoLabel` and `lookupTMDb`
+    /// have run. `nil` when no mismatch detected, no TMDb runtime
+    /// available, or the user dismissed it for this scan.
+    @Published var mainFeatureRuntimeMismatch: MainFeatureMismatch?
     /// v3.12.0: per-title audio track selection. Outer key is title id,
     /// inner set holds the MakeMKV stream IDs of audio tracks the user
     /// wants included in the encode. Empty set means "use HandBrake
@@ -300,6 +311,89 @@ final class RipViewModel: ObservableObject {
     /// proper TV handling), but the override never reaches into the
     /// per-title bucket logic — non-episode titles still bucket by
     /// runtime as before.
+    ///
+    /// v4.0.6: compare the size-picked main-feature title against the
+    /// TMDb-reported movie runtime. Returns a `MainFeatureMismatch` when:
+    ///   * the picked main feature's runtime is > `toleranceSeconds` off TMDb's
+    ///   * AND another disc title is at least 60 sec closer to TMDb
+    /// Otherwise returns nil (no actionable suggestion).
+    ///
+    /// Pure logic — no UI, no actor isolation. Easy to test (see
+    /// `MainFeaturePickerTests` in ServiceTests.swift).
+    nonisolated static func detectMainFeatureMismatch(
+        in info: DiscInfo,
+        tmdbRuntimeMinutes: Int?,
+        toleranceSeconds: Int = 5 * 60
+    ) -> MainFeatureMismatch? {
+        guard let mins = tmdbRuntimeMinutes, mins > 0 else { return nil }
+        let tmdbSeconds = mins * 60
+        guard let picked = info.titles.first(where: { $0.category == .mainFeature }) else {
+            return nil
+        }
+        let pickedDelta = abs(picked.durationSeconds - tmdbSeconds)
+        guard pickedDelta > toleranceSeconds else { return nil }
+
+        // Find the disc title whose runtime is closest to TMDb's.
+        // Restrict to titles plausibly large enough to be a movie
+        // (≥ 60 min) so a commentary-bonus exactly the runtime
+        // doesn't get suggested for a doc-style disc.
+        let minPlausibleMovieSeconds = 60 * 60
+        let candidates = info.titles.filter { $0.durationSeconds >= minPlausibleMovieSeconds }
+        guard let best = candidates.min(by: {
+            abs($0.durationSeconds - tmdbSeconds) < abs($1.durationSeconds - tmdbSeconds)
+        }) else { return nil }
+
+        // Only suggest if best is meaningfully closer than picked.
+        let bestDelta = abs(best.durationSeconds - tmdbSeconds)
+        guard bestDelta + 60 < pickedDelta else { return nil }
+        // And the suggestion must not be the same title we already picked.
+        guard best.id != picked.id else { return nil }
+
+        return MainFeatureMismatch(
+            tmdbRuntimeSeconds: tmdbSeconds,
+            pickedTitleId: picked.id,
+            pickedRuntimeSeconds: picked.durationSeconds,
+            suggestedTitleId: best.id,
+            suggestedRuntimeSeconds: best.durationSeconds
+        )
+    }
+
+    /// v4.0.6: user clicked "Use TMDb match" on the mismatch banner.
+    /// Swaps categories: the suggested title becomes .mainFeature,
+    /// the previously-picked title falls back to .alternateCut (most
+    /// common case: theatrical-vs-extended on the same disc). Clears
+    /// the mismatch so the banner dismisses.
+    func acceptMainFeatureMismatchSuggestion() {
+        guard let mismatch = mainFeatureRuntimeMismatch, var info = discInfo else { return }
+        for i in info.titles.indices {
+            if info.titles[i].id == mismatch.pickedTitleId {
+                info.titles[i].category = .alternateCut
+                info.titles[i].label = TitleCategory.alternateCut.displayLabel
+            } else if info.titles[i].id == mismatch.suggestedTitleId {
+                info.titles[i].category = .mainFeature
+                info.titles[i].label = TitleCategory.mainFeature.displayLabel
+            }
+        }
+        discInfo = info
+        mainFeatureRuntimeMismatch = nil
+        FileLogger.shared.info("rip-vm",
+            "main-feature mismatch: user accepted swap to title \(mismatch.suggestedTitleId)")
+    }
+
+    /// v4.0.6: user clicked dismiss on the mismatch banner. Common
+    /// case: an Extended-Edition disc where the longer cut IS what
+    /// the user wants as the main feature.
+    func dismissMainFeatureMismatch() {
+        if let mismatch = mainFeatureRuntimeMismatch {
+            FileLogger.shared.info("rip-vm",
+                "main-feature mismatch: user kept size-based pick (title \(mismatch.pickedTitleId))")
+        }
+        mainFeatureRuntimeMismatch = nil
+    }
+
+    /// v4.0.5: apply user-selected mode override. When the user
+    /// pre-picked TV / Movie before scan, force the categorization
+    /// to match — overrides the heuristic.
     ///
     /// `.auto` is a no-op (default). `.tv` promotes every in-window
     /// (5-90 min) title to `.episode`, except the play-all outlier
@@ -943,6 +1037,7 @@ final class RipViewModel: ObservableObject {
         readErrorOffsets = []  // v3.11.12
         titleEpisodeAssignments = [:]  // v4.0.2 — clear stale TV assignments
         titleIntents = [:]  // v4.0.2 — clear stale intent overrides
+        mainFeatureRuntimeMismatch = nil  // v4.0.6 — clear prior banner
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -964,6 +1059,21 @@ final class RipViewModel: ObservableObject {
                 await lookupTMDb(for: &info)
 
                 self.discInfo = info
+                // v4.0.6: now that TMDb has been consulted, see if the
+                // size-based main-feature pick disagrees with the
+                // canonical movie runtime. We don't auto-override —
+                // Extended-Edition Blu-rays legitimately have the longer
+                // cut as the main feature even though TMDb only knows
+                // the theatrical runtime. Banner gives the user a one-
+                // click swap when the heuristic actually got it wrong.
+                if cachedMediaResult?.mediaType == "movie" {
+                    self.mainFeatureRuntimeMismatch = Self.detectMainFeatureMismatch(
+                        in: info,
+                        tmdbRuntimeMinutes: cachedMediaResult?.runtimeMinutes
+                    )
+                } else {
+                    self.mainFeatureRuntimeMismatch = nil
+                }
                 // Auto-select titles above min duration
                 for title in info.titles where title.durationSeconds >= config.minDuration {
                     selectedTitles.insert(title.id)
@@ -1603,6 +1713,18 @@ final class RipViewModel: ObservableObject {
                 applyScanModeOverride(to: &info)  // v4.0.5
                 await lookupTMDb(for: &info)
                 self.discInfo = info
+                // v4.0.6: surface main-feature/TMDb runtime mismatch
+                // in the fullAuto path too (rare since fullAuto rips
+                // immediately, but the banner stays for the History
+                // / hero post-rip).
+                if cachedMediaResult?.mediaType == "movie" {
+                    self.mainFeatureRuntimeMismatch = Self.detectMainFeatureMismatch(
+                        in: info,
+                        tmdbRuntimeMinutes: cachedMediaResult?.runtimeMinutes
+                    )
+                } else {
+                    self.mainFeatureRuntimeMismatch = nil
+                }
                 let fp = DiscFingerprintService.fingerprint(info)
                 let forcedRerrip = config.forceRerripFingerprints.contains(fp)
                 let prior = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
@@ -1818,6 +1940,32 @@ enum DiscScanMode: String, Sendable, CaseIterable, Identifiable {
         case .movie: return "film"
         case .tv:    return "tv"
         }
+    }
+}
+
+/// v4.0.6: a "the size-based main-feature pick disagrees with TMDb's
+/// runtime" finding. Surfaced via `RipViewModel.mainFeatureRuntimeMismatch`
+/// for the UI banner. Pure value type — equality + immutability so the
+/// view diffs cleanly.
+///
+/// We never auto-apply the suggested swap. Extended-Edition Blu-rays
+/// legitimately have the longer cut as the main feature, even though
+/// TMDb only knows the theatrical runtime. The user accepts or dismisses.
+struct MainFeatureMismatch: Equatable, Sendable {
+    /// TMDb's stated movie runtime (seconds). What we compared against.
+    let tmdbRuntimeSeconds: Int
+    /// The currently-picked main-feature title's id and runtime (seconds).
+    let pickedTitleId: Int
+    let pickedRuntimeSeconds: Int
+    /// The disc title whose runtime is closest to TMDb's. May or may not
+    /// be a better choice (e.g., a commentary track of the same length).
+    let suggestedTitleId: Int
+    let suggestedRuntimeSeconds: Int
+
+    /// Absolute delta between the picked title and TMDb, in seconds.
+    /// Driver for the "is this worth surfacing?" threshold.
+    var pickedDeltaSeconds: Int {
+        abs(pickedRuntimeSeconds - tmdbRuntimeSeconds)
     }
 }
 
