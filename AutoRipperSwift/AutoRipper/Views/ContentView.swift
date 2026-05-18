@@ -220,13 +220,11 @@ struct DiscPaneView: View {
     @ViewBuilder
     private var topToolbar: some View {
         HStack(spacing: 12) {
-            Toggle(isOn: Binding(
-                get: { ripVM.fullAutoEnabled },
-                set: { ripVM.fullAutoEnabled = $0 }
-            )) { Label("Auto", systemImage: "bolt.fill") }
-                .toggleStyle(.checkbox)
-                .disabled(ripVM.isScanning || ripVM.isRipping)
-                .help("Hands-free mode: insert disc → app rips, encodes, organizes, uploads. Loops to the next disc until you turn it off.")
+            // v4.0.5: 'Auto' toggle removed. AutoRipper no longer
+            // auto-polls for next disc after a rip — each rip is a
+            // deliberate Scan → Rip click sequence. The encode +
+            // publish pipeline still runs after every rip (was gated
+            // on this toggle; now always-on).
 
             Text("Skip under:").foregroundStyle(.secondary).font(.caption)
             Stepper(value: $config.minDuration, in: 0...7200, step: 60) {
@@ -234,6 +232,22 @@ struct DiscPaneView: View {
                     .monospacedDigit().font(.caption).frame(width: 45)
             }
             .controlSize(.small)
+
+            // v4.0.5: pre-scan TV/Movie/Auto mode picker. Set this
+            // before clicking Scan to override the auto-detection
+            // heuristic (which can miss short-form TV like Bluey).
+            Divider().frame(height: 14)
+            Text("Mode:").foregroundStyle(.secondary).font(.caption)
+            Picker("", selection: $ripVM.scanMode) {
+                ForEach(DiscScanMode.allCases) { mode in
+                    Label(mode.displayLabel, systemImage: mode.sfSymbol)
+                        .tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 220)
+            .disabled(ripVM.isScanning || ripVM.isRipping)
+            .help("Set TV before scanning a TV-on-disc — forces all clustered short titles into the TV publish pipeline regardless of auto-detection.")
 
             Spacer()
 
@@ -563,13 +577,17 @@ struct DiscPaneView: View {
             VStack(spacing: 16) {
                 Spacer()
                 Button {
-                    if ripVM.fullAutoEnabled { ripVM.fullAuto() } else { ripVM.scanDisc() }
+                    // v4.0.5: always explicit scan — no Auto-mode
+                    // shortcut that would scan + rip + loop in one
+                    // click. After scan completes, user reviews titles
+                    // and clicks Rip explicitly.
+                    ripVM.scanDisc()
                 } label: {
                     VStack(spacing: 12) {
                         Image(systemName: ripVM.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
                             .font(.system(size: 64))
                         if !ripVM.detectedDiscType.isEmpty {
-                            Text(ripVM.fullAutoEnabled ? "Full Auto · \(ripVM.detectedDiscType)" : "Scan \(ripVM.detectedDiscType)")
+                            Text("Scan \(ripVM.detectedDiscType)")
                                 .font(.title2).fontWeight(.semibold)
                         } else {
                             Text("Insert a disc")

@@ -13,7 +13,15 @@ final class RipViewModel: ObservableObject {
     @Published var selectedTitles: Set<Int> = []
     @Published var statusText: String = "Idle"
     @Published var logLines: [String] = []
-    @Published var fullAutoEnabled: Bool = false
+    /// v4.0.5: was "Full Auto" toggle (scan→rip→eject→loop-poll-for-next-disc).
+    /// The auto-loop part is REMOVED — each rip is now an explicit
+    /// one-shot. This flag now only controls whether the encode →
+    /// organize → publish pipeline runs after rip. Defaulted to TRUE
+    /// so users get the full pipeline by default; the UI toggle is
+    /// hidden (the flag is effectively always-on now). Kept named
+    /// `fullAutoEnabled` to minimize churn across the dozens of call
+    /// sites that gate post-rip behavior on it.
+    @Published var fullAutoEnabled: Bool = true
     @Published var errorMessage: String?
     @Published var detectedDiscType: String = ""
     @Published var detectedDiscName: String = ""
@@ -112,6 +120,18 @@ final class RipViewModel: ObservableObject {
 
     /// Per-title intent (Movie / Episode / Edition / Extra). Defaults to .movie when unset.
     @Published var titleIntents: [Int: JobIntent] = [:]
+    /// v4.0.5: per-disc TV/Movie mode override. When `.auto`, the
+    /// existing heuristic decides (looksLikeTVSeason + TMDb media
+    /// type). When `.tv` or `.movie`, the user's choice wins regardless
+    /// of the heuristic — solves edge cases like Bluey (short-form
+    /// children's TV that wouldn't pass the auto-detect cleanly
+    /// even with the v4.0.5 widened window) and short DVD movies
+    /// that happen to have 4+ similar-runtime extras.
+    ///
+    /// Reset to `.auto` whenever a new disc is detected. The picker
+    /// is in the main window toolbar so the user can set it before
+    /// the scan starts.
+    @Published var scanMode: DiscScanMode = .auto
     /// v3.12.0: per-title audio track selection. Outer key is title id,
     /// inner set holds the MakeMKV stream IDs of audio tracks the user
     /// wants included in the encode. Empty set means "use HandBrake
@@ -270,6 +290,68 @@ final class RipViewModel: ObservableObject {
         } catch {
             FileLogger.shared.error("rip-vm",
                 "extras-to-NAS: copy failed (\(error.localizedDescription)) — file remains on local at \(localFile.path)")
+        }
+    }
+
+    /// v4.0.5: apply the user's pre-scan TV/Movie mode override on
+    /// top of the heuristic categorization that `DiscInfo.autoLabel`
+    /// just produced. The override wins regardless of `looksLikeTVSeason`
+    /// (so Bluey-shape discs the heuristic might miss still get
+    /// proper TV handling), but the override never reaches into the
+    /// per-title bucket logic — non-episode titles still bucket by
+    /// runtime as before.
+    ///
+    /// `.auto` is a no-op (default). `.tv` promotes every in-window
+    /// (5-90 min) title to `.episode`, except the play-all outlier
+    /// which falls through to its normal duration bucket. `.movie`
+    /// demotes every `.episode` from autoLabel back to its
+    /// duration-bucket category, then marks the largest title as
+    /// `.mainFeature`.
+    private func applyScanModeOverride(to info: inout DiscInfo) {
+        switch scanMode {
+        case .auto:
+            return
+        case .tv:
+            // Force-categorize every in-window title as .episode,
+            // minus the play-all outlier.
+            let episodeIds = Set(DiscInfo.trimmedTVCandidates(in: info.titles).map { $0.id })
+            for i in info.titles.indices {
+                if episodeIds.contains(info.titles[i].id) {
+                    info.titles[i].category = .episode
+                    info.titles[i].label = TitleCategory.episode.displayLabel
+                }
+            }
+            FileLogger.shared.info("rip-vm",
+                "scanMode=.tv: forced \(episodeIds.count) titles to .episode")
+        case .movie:
+            // Demote any .episode categorization back to duration-
+            // bucket. Then pick the largest as .mainFeature.
+            var largestIndex = 0
+            for i in info.titles.indices {
+                if info.titles[i].sizeBytes > info.titles[largestIndex].sizeBytes {
+                    largestIndex = i
+                }
+            }
+            for i in info.titles.indices {
+                if info.titles[i].category == .episode {
+                    // Fall back to duration-bucket using a mini-cascade.
+                    let secs = info.titles[i].durationSeconds
+                    let cat: TitleCategory
+                    switch secs {
+                    case 5400...: cat = .bonusFeature
+                    case 1800...: cat = .featurette
+                    case 300...:  cat = .extra
+                    case 60...:   cat = .shortExtra
+                    default:      cat = .trailer
+                    }
+                    info.titles[i].category = cat
+                    info.titles[i].label = cat.displayLabel
+                }
+            }
+            info.titles[largestIndex].category = .mainFeature
+            info.titles[largestIndex].label = TitleCategory.mainFeature.displayLabel
+            FileLogger.shared.info("rip-vm",
+                "scanMode=.movie: largest title (id \(info.titles[largestIndex].id)) = mainFeature")
         }
     }
 
@@ -874,6 +956,10 @@ final class RipViewModel: ObservableObject {
 
                 // Auto-label titles by duration/size
                 info.autoLabel()
+                // v4.0.5: apply user-selected mode override. When the
+                // user pre-picked TV / Movie before scan, force the
+                // categorization to match — overrides the heuristic.
+                applyScanModeOverride(to: &info)
 
                 await lookupTMDb(for: &info)
 
@@ -1336,19 +1422,22 @@ final class RipViewModel: ObservableObject {
                 ? "Auto — insert next disc"
                 : "Ready — insert next disc"
 
-            // Auto mode: wait for the next disc to appear, then run again.
-            if fullAutoEnabled {
-                await waitForNextDiscAndContinue()
-            }
+            // v4.0.5: post-rip auto-poll loop REMOVED. Per user request:
+            // "I want to be able to just put in a movie and select the
+            // start scan to start and not worry about the process
+            // starting again on its own." Each rip is now an explicit
+            // one-shot — insert disc → Scan → Rip. After completion,
+            // AutoRipper stops and waits for the next manual Scan click.
+            // (The waitForNextDiscAndContinue helper below is preserved
+            // as dead code in case batch auto-looping is ever re-introduced
+            // behind an explicit opt-in setting.)
         }
     }
 
-    /// Polls drutil until a disc is detected (or the user disables Auto mode /
-    /// aborts), then kicks off Full Auto on the new disc.
-    ///
-    /// Two-phase wait so we don't trigger on the disc that *just* finished:
-    ///   1. Wait until drutil reports NO disc (eject completed).
-    ///   2. Wait until drutil reports a disc (next one inserted).
+    /// v4.0.5: dead code — preserved for reference. See removal note
+    /// in `fullAuto()` above. Used to poll for next-disc-inserted and
+    /// re-trigger fullAuto() on detection.
+    @available(*, deprecated, message: "Removed in v4.0.5 — auto-loop disabled by user request")
     private func waitForNextDiscAndContinue() async {
         FileLogger.shared.info("rip-vm", "auto: waiting for eject to complete")
         statusText = "Auto — waiting for eject…"
@@ -1511,6 +1600,7 @@ final class RipViewModel: ObservableObject {
                     Task { @MainActor in self?.appendMakeMKVLog(line) }
                 }
                 info.autoLabel()
+                applyScanModeOverride(to: &info)  // v4.0.5
                 await lookupTMDb(for: &info)
                 self.discInfo = info
                 let fp = DiscFingerprintService.fingerprint(info)
@@ -1700,6 +1790,35 @@ struct TitleEpisodeAssignment: Sendable, Equatable {
     let season: Int
     let episode: Int
     let title: String
+}
+
+/// v4.0.5: pre-scan mode picker that overrides the auto TV/Movie
+/// heuristic. Lets the user say "this is TV" up front so AutoRipper
+/// doesn't have to guess on edge cases (Bluey-shape short-form
+/// children's TV, short DVD movies with 4+ extras that accidentally
+/// trigger TV detection, etc.).
+enum DiscScanMode: String, Sendable, CaseIterable, Identifiable {
+    case auto
+    case movie
+    case tv
+
+    var id: String { rawValue }
+
+    var displayLabel: String {
+        switch self {
+        case .auto:  return "Auto"
+        case .movie: return "Movie"
+        case .tv:    return "TV"
+        }
+    }
+
+    var sfSymbol: String {
+        switch self {
+        case .auto:  return "wand.and.stars"
+        case .movie: return "film"
+        case .tv:    return "tv"
+        }
+    }
 }
 
 /// Tracks the last time MakeMKV's PRGV callback fired. Used by the file-size

@@ -602,10 +602,30 @@ struct DiscInfoColumn: View {
     @ViewBuilder
     private func titleTracksRow(title: TitleInfo) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("Title \(title.id) · \(title.audioTracks.count) audio · \(title.subtitleTracks.count) subtitle")
+            HStack(spacing: 6) {
+                Text("Title \(title.id) · \(title.audioTracks.count) audio · \(title.subtitleTracks.count) subtitle")
+                    .font(.caption2)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // v4.0.5: All / None quick-toggles. Tracks default to
+                // "all selected" after scan; these shortcuts let the
+                // user flip the state without clicking each row.
+                Button("All") {
+                    ripVM.selectedAudioTracks[title.id] = Set(title.audioTracks.map { $0.id })
+                    ripVM.selectedSubtitleTracks[title.id] = Set(title.subtitleTracks.map { $0.id })
+                }
+                .buttonStyle(.borderless)
                 .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .help("Re-select every audio + subtitle track for this title")
+                Button("None") {
+                    ripVM.selectedAudioTracks[title.id] = []
+                    ripVM.selectedSubtitleTracks[title.id] = []
+                }
+                .buttonStyle(.borderless)
+                .font(.caption2)
+                .help("Unselect every audio + subtitle track for this title (encode will fall back to HandBrake --all-audio / --all-subtitles default — i.e., still includes them)")
+            }
             ForEach(title.audioTracks) { track in
                 audioTrackToggle(titleId: title.id, track: track)
             }

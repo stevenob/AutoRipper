@@ -176,7 +176,12 @@ struct DiscInfo: Sendable {
 
         // TV season: if the disc looks like a season, every clustered
         // episode-runtime title becomes .episode. The biggest one no
-        // longer pulls "main feature" away from a sibling.
+        // longer pulls "main feature" away from a sibling. v4.0.5: the
+        // play-all outlier (if any) is already filtered out of
+        // tvEpisodeCandidateIds via trimmedTVCandidates, so it falls
+        // through to the duration-bucket path below and naturally lands
+        // in .bonusFeature (~50 min play-all → ≥ 90 min check fails →
+        // .featurette; or → .bonusFeature if longer).
         let isTVSeason = looksLikeTVSeason
         let episodeIds = isTVSeason ? Set(tvEpisodeCandidateIds) : Set<Int>()
 
@@ -187,23 +192,32 @@ struct DiscInfo: Sendable {
 
             if episodeIds.contains(t.id) {
                 cat = .episode
-            } else if i == largestIndex {
+            } else if i == largestIndex && !isTVSeason {
+                // v4.0.5: skip the "largest = main feature" heuristic
+                // on TV-season discs. The largest title on a TV disc is
+                // usually the play-all (a featurette stringing all
+                // episodes together). Falling through to the duration-
+                // bucket path categorizes it correctly as a featurette
+                // / bonus feature based on its runtime.
                 cat = .mainFeature
-            } else if secs >= 60 && Self.isWithinPercent(secs, of: mainSeconds, percent: 0.05) {
+            } else if !isTVSeason && secs >= 60 && Self.isWithinPercent(secs, of: mainSeconds, percent: 0.05) {
                 // Same-runtime as main but might be alt audio (smaller size)
                 // or a full alternate cut. Use size tolerance to disambiguate.
+                // v4.0.5: skip on TV-season discs — mainSeconds is the
+                // play-all, which would mark itself as alternateCut.
                 if Self.isWithinPercent(secs, of: mainSeconds, percent: 0.005)
                     && t.sizeBytes < mainSize {
                     cat = .alternateAudio
                 } else {
                     cat = .alternateCut
                 }
-            } else if secs >= 3600 && Self.isLikelyAlternateCut(of: secs, vs: mainSeconds) {
+            } else if !isTVSeason && secs >= 3600 && Self.isLikelyAlternateCut(of: secs, vs: mainSeconds) {
                 // v3.10.0: real-world Director's Cuts are often +20-60 min
                 // longer than the theatrical (LoTR Ext +51 min, Donnie Darko
                 // +20 min, Blade Runner Final Cut basically equal). Wider
                 // threshold using an absolute-minute window so very-long
                 // extended cuts of long movies still match.
+                // v4.0.5: also gated on !isTVSeason.
                 cat = .alternateCut
             } else if secs >= 5400 {                    // ≥ 90 min: probably another full feature
                 cat = .bonusFeature
@@ -327,20 +341,69 @@ struct DiscInfo: Sendable {
 
     /// Heuristic: does this disc look like a TV-series season?
     /// Triggers when there are 3+ titles whose durations cluster within ±15%
-    /// and each is between 18 and 90 minutes (typical episode length).
+    /// True when this disc looks like a TV season — at least
+    /// `tvEpisodeMinTitles` titles within the per-episode duration
+    /// window, with low runtime variance after stripping any single
+    /// "play all" outlier.
+    ///
+    /// v4.0.5: window widened to 5–90 min (was 18–90) to capture
+    /// short-form children's content like Bluey (~7 min eps), anime
+    /// shorts, and YouTube-style episodic content. The minimum-title
+    /// count (4) was bumped from 3 to compensate for the wider
+    /// window — a disc with 3 trailers wouldn't accidentally trigger.
+    ///
+    /// v4.0.5: also strips a single "play all" outlier (a title
+    /// significantly longer than the median of the others) before
+    /// checking variance. Without this, a Bluey-shape disc — 7
+    /// episodes @ ~7 min + 1 play-all @ ~50 min — fails the variance
+    /// check because the play-all skews the average wildly.
     var looksLikeTVSeason: Bool {
-        let candidates = titles.filter { $0.durationSeconds >= 18 * 60 && $0.durationSeconds <= 90 * 60 }
-        guard candidates.count >= 3 else { return false }
-        let durations = candidates.map { Double($0.durationSeconds) }
+        let kept = Self.trimmedTVCandidates(in: titles)
+        guard kept.count >= Self.tvEpisodeMinTitles else { return false }
+        let durations = kept.map { Double($0.durationSeconds) }
         let avg = durations.reduce(0, +) / Double(durations.count)
         guard avg > 0 else { return false }
-        return durations.allSatisfy { abs($0 - avg) / avg <= 0.15 }
+        return durations.allSatisfy { abs($0 - avg) / avg <= 0.30 }
     }
 
+    /// v4.0.5: episode-duration window bounds. Public so unit tests can
+    /// pin them as part of the contract.
+    static let tvEpisodeMinDurationSeconds = 5 * 60
+    static let tvEpisodeMaxDurationSeconds = 90 * 60
+    /// Minimum number of clustered-runtime titles needed to call a disc
+    /// a TV season. 4 is conservative enough that 3 promo / trailer
+    /// stubs don't trigger TV mode by accident.
+    static let tvEpisodeMinTitles = 4
+    /// A candidate ≥ this multiple of the median of the others is
+    /// treated as a "play all" outlier and excluded from the
+    /// episode set (it's a featurette, not an episode).
+    static let playAllOutlierRatio = 1.8
+
     /// Title IDs that match the TV-episode heuristic — useful for auto-selecting.
+    /// v4.0.5: now also strips the play-all outlier.
     var tvEpisodeCandidateIds: [Int] {
-        titles
-            .filter { $0.durationSeconds >= 18 * 60 && $0.durationSeconds <= 90 * 60 }
-            .map { $0.id }
+        Self.trimmedTVCandidates(in: titles).map { $0.id }
+    }
+
+    /// v4.0.5: filter titles to those in the episode-runtime window,
+    /// then drop a single outlier (the "play all") if its runtime is
+    /// >= `playAllOutlierRatio` × the median of the others. Used by
+    /// both `looksLikeTVSeason` (which needs a clean variance check)
+    /// and `tvEpisodeCandidateIds` (which needs to omit the outlier
+    /// from the auto-selected episode set).
+    static func trimmedTVCandidates(in titles: [TitleInfo]) -> [TitleInfo] {
+        let inRange = titles.filter {
+            $0.durationSeconds >= tvEpisodeMinDurationSeconds
+                && $0.durationSeconds <= tvEpisodeMaxDurationSeconds
+        }
+        guard inRange.count >= 2 else { return inRange }
+        let sorted = inRange.sorted { $0.durationSeconds < $1.durationSeconds }
+        let withoutLongest = Array(sorted.dropLast())
+        let medianSec = withoutLongest[withoutLongest.count / 2].durationSeconds
+        let longest = sorted.last!
+        if medianSec > 0 && Double(longest.durationSeconds) >= Double(medianSec) * playAllOutlierRatio {
+            return withoutLongest
+        }
+        return sorted
     }
 }

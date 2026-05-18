@@ -2525,17 +2525,20 @@ final class DiscInfoAutoLabelV380Tests: XCTestCase {
     }
 
     func testTVSeasonOverridesMainFeature() {
-        // 3 episodes of similar runtime, plus a short trailer.
+        // 4 episodes of similar runtime, plus a short trailer.
+        // v4.0.5: bumped from 3 to 4 episodes to match new minimum.
         var info = DiscInfo(name: "S01D01", type: "dvd", titles: [
             makeTitle(id: 0, duration: "0:42:00", sizeGB: 1.5),
             makeTitle(id: 1, duration: "0:43:00", sizeGB: 1.5),
             makeTitle(id: 2, duration: "0:42:30", sizeGB: 1.4),
-            makeTitle(id: 3, duration: "0:01:00", sizeGB: 0.05),
+            makeTitle(id: 3, duration: "0:41:45", sizeGB: 1.5),
+            makeTitle(id: 4, duration: "0:01:00", sizeGB: 0.05),
         ])
         info.autoLabel()
         XCTAssertEqual(info.titles[0].category, .episode)
         XCTAssertEqual(info.titles[1].category, .episode)
         XCTAssertEqual(info.titles[2].category, .episode)
+        XCTAssertEqual(info.titles[3].category, .episode)
         XCTAssertNotEqual(info.titles[0].category, .mainFeature,
                           "TV-shape should not produce a main feature")
     }
@@ -2986,6 +2989,147 @@ final class HdiutilPlistParserTests: XCTestCase {
         </plist>
         """
         XCTAssertNil(UpdateService.parseMountPointFromHdiutilPlist(Data(plist.utf8)))
+    }
+}
+
+// MARK: - Bluey-shape TV-on-disc detection (v4.0.5)
+//
+// Validates that short-form children's TV (7-min episodes, multiple
+// per disc, plus a "play all" trap title) categorizes correctly with
+// the v4.0.5 widened detection window + play-all filter.
+
+final class BlueyShapeTests: XCTestCase {
+
+    private func makeTitle(id: Int, durationSec: Int, sizeGB: Double) -> TitleInfo {
+        // Build a duration string from seconds.
+        let h = durationSec / 3600
+        let m = (durationSec % 3600) / 60
+        let s = durationSec % 60
+        let dur = String(format: "%d:%02d:%02d", h, m, s)
+        return TitleInfo(id: id, name: "Title \(id)", duration: dur,
+                         sizeBytes: Int64(sizeGB * 1_073_741_824),
+                         chapters: 1, fileOutput: "")
+    }
+
+    /// Bluey-shape disc: 1 menu stub + 7 short episodes ~7 min + 1
+    /// "play all" of all 7 episodes back-to-back (~50 min).
+    private func makeBlueyDisc() -> DiscInfo {
+        var titles: [TitleInfo] = []
+        // Menu / intro stub
+        titles.append(makeTitle(id: 0, durationSec: 90, sizeGB: 0.05))
+        // 7 episodes, slight runtime variance like a real show
+        let epDurations = [415, 420, 430, 405, 425, 410, 420]  // 6:45 - 7:10 range
+        for (i, sec) in epDurations.enumerated() {
+            titles.append(makeTitle(id: i + 1, durationSec: sec, sizeGB: 1.5))
+        }
+        // Play-all: sum of episode durations + some segue padding
+        let playAllSec = epDurations.reduce(0, +) + 30
+        titles.append(makeTitle(id: 8, durationSec: playAllSec, sizeGB: 10.5))
+        return DiscInfo(name: "BLUEY_S01_D1", type: "bluray", titles: titles)
+    }
+
+    func testBlueyDiscDetectsAsTVSeason() {
+        let info = makeBlueyDisc()
+        XCTAssertTrue(info.looksLikeTVSeason,
+            "7 clustered 7-min titles should now satisfy looksLikeTVSeason (v4.0.5 widened from 18-min minimum)")
+    }
+
+    func testBlueyDiscMarksAllShortEpisodesAsEpisode() {
+        var info = makeBlueyDisc()
+        info.autoLabel()
+        let episodes = info.titles.filter { $0.category == .episode }
+        XCTAssertEqual(episodes.count, 7,
+            "all 7 short-form episodes should be categorized as .episode")
+        let ids = Set(episodes.map { $0.id })
+        XCTAssertEqual(ids, Set(1...7))
+    }
+
+    func testBlueyDiscDemotesPlayAllToBonusFeature() {
+        var info = makeBlueyDisc()
+        info.autoLabel()
+        let playAll = info.titles.first { $0.id == 8 }
+        XCTAssertNotNil(playAll)
+        XCTAssertNotEqual(playAll?.category, .episode,
+            "play-all title must NOT be categorized as .episode (would inflate episode count)")
+        // ~50 min play-all falls in the 30-90 min duration bucket → .featurette.
+        // Either non-episode category (.featurette / .bonusFeature) is acceptable;
+        // the important invariant is "not .episode".
+        XCTAssertTrue(playAll?.category == .featurette || playAll?.category == .bonusFeature,
+            "play-all (~50 min, much longer than episodes) should be .featurette or .bonusFeature; got \(String(describing: playAll?.category))")
+    }
+
+    func testBlueyDiscIgnoresMenuStub() {
+        var info = makeBlueyDisc()
+        info.autoLabel()
+        let menu = info.titles.first { $0.id == 0 }
+        XCTAssertEqual(menu?.category, .shortExtra,
+            "90s menu stub should be .shortExtra, not .episode")
+    }
+
+    func testWidenedThresholdConstantsExposed() {
+        XCTAssertEqual(DiscInfo.tvEpisodeMinDurationSeconds, 5 * 60)
+        XCTAssertEqual(DiscInfo.tvEpisodeMaxDurationSeconds, 90 * 60)
+        XCTAssertEqual(DiscInfo.tvEpisodeMinTitles, 4)
+    }
+
+    func testThreeShortTitlesDoNotTriggerTVDetection() {
+        // Don't false-positive on a disc with only 3 short clips —
+        // could be a promo disc with 3 trailers, not a TV season.
+        // Bump to 4 to match the v4.0.5 minimum.
+        let info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, durationSec: 420, sizeGB: 0.5),
+            makeTitle(id: 1, durationSec: 425, sizeGB: 0.5),
+            makeTitle(id: 2, durationSec: 415, sizeGB: 0.5),
+        ])
+        XCTAssertFalse(info.looksLikeTVSeason,
+            "fewer than tvEpisodeMinTitles candidates should NOT detect as TV")
+    }
+
+    func testFourPlusShortTitlesDoTriggerTVDetection() {
+        let info = DiscInfo(name: "X", type: "dvd", titles: [
+            makeTitle(id: 0, durationSec: 420, sizeGB: 0.5),
+            makeTitle(id: 1, durationSec: 425, sizeGB: 0.5),
+            makeTitle(id: 2, durationSec: 415, sizeGB: 0.5),
+            makeTitle(id: 3, durationSec: 410, sizeGB: 0.5),
+        ])
+        XCTAssertTrue(info.looksLikeTVSeason,
+            "exactly tvEpisodeMinTitles clustered titles should detect as TV")
+    }
+
+    func testWidenedVarianceTolerance() {
+        // Bluey-style runtimes can vary up to ~30s on ~7min eps (=7%).
+        // v4.0.5 widened tolerance from 15% to 30% to avoid rejecting
+        // legitimate seasons where one episode is meaningfully shorter.
+        let info = DiscInfo(name: "X", type: "bluray", titles: [
+            makeTitle(id: 0, durationSec: 360, sizeGB: 1.0),  // 6:00 — 20% below avg
+            makeTitle(id: 1, durationSec: 420, sizeGB: 1.0),  // 7:00
+            makeTitle(id: 2, durationSec: 480, sizeGB: 1.0),  // 8:00 — 14% above avg
+            makeTitle(id: 3, durationSec: 450, sizeGB: 1.0),  // 7:30
+        ])
+        XCTAssertTrue(info.looksLikeTVSeason,
+            "variance within 30% should still detect as TV")
+    }
+}
+
+// MARK: - DiscScanMode tests (v4.0.5)
+
+@MainActor
+final class DiscScanModeTests: XCTestCase {
+
+    func testDiscScanModeIdentifiableCases() {
+        // Sanity: enum carries the right cases for the segmented picker.
+        XCTAssertEqual(DiscScanMode.allCases, [.auto, .movie, .tv])
+        XCTAssertEqual(DiscScanMode.auto.id, "auto")
+        XCTAssertEqual(DiscScanMode.tv.displayLabel, "TV")
+        XCTAssertEqual(DiscScanMode.movie.displayLabel, "Movie")
+        XCTAssertFalse(DiscScanMode.tv.sfSymbol.isEmpty)
+    }
+
+    func testDiscScanModeDefaultsToAuto() {
+        // RipViewModel boots with .auto so existing users see no
+        // behavior change until they explicitly pick TV / Movie.
+        let vm = RipViewModel()
+        XCTAssertEqual(vm.scanMode, .auto)
     }
 }
 
