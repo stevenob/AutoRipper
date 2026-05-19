@@ -1216,6 +1216,14 @@ final class RipViewModel: ObservableObject {
         runningTask = Task {
             let start = Date()
 
+            // v4.0.12: register the rip dir so per-title publish/cleanup
+            // (running in parallel via QueueViewModel) can't delete the
+            // directory while subsequent titles in this same rip session
+            // are still being written by MakeMKV. Deregistered in the
+            // defer below regardless of success/failure.
+            ActiveRipDirectories.register(outputDir)
+            defer { ActiveRipDirectories.deregister(outputDir) }
+
             // Initialize per-title status for the hero view: every selected title
             // starts as .queued, transitions to .ripping/.done/.failed below.
             var initial: [Int: TitleRipStatus] = [:]

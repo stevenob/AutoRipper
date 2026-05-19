@@ -2573,6 +2573,69 @@ final class SafeFSCleanupTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent("fanart.jpg").path),
                        "artifact still gets removed")
     }
+
+    // MARK: - v4.0.12 ActiveRipDirectories guard
+
+    /// Regression test for the "Bluey title 1 failed with POSIX no
+    /// such file or directory" bug. When a directory is registered
+    /// as an active rip target, `removeDirIfEmpty` MUST leave it
+    /// alone — even when it's otherwise empty — so the in-flight
+    /// MakeMKV rip for a sibling title can keep writing to it.
+    func testRemoveDirIfEmptySkipsActiveRipDir() throws {
+        let dir = tempDir()
+        defer { ActiveRipDirectories._resetForTests() }
+
+        ActiveRipDirectories.register(dir.path)
+        XCTAssertTrue(ActiveRipDirectories.isActive(dir.path),
+            "Precondition: dir is registered as active")
+
+        SafeFSCleanup.removeDirIfEmpty(dir)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path),
+            "removeDirIfEmpty must NOT delete an empty dir while a rip is in progress (this is the Bluey title-1 bug)")
+    }
+
+    /// And the inverse: once the rip session deregisters the dir,
+    /// cleanup proceeds normally.
+    func testRemoveDirIfEmptyDeletesAfterDeregister() throws {
+        let dir = tempDir()
+        defer { ActiveRipDirectories._resetForTests() }
+
+        ActiveRipDirectories.register(dir.path)
+        ActiveRipDirectories.deregister(dir.path)
+        SafeFSCleanup.removeDirIfEmpty(dir)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dir.path),
+            "After deregister, empty dir cleanup resumes normal behavior")
+    }
+
+    /// `cleanupOwnedFilesAndScrubArtifacts` flows through `removeDirIfEmpty`
+    /// at step 3 — verify the active-rip guard catches that path too.
+    func testCleanupOwnedFilesSkipsDirRemovalWhileActive() throws {
+        let dir = tempDir()
+        let owned = dir.appendingPathComponent("episode_t00.mkv")
+        try touch(owned)
+        defer { ActiveRipDirectories._resetForTests() }
+
+        ActiveRipDirectories.register(dir.path)
+        SafeFSCleanup.cleanupOwnedFilesAndScrubArtifacts(dir: dir, ownedFiles: [owned])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: owned.path),
+            "Owned file is still removed (active-rip guard doesn't block file-level cleanup)")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path),
+            "But the dir itself stays — the sibling rip needs it")
+    }
+
+    /// Ancestor-of-active-dir is also protected (defense in depth).
+    func testRemoveDirIfEmptySkipsAncestorOfActiveDir() throws {
+        let parent = tempDir()
+        let child = parent.appendingPathComponent("active-child")
+        try FileManager.default.createDirectory(at: child, withIntermediateDirectories: true)
+        defer { ActiveRipDirectories._resetForTests() }
+
+        ActiveRipDirectories.register(child.path)
+        SafeFSCleanup.removeDirIfEmpty(parent)
+        // parent isn't empty (it contains `child`), but more importantly
+        // the active-rip check has to fire first.
+        XCTAssertTrue(FileManager.default.fileExists(atPath: parent.path))
+    }
 }
 
 // MARK: - MakeMKVService stale-file purge (v3.11.8)
