@@ -1039,6 +1039,67 @@ final class TMDbCleanDiscNameExtendedTests: XCTestCase {
         XCTAssertFalse(cleaned.query.lowercased().contains("unrated"))
         XCTAssertTrue(cleaned.query.lowercased().contains("dirty grandpa"))
     }
+
+    // MARK: - v4.0.9 TV-on-disc marker stripping
+
+    /// Bluey ships volume labels like "Bluey S1 Second Half" — TMDb's
+    /// search has no match for that verbatim and AutoRipper falls back
+    /// to "unidentified disc", which is what triggered the user's
+    /// "TMDb picker no longer working" report. v4.0.9 detects season /
+    /// half / disc markers and truncates the query to just the show
+    /// name.
+    func testStripsSAbbreviationSeasonMarker() {
+        let cleaned = TMDbService.cleanDiscName("BLUEY_S1_SECOND_HALF")
+        XCTAssertEqual(cleaned.query, "Bluey",
+            "S1 marker should truncate to just the show name")
+    }
+
+    func testStripsSecondHalfMarker() {
+        let cleaned = TMDbService.cleanDiscName("Bluey S1 Second Half")
+        XCTAssertEqual(cleaned.query, "Bluey")
+    }
+
+    func testStripsSeasonOneWordMarker() {
+        let cleaned = TMDbService.cleanDiscName("Bluey- Season One - The First Half")
+        XCTAssertEqual(cleaned.query, "Bluey",
+            "Truncate at 'Season One' and strip the trailing dash")
+    }
+
+    func testStripsSeasonNumberMarker() {
+        let cleaned = TMDbService.cleanDiscName("Downton_Abbey_Season_3")
+        XCTAssertEqual(cleaned.query, "Downton Abbey")
+    }
+
+    func testEarliestMarkerWinsWhenMultiplePresent() {
+        // S1 appears before SECOND HALF — truncate at S1, not at the later marker.
+        let cleaned = TMDbService.cleanDiscName("Bluey S1 First Half")
+        XCTAssertEqual(cleaned.query, "Bluey")
+    }
+
+    func testMarkerAtPositionZeroDoesNotTruncate() {
+        // A hypothetical movie literally titled "First Half" shouldn't
+        // be clobbered to empty. The marker-at-pos-0 guard preserves it.
+        let cleaned = TMDbService.cleanDiscName("First Half")
+        XCTAssertFalse(cleaned.query.isEmpty,
+            "Marker at position 0 must not produce an empty query")
+    }
+
+    func testMovieTitleWithoutMarkerUnchanged() {
+        // No markers → no-op. Inception was working; verify no regression.
+        let cleaned = TMDbService.cleanDiscName("INCEPTION")
+        XCTAssertEqual(cleaned.query, "Inception")
+    }
+
+    func testEpisodeWordNotTreatedAsMarker() {
+        // "Episode" alone is too ambiguous (Star Wars: Episode I is a
+        // real movie title). Verify it's NOT stripped.
+        let cleaned = TMDbService.cleanDiscName("STAR_WARS_EPISODE_1")
+        XCTAssertTrue(cleaned.query.lowercased().contains("star wars"),
+            "Should still contain 'Star Wars'")
+        XCTAssertTrue(cleaned.query.lowercased().contains("episode")
+            || cleaned.query.contains("1"),
+            "Episode/number context should survive — Star Wars Episode I is a real movie title")
+    }
 }
 
 // MARK: - GenericWebhookService payload tests

@@ -80,6 +80,48 @@ struct TMDbService {
             cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "")
         }
 
+        // v4.0.9: TV-on-disc marker detection. Bluey discs ship with
+        // labels like "Bluey S1 Second Half", "Bluey- Season One - The
+        // First Half", "BLUEY_S1_SECOND_HALF" — none of which TMDb
+        // recognizes verbatim. The show name always precedes the
+        // season/half/disc marker, so we find the earliest marker and
+        // truncate everything from there. Preserves single-word and
+        // movie names (no markers → no-op). Skip when the marker
+        // starts at position 0 to avoid clobbering legit movie titles
+        // that happen to start with these words (e.g. a hypothetical
+        // "First Half" as the actual film title).
+        let tvMarkers = [
+            // Season abbreviations: S1, S02 (must be S+digits, not bare S)
+            #"\bS\d+\b"#,
+            // "Season N" and "Season One/Two/.../Ten"
+            #"\b(?:SEASON|SERIES)\s+(?:\d+|ONE|TWO|THREE|FOUR|FIVE|SIX|SEVEN|EIGHT|NINE|TEN)\b"#,
+            // "First Half" / "Second Half" / etc. — common on multi-disc TV releases
+            #"\b(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH)\s+HALF\b"#,
+        ]
+        var earliestTVMarker: Int?
+        for pattern in tvMarkers {
+            guard let regex = try? NSRegularExpression(
+                pattern: pattern, options: .caseInsensitive) else { continue }
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            if let m = regex.firstMatch(in: cleaned, range: range),
+               m.range.location > 0 {
+                if earliestTVMarker == nil || m.range.location < earliestTVMarker! {
+                    earliestTVMarker = m.range.location
+                }
+            }
+        }
+        if let cut = earliestTVMarker,
+           let cutIdx = cleaned.index(cleaned.startIndex, offsetBy: cut, limitedBy: cleaned.endIndex) {
+            cleaned = String(cleaned[..<cutIdx])
+            // Strip trailing punctuation/whitespace leftover from the
+            // truncation point ("Bluey- " → "Bluey").
+            if let regex = try? NSRegularExpression(pattern: #"[-_:.\s]+$"#) {
+                cleaned = regex.stringByReplacingMatches(
+                    in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned),
+                    withTemplate: "")
+            }
+        }
+
         // Strip leading single letter prefix before a number (e.g. T28 → 28)
         if let regex = try? NSRegularExpression(pattern: #"^[A-Za-z](?=\d)"#) {
             cleaned = regex.stringByReplacingMatches(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned), withTemplate: "")
