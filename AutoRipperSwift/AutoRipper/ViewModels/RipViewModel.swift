@@ -13,15 +13,6 @@ final class RipViewModel: ObservableObject {
     @Published var selectedTitles: Set<Int> = []
     @Published var statusText: String = "Idle"
     @Published var logLines: [String] = []
-    /// v4.0.5: was "Full Auto" toggle (scan→rip→eject→loop-poll-for-next-disc).
-    /// The auto-loop part is REMOVED — each rip is now an explicit
-    /// one-shot. This flag now only controls whether the encode →
-    /// organize → publish pipeline runs after rip. Defaulted to TRUE
-    /// so users get the full pipeline by default; the UI toggle is
-    /// hidden (the flag is effectively always-on now). Kept named
-    /// `fullAutoEnabled` to minimize churn across the dozens of call
-    /// sites that gate post-rip behavior on it.
-    @Published var fullAutoEnabled: Bool = true
     @Published var errorMessage: String?
     @Published var detectedDiscType: String = ""
     @Published var detectedDiscName: String = ""
@@ -102,12 +93,6 @@ final class RipViewModel: ObservableObject {
     /// errors clustering in a narrow range across MULTIPLE different
     /// discs is the smoking gun for a drive laser-tracking fault.
     @Published var readErrorOffsets: [Int64] = []
-    /// v3.11.2: true when Auto mode has finished scanning a disc and is
-    /// paused awaiting the user's "Rip" click. Set when
-    /// `config.autoConfirmBeforeRip == true` AND the scan in `fullAuto`
-    /// completed. Cleared as soon as `ripSelected` starts, on abort, or
-    /// on a new scan. Wired into the UI's Rip-button enablement.
-    @Published var awaitingAutoRipConfirm: Bool = false
     /// v3.7.2: most-recent informational MakeMKV log line, surfaced as a
     /// caption beneath the rip status. Filters out high-frequency progress
     /// ticks (PRGV/PRGC/PRGT) and structural data lines (DRV/CINFO/TINFO/SINFO).
@@ -174,17 +159,6 @@ final class RipViewModel: ObservableObject {
     private let discord: DiscordService
     private let stagingService = StagingService()
     private var runningTask: Task<Void, Never>?
-    /// v3.7.2: in-memory cache of discs the auto loop just skipped because
-    /// they were already in the rip registry. Avoids re-scanning when the
-    /// drive's hardware auto-close pulls the same disc back in moments after
-    /// we ejected it. Keyed by detected volume label (cheap from drutil/
-    /// diskutil — no MakeMKV scan needed). Entries expire after the cooldown
-    /// window so the user can intentionally re-rip after clearing the registry.
-    private var recentlySkippedDiscNames: [(name: String, at: Date)] = []
-    /// Cooldown window for `recentlySkippedDiscNames`. 5 min is long enough
-    /// to absorb the drive's tray-cycle behavior and short enough that an
-    /// intentional re-rip works without restarting the app.
-    private static let recentlySkippedCooldown: TimeInterval = 300
     /// TMDb match for the current disc. Published so the rip hero / queue rows can
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
@@ -1038,7 +1012,6 @@ final class RipViewModel: ObservableObject {
         discCandidates = []
         unidentifiedDiscName = nil
         previousRipMatch = nil
-        awaitingAutoRipConfirm = false  // v3.11.2
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
         corruptionEventCount = 0  // v3.11.7
@@ -1142,22 +1115,7 @@ final class RipViewModel: ObservableObject {
     }
 
     func ripSelected() {
-        // v4.0.8: defensive — ensure the post-rip encode/organize/publish
-        // pipeline is enabled BEFORE the early-return guard. v4.0.5
-        // turned `fullAutoEnabled` into an always-true internal gate
-        // (the UI toggle was removed), but legacy code paths (or users
-        // upgrading from an older bundle that disabled it via abort)
-        // may still have it set false. The bug this rescues:
-        // 26-episode Bluey disc ripped but no queue jobs were added
-        // because `if fullAutoEnabled { onRipComplete?(...) }` skipped
-        // silently. This guarantees every deliberate Rip click flows
-        // all the way through to the NAS.
-        fullAutoEnabled = true
         guard !selectedTitles.isEmpty, !isRipping, let info = discInfo else { return }
-        // v3.11.2: clearing the pause flag the moment a rip starts means the
-        // UI's Rip button can return to its standard disabled-while-ripping
-        // state and the auto loop knows the user committed.
-        awaitingAutoRipConfirm = false
         // v3.11.5: reset error counters at rip start so the count reflects
         // this rip, not whatever happened during the prior scan.
         readErrorCount = 0
@@ -1248,15 +1206,11 @@ final class RipViewModel: ObservableObject {
                 let expectedSize = info.titles.first(where: { $0.id == tid })?.sizeBytes ?? 0
 
                 // One JobCard per ripped title — covers rip → encode → done for that title.
-                // Only created in full-auto mode (manual mode skips post-rip pipeline).
-                var card: JobCard? = nil
-                if fullAutoEnabled {
-                    let cardName = totalTitles > 1 ? "\(folderName) — title \(tid)" : folderName
-                    card = JobCard(discName: cardName,
+                let cardName = totalTitles > 1 ? "\(folderName) — title \(tid)" : folderName
+                let card = JobCard(discName: cardName,
                                    nasEnabled: config.nasUploadEnabled,
                                    discord: discord)
-                    await card?.start("rip")
-                }
+                await card.start("rip")
 
                 // Tell AppConfig where the partial rip will live so a crash mid-rip
                 // can clean up on next launch. The exact ripFile path isn't known
@@ -1327,20 +1281,13 @@ final class RipViewModel: ObservableObject {
                     )
                     sizeMonitor.cancel()
 
-                    // Stage to outputDir ONLY for jobs that won't enter the
-                    // queue pipeline. Queue-bound jobs (full-auto, non-extra)
-                    // skip staging — QueueViewModel does the local-encode
-                    // pipeline straight from scratch and publishes at the end.
-                    //
-                    // Cases that still need staging:
-                    //   * .extra titles (kept as raw rip; never enter queue)
-                    //   * manual-mode rips (no queue at all)
-                    //
-                    // For everything else (full-auto + non-extra), the rip
-                    // file stays in scratch and `file` points there directly.
+                    // Stage to outputDir ONLY for .extra titles — they keep
+                    // their raw rip and never enter the queue pipeline.
+                    // Queue-bound jobs (non-extra) skip staging; QueueViewModel
+                    // does the local-encode pipeline straight from scratch
+                    // and publishes at the end.
                     let titleIntent = intent(for: tid)
-                    let needsStaging = stagingEnabled
-                        && (!fullAutoEnabled || titleIntent == .extra)
+                    let needsStaging = stagingEnabled && titleIntent == .extra
                     let file: URL
                     if needsStaging {
                         let dest = URL(fileURLWithPath: finalDir)
@@ -1389,11 +1336,7 @@ final class RipViewModel: ObservableObject {
                             statusText = "Staging failed: \(error.localizedDescription)"
                             errorMessage = error.localizedDescription
                             log.error("Staging failed for title \(tid): \(error.localizedDescription)")
-                            if fullAutoEnabled {
-                                await card?.fail("rip", detail: "Staging: \(error.localizedDescription)")
-                            } else {
-                                await discord.notifyError("Staging failed for \(folderName): \(error.localizedDescription)")
-                            }
+                            await card.fail("rip", detail: "Staging: \(error.localizedDescription)")
                             NotificationService.shared.notify(title: "Staging Failed",
                                                               message: "\(folderName): \(error.localizedDescription)")
                             continue
@@ -1410,7 +1353,7 @@ final class RipViewModel: ObservableObject {
                     // local output forever. The Plex convention is to put
                     // extras under `<Movie or Show>/extras/` so we'll go
                     // there.
-                    if fullAutoEnabled, titleIntent == .extra,
+                    if titleIntent == .extra,
                        config.publishExtrasToNAS, config.nasUploadEnabled {
                         await publishExtraToNAS(localFile: file, info: info)
                     }
@@ -1419,38 +1362,35 @@ final class RipViewModel: ObservableObject {
                     config.inFlightRip = nil
                     activePhase = .idle
                     titleRipStatuses[tid] = .done
-                    // In Full Auto, every successfully-ripped title flows through the
+                    // Every successfully-ripped title flows through the
                     // encode → organize → scrape → NAS pipeline as its own queue job.
-                    // Manual mode still ends here (rip-only).
-                    if fullAutoEnabled {
-                        let resolution = info.titles.first(where: { $0.id == tid })?.resolution ?? ""
-                        let mins = Int(titleElapsed) / 60
-                        let secs = Int(titleElapsed) % 60
-                        await card?.finish("rip", detail: "\(mins)m \(secs)s")
-                        let intent = intent(for: tid)
-                        let edition = editionLabel(for: tid)
-                        let editionParam = (intent == .edition && !edition.isEmpty) ? edition : nil
-                        let override = nameOverride(for: tid)
-                        let queryName = override.isEmpty ? info.name : override
-                        let mediaResult = override.isEmpty ? cachedMediaResult : nil
-                        // TV episode assignment (populated by v3.3.0 picker UI; nil today
-                        // unless the user has manually injected one via titleEpisodeAssignments).
-                        let assignment = episodeAssignment(for: tid)
-                        // Compute disc fingerprint from the current scan info
-                        // and thread it through to the queue, so v3.7.1's
-                        // RippedDiscRegistry can record the publish.
-                        let discFp = DiscFingerprintService.fingerprint(info)
-                        // v3.12.0: compute HandBrake ordinals from the
-                        // user's track selection state. nil result means
-                        // "all tracks included" which maps to HandBrake's
-                        // --all-audio / --all-subtitles default.
-                        let audioOrd = self.audioOrdinals(forTitle: tid, in: info)
-                        let subOrd = self.subtitleOrdinals(forTitle: tid, in: info)
-                        onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
-                                       assignment?.season, assignment?.episode, assignment?.title, discFp,
-                                       readErrorCount, corruptionEventCount, readErrorOffsets,
-                                       audioOrd, subOrd)
-                    }
+                    let resolution = info.titles.first(where: { $0.id == tid })?.resolution ?? ""
+                    let mins = Int(titleElapsed) / 60
+                    let secs = Int(titleElapsed) % 60
+                    await card.finish("rip", detail: "\(mins)m \(secs)s")
+                    let intent = intent(for: tid)
+                    let edition = editionLabel(for: tid)
+                    let editionParam = (intent == .edition && !edition.isEmpty) ? edition : nil
+                    let override = nameOverride(for: tid)
+                    let queryName = override.isEmpty ? info.name : override
+                    let mediaResult = override.isEmpty ? cachedMediaResult : nil
+                    // TV episode assignment (populated by v3.3.0 picker UI; nil today
+                    // unless the user has manually injected one via titleEpisodeAssignments).
+                    let assignment = episodeAssignment(for: tid)
+                    // Compute disc fingerprint from the current scan info
+                    // and thread it through to the queue, so v3.7.1's
+                    // RippedDiscRegistry can record the publish.
+                    let discFp = DiscFingerprintService.fingerprint(info)
+                    // v3.12.0: compute HandBrake ordinals from the
+                    // user's track selection state. nil result means
+                    // "all tracks included" which maps to HandBrake's
+                    // --all-audio / --all-subtitles default.
+                    let audioOrd = self.audioOrdinals(forTitle: tid, in: info)
+                    let subOrd = self.subtitleOrdinals(forTitle: tid, in: info)
+                    onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
+                                   assignment?.season, assignment?.episode, assignment?.title, discFp,
+                                   readErrorCount, corruptionEventCount, readErrorOffsets,
+                                   audioOrd, subOrd)
                 } catch {
                     sizeMonitor.cancel()
                     config.inFlightRip = nil
@@ -1458,11 +1398,7 @@ final class RipViewModel: ObservableObject {
                     statusText = "Rip failed: \(error.localizedDescription)"
                     errorMessage = error.localizedDescription
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
-                    if fullAutoEnabled {
-                        await card?.fail("rip", detail: error.localizedDescription)
-                    } else {
-                        await discord.notifyError("Rip failed for \(folderName): \(error.localizedDescription)")
-                    }
+                    await card.fail("rip", detail: error.localizedDescription)
                     NotificationService.shared.notify(title: "Rip Failed", message: "\(folderName): \(error.localizedDescription)")
                 }
             }
@@ -1479,25 +1415,9 @@ final class RipViewModel: ObservableObject {
             _ = start  // overall start kept for potential summary logging
             // Scrape artwork/NFO into the title folder right after rip
             // (skip in full-auto mode — QueueViewModel handles it after organize)
-            if !fullAutoEnabled {
-                statusText = "Scraping artwork & NFO…"
-                logLines.append("Scraping artwork for \(folderName)…")
-                // When staging is on, the rip files now live at `finalDir`; the
-                // scratch `outputDir` was deleted just above. Always scrape into
-                // wherever the files actually ended up.
-                let destDir = URL(fileURLWithPath: stagingEnabled ? finalDir : outputDir)
-                let artwork = ArtworkService()
-                let scraped = await artwork.scrapeAndSave(
-                    discName: info.name,
-                    destDir: destDir,
-                    logCallback: { [weak self] line in
-                        Task { @MainActor in self?.logLines.append(line) }
-                    }
-                )
-                if scraped {
-                    logLines.append("✓ Artwork & NFO saved")
-                }
-            }
+            // v4.0.13: removed `if !fullAutoEnabled { scrape... }` block.
+            // The post-rip pipeline is always-on now; QueueViewModel scrapes
+            // artwork after the organize step, so scraping here was dead.
 
             ripProgress = 1.0
             statusText = "Rip complete"
@@ -1516,37 +1436,15 @@ final class RipViewModel: ObservableObject {
             let elapsed = Date().timeIntervalSince(start)
             let mins = Int(elapsed) / 60
             let secs = Int(elapsed) % 60
-            if !fullAutoEnabled {
-                await discord.notifySuccess("\(folderName) — rip complete in \(mins)m \(secs)s")
-            }
             NotificationService.shared.notify(title: "Rip Complete", message: "\(folderName) — \(mins)m \(secs)s")
 
             if config.autoEject { ejectDisc() }
 
-            // v3.11.1: protect against post-rip re-detect loop. The drive's
-            // hardware auto-close behavior (LG WH16NS40 etc.) can pull the
-            // just-ejected disc back in before the queue's publish step
-            // records its fingerprint in RippedDiscRegistry — leaving a
-            // window where the auto poll loop sees a "new" disc that's
-            // actually the same one we just ripped. Add its volume label
-            // to the in-memory cooldown cache so the poll loop ignores it
-            // until the registry catches up (or the user removes the disc).
-            //
-            // We use the SAME 5-min cooldown window as the existing
-            // recentlySkippedDiscNames cache. By the time it expires, the
-            // queue's publish step (worst case ~30 min on slow NAS but
-            // typically much faster) should have recorded the fingerprint
-            // in the persistent registry, which will then take over as the
-            // duplicate guard.
-            if fullAutoEnabled {
-                let justRippedName = detectedDiscName.isEmpty ? info.name : detectedDiscName
-                if !justRippedName.isEmpty {
-                    recentlySkippedDiscNames.append((name: justRippedName, at: Date()))
-                    pruneRecentlySkipped()
-                    FileLogger.shared.info("rip-vm",
-                        "auto: post-rip cooldown set for \(justRippedName) (5 min)")
-                }
-            }
+            // v4.0.13: removed post-rip cooldown cache. It was only
+            // load-bearing for the auto-poll loop removed in v4.0.5;
+            // duplicate-disc detection on the next manual scan is
+            // already handled by RippedDiscRegistry (persistent) and
+            // the per-disc fingerprint check.
 
             // Reset UX after a brief delay so the user sees "Rip complete"
             try? await Task.sleep(for: .seconds(3))
@@ -1555,128 +1453,8 @@ final class RipViewModel: ObservableObject {
             ripProgress = 0
             logLines = []
             titleRipStatuses = [:]
-            statusText = fullAutoEnabled
-                ? "Auto — insert next disc"
-                : "Ready — insert next disc"
-
-            // v4.0.5: post-rip auto-poll loop REMOVED. Per user request:
-            // "I want to be able to just put in a movie and select the
-            // start scan to start and not worry about the process
-            // starting again on its own." Each rip is now an explicit
-            // one-shot — insert disc → Scan → Rip. After completion,
-            // AutoRipper stops and waits for the next manual Scan click.
-            // (The waitForNextDiscAndContinue helper below is preserved
-            // as dead code in case batch auto-looping is ever re-introduced
-            // behind an explicit opt-in setting.)
+            statusText = "Ready — insert next disc"
         }
-    }
-
-    /// v4.0.5: dead code — preserved for reference. See removal note
-    /// in `fullAuto()` above. Used to poll for next-disc-inserted and
-    /// re-trigger fullAuto() on detection.
-    @available(*, deprecated, message: "Removed in v4.0.5 — auto-loop disabled by user request")
-    private func waitForNextDiscAndContinue() async {
-        FileLogger.shared.info("rip-vm", "auto: waiting for eject to complete")
-        statusText = "Auto — waiting for eject…"
-        // Phase 1: wait for the drive to be empty.
-        // Bail out after ~60s if drutil never reports empty (some drives lie).
-        var waited = 0
-        while fullAutoEnabled && !Task.isCancelled && waited < 60 {
-            let detected = await currentDiscType()
-            if detected.isEmpty { break }
-            try? await Task.sleep(for: .seconds(2))
-            waited += 2
-        }
-        guard fullAutoEnabled, !Task.isCancelled else {
-            FileLogger.shared.info("rip-vm", "auto: stopped during eject wait")
-            return
-        }
-
-        FileLogger.shared.info("rip-vm", "auto: drive empty, waiting for next disc")
-        statusText = "Auto — insert next disc"
-
-        // Phase 2: poll for new disc insertion.
-        // Periodically attempt a tray close — lets the user drop a disc on an
-        // open tray and walk away. drutil tray close is a no-op when the tray
-        // is already shut, and silently fails on drives without soft-close.
-        var pollsSinceClose = 0
-        while fullAutoEnabled && !Task.isCancelled {
-            let detected = await currentDiscType()
-            if !detected.isEmpty {
-                // v3.7.2: re-detect the disc to update detectedDiscName so the
-                // cooldown check below has the freshest volume label.
-                detectDisc()
-                // Give detectDisc's detached task a moment to populate
-                // detectedDiscName from diskutil before we check the cache.
-                try? await Task.sleep(for: .seconds(2))
-                if isRecentlySkipped(volumeName: detectedDiscName) {
-                    FileLogger.shared.info("rip-vm",
-                        "auto: ignoring \(detectedDiscName) — recently skipped (within cooldown)")
-                    statusText = "Auto — same disc still loaded, ignoring"
-                    // Re-eject; some drives need a nudge.
-                    ejectDisc()
-                    try? await Task.sleep(for: .seconds(8))
-                    continue
-                }
-                FileLogger.shared.info("rip-vm", "auto: new disc detected (\(detected)), starting Full Auto")
-                statusText = "Auto — \(detected) detected, scanning…"
-                // Give MakeMKV a moment to see the freshly-mounted disc — some drives
-                // report it in drutil before the volume actually mounts.
-                try? await Task.sleep(for: .seconds(3))
-                await MainActor.run { self.fullAuto() }
-                return
-            }
-            // Try a tray close every ~30s while idle. If the user dropped a
-            // disc on the open tray, the next poll cycle picks it up.
-            if pollsSinceClose >= 6 {
-                await closeDiscTrayBestEffort(reason: "auto-poll")
-                pollsSinceClose = 0
-            } else {
-                pollsSinceClose += 1
-            }
-            try? await Task.sleep(for: .seconds(5))
-        }
-        FileLogger.shared.info("rip-vm", "auto: stopped (fullAutoEnabled=\(fullAutoEnabled))")
-    }
-
-    /// True if `volumeName` was added to `recentlySkippedDiscNames` within the
-    /// cooldown window. Empty names never match.
-    func isRecentlySkipped(volumeName: String) -> Bool {
-        guard !volumeName.isEmpty else { return false }
-        pruneRecentlySkipped()
-        return recentlySkippedDiscNames.contains { $0.name == volumeName }
-    }
-
-    /// Drop expired entries from the recently-skipped cache. Called before
-    /// every read and after every write.
-    func pruneRecentlySkipped() {
-        let cutoff = Date().addingTimeInterval(-Self.recentlySkippedCooldown)
-        recentlySkippedDiscNames.removeAll { $0.at < cutoff }
-    }
-
-    /// Synchronous-style query of drutil for current disc type, "" if no disc.
-    private func currentDiscType() async -> String {
-        await Task.detached { () -> String in
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/drutil")
-            proc.arguments = ["status"]
-            let pipe = Pipe()
-            proc.standardOutput = pipe
-            proc.standardError = pipe
-            try? proc.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            guard let output = String(data: data, encoding: .utf8) else { return "" }
-            for line in output.components(separatedBy: .newlines) {
-                let t = line.trimmingCharacters(in: .whitespaces)
-                if t.hasPrefix("Type:") {
-                    let v = t.replacingOccurrences(of: "Type:", with: "").trimmingCharacters(in: .whitespaces)
-                    if v.lowercased().contains("bd") || v.lowercased().contains("blu") { return "Blu-ray" }
-                    if v.lowercased().contains("dvd") { return "DVD" }
-                }
-            }
-            return ""
-        }.value
     }
 
     /// Best-effort `drutil tray close` to pull in a disc the user has placed
@@ -1722,116 +1500,10 @@ final class RipViewModel: ObservableObject {
         if statusText == "Closing tray…" { statusText = prev }
     }
 
-    func fullAuto() {
-        guard !isScanning, !isRipping else { return }
-        isScanning = true
-        statusText = "Full Auto: scanning…"
-        logLines = []
-
-        runningTask = Task {
-            // Best-effort tray close so the user can drop a disc on the open
-            // tray and click Auto without first manually pushing it shut.
-            await closeDiscTrayBestEffort(reason: "auto")
-            do {
-                var info = try await makemkv.scanDisc(volumeLabel: detectedDiscName) { [weak self] line in
-                    Task { @MainActor in self?.appendMakeMKVLog(line) }
-                }
-                info.autoLabel()
-                applyScanModeOverride(to: &info)  // v4.0.5
-                await lookupTMDb(for: &info)
-                self.discInfo = info
-                // v4.0.6: surface main-feature/TMDb runtime mismatch
-                // in the fullAuto path too (rare since fullAuto rips
-                // immediately, but the banner stays for the History
-                // / hero post-rip).
-                if cachedMediaResult?.mediaType == "movie" {
-                    self.mainFeatureRuntimeMismatch = Self.detectMainFeatureMismatch(
-                        in: info,
-                        tmdbRuntimeMinutes: cachedMediaResult?.runtimeMinutes
-                    )
-                } else {
-                    self.mainFeatureRuntimeMismatch = nil
-                }
-                let fp = DiscFingerprintService.fingerprint(info)
-                let forcedRerrip = config.forceRerripFingerprints.contains(fp)
-                let prior = await RippedDiscRegistry.shared.entry(forFingerprint: fp)
-                // v3.11.10: same suppression as scanDisc — if the user
-                // marked this disc for re-rip, don't surface the dup
-                // banner and don't auto-skip below.
-                self.previousRipMatch = forcedRerrip ? nil : prior
-                isScanning = false
-
-                // v3.7.2: skip auto-re-rip when the disc is already in the
-                // registry. Prevents the auto-eject + drive-auto-close +
-                // re-scan loop the user hit on the LG WH16NS40. The user
-                // can disable via Settings → Library → "Skip already-ripped".
-                // v3.11.10: also bypass when the disc is explicitly
-                // queued for re-rip.
-                if let prior = self.previousRipMatch, config.skipAlreadyRippedInAuto, !forcedRerrip {
-                    let dateStr = ISO8601DateFormatter().string(from: prior.date)
-                    FileLogger.shared.info("rip-vm",
-                        "auto: skipping already-ripped disc \(prior.discName) (originally ripped \(dateStr))")
-                    statusText = "Skipped — already ripped"
-                    NotificationService.shared.notify(
-                        title: "Skipped: already ripped",
-                        message: "\(prior.discName) — originally on \(prior.date.formatted(date: .abbreviated, time: .shortened))"
-                    )
-                    // Cache the disc name so the auto poll loop doesn't
-                    // bother re-scanning it if the drive's auto-close
-                    // pulls it back in shortly.
-                    let detectedName = self.detectedDiscName.isEmpty ? info.name : self.detectedDiscName
-                    self.recentlySkippedDiscNames.append((name: detectedName, at: Date()))
-                    self.pruneRecentlySkipped()
-                    // Eject so the auto poll can move on.
-                    ejectDisc()
-                    return
-                }
-
-                // v4.0.2: TV-on-disc handling. When autoLabel marked
-                // multiple titles as .episode (clustered runtimes in
-                // the 18-90 min window), select ALL of them and
-                // auto-assign sequential S01EXX numbers. Without this
-                // an Auto mode rip of a TV box-set disc only picked
-                // the single largest title — usually a behind-the-
-                // scenes featurette, not an actual episode.
-                let episodeTitles = info.titles.filter { $0.category == .episode }
-                if episodeTitles.count >= 3 {
-                    selectedTitles = Set(episodeTitles.map { $0.id })
-                    autoAssignTvEpisodeNumbers(from: info)
-                    statusText = "Auto: \(episodeTitles.count) episodes queued (S01E01-\(String(format: "%02d", episodeTitles.count)))"
-                } else {
-                    // Movie / extras disc — pick the largest title above min duration.
-                    let candidates = info.titles.filter { $0.durationSeconds >= config.minDuration }
-                    guard let best = candidates.max(by: { $0.sizeBytes < $1.sizeBytes }) else {
-                        statusText = "No titles meet minimum duration"
-                        return
-                    }
-                    selectedTitles = [best.id]
-                }
-
-                // v3.11.2: opt-in "review before rip" pause. When enabled,
-                // Auto stops here and waits for the user to click the big
-                // Rip button. The auto poll loop is paused via the
-                // awaitingAutoRipConfirm flag — once the user presses Rip,
-                // ripSelected runs and the standard post-rip eject + poll
-                // path resumes. The user can also abort (ejects without
-                // ripping) via the Abort button.
-                if config.autoConfirmBeforeRip {
-                    awaitingAutoRipConfirm = true
-                    statusText = "Auto — review titles and press Rip"
-                    FileLogger.shared.info("rip-vm", "auto: paused for user confirmation")
-                    // Don't call ripSelected() — the UI's Rip button will
-                    // invoke it when the user clicks.
-                    return
-                }
-
-                ripSelected()
-            } catch {
-                statusText = "Full Auto failed: \(error.localizedDescription)"
-                isScanning = false
-            }
-        }
-    }
+    // v4.0.13: `fullAuto()` removed. Only caller was the also-removed
+    // `waitForNextDiscAndContinue()` auto-poll loop (v4.0.5). Each rip is
+    // now an explicit Scan → Rip click pair driven by `scanDisc()` +
+    // `ripSelected()`.
 
     func ejectDisc() {
         // Reset UI to the empty/insert-next state immediately — visually obvious
@@ -1884,18 +1556,6 @@ final class RipViewModel: ObservableObject {
             }
         }
         statusText = "Aborted"
-        // v4.0.8: do NOT disable fullAutoEnabled here. The pre-v4.0.5
-        // behavior was "abort exits the auto-loop, user must re-enable
-        // Full Auto to resume hands-free behavior" — but v4.0.5 removed
-        // the auto-loop and the UI toggle. With this line in place,
-        // a single abort would silence the post-rip encode/organize/
-        // publish pipeline FOREVER (no UI to re-enable it). The user
-        // hit exactly this bug: aborted some rip, then later ripped a
-        // full Bluey disc and got 26 orphaned MKVs in the output dir
-        // because onRipComplete is gated on fullAutoEnabled. Abort
-        // should stop the in-flight rip but leave the pipeline ready
-        // for the next deliberate Scan → Rip cycle.
-        awaitingAutoRipConfirm = false  // v3.11.2
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
         corruptionEventCount = 0  // v3.11.7

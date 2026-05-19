@@ -286,13 +286,7 @@ struct InsertNextDiscHero: View {
                     VStack(spacing: 12) {
                         Image(systemName: ripVM.detectedDiscType.contains("Blu") ? "opticaldisc.fill" : "opticaldisc")
                             .font(.system(size: 64))
-                        if ripVM.fullAutoEnabled {
-                            // In Auto mode, the same button shows the next-disc affordance
-                            // both immediately after enabling and after each completed disc.
-                            Text(ripVM.lastCompletedMedia == nil ? "Auto" : "Insert next disc")
-                                .font(.title2)
-                                .fontWeight(.semibold)
-                        } else if !ripVM.detectedDiscType.isEmpty {
+                        if !ripVM.detectedDiscType.isEmpty {
                             Text("Scan \(ripVM.detectedDiscType)")
                                 .font(.title2)
                                 .fontWeight(.semibold)

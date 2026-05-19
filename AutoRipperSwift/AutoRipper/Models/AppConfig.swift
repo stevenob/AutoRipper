@@ -136,24 +136,6 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(jellyfinApiKey, forKey: "jellyfinApiKey") }
     }
 
-    /// In Auto mode, when a freshly-scanned disc's fingerprint already exists
-    /// in `RippedDiscRegistry`, skip the rip and eject. Default: true. Set to
-    /// false if the user wants Auto mode to re-rip duplicates anyway (e.g. to
-    /// re-do a previously botched rip without manual intervention).
-    @Published var skipAlreadyRippedInAuto: Bool {
-        didSet { defaults.set(skipAlreadyRippedInAuto, forKey: "skipAlreadyRippedInAuto") }
-    }
-
-    /// v3.11.2: when on, Auto mode pauses after scanning each disc and waits
-    /// for the user to click the prominent "Rip" button before proceeding.
-    /// Default: false (existing fully-auto behavior preserved). Useful when
-    /// the user wants the auto loop's convenience (next-disc detection, tray
-    /// close, eject) but wants to eyeball each scan before committing to a
-    /// rip — for example to swap the TMDb match for a misidentified disc.
-    @Published var autoConfirmBeforeRip: Bool {
-        didSet { defaults.set(autoConfirmBeforeRip, forKey: "autoConfirmBeforeRip") }
-    }
-
     /// v3.11.3: cap MakeMKV's drive read speed for noise / longevity. 0 =
     /// no override (MakeMKV decides). 4 = quietest. 8 = balanced. 16 =
     /// fast. Above 32 = practically max. Mirrors MakeMKV's
@@ -326,8 +308,6 @@ final class AppConfig: ObservableObject {
         self.plexTvSectionId = str("plexTvSectionId", "")
         self.jellyfinUrl = str("jellyfinUrl", "")
         self.jellyfinApiKey = str("jellyfinApiKey", "")
-        self.skipAlreadyRippedInAuto = bool("skipAlreadyRippedInAuto", true)
-        self.autoConfirmBeforeRip = bool("autoConfirmBeforeRip", false)
         // v3.11.10: load the force-re-rip set. JSON-encoded sorted array
         // for deterministic on-disk shape. Defaults to empty if absent.
         if let arrData = data("forceRerripFingerprints"),

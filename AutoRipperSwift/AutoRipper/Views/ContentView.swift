@@ -747,11 +747,5 @@ struct DiscPaneView: View {
         .background(.bar)
     }
 
-    /// v3.11.2: rip button label varies by state. "Rip Now" makes it obvious
-    /// when Auto is paused waiting for user confirmation.
-    private var ripButtonLabel: String {
-        if ripVM.awaitingAutoRipConfirm { return "Rip Now" }
-        if ripVM.fullAutoEnabled { return "Rip & Encode" }
-        return "Rip"
-    }
+    private var ripButtonLabel: String { "Rip & Encode" }
 }

@@ -588,25 +588,6 @@ private struct LibraryRefreshPane: View {
             }
 
             Section {
-                Toggle("Skip already-ripped discs in Auto mode", isOn: $config.skipAlreadyRippedInAuto)
-                HStack(alignment: .top) {
-                    Spacer().frame(width: 130)
-                    Text("When Auto detects a disc whose fingerprint is in the registry, it ejects without ripping. Prevents the auto-eject + drive-auto-close re-rip loop on motorized-tray drives. Disable to always rip duplicates.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer()
-                }
-
-                Toggle("Pause for review before each Auto rip", isOn: $config.autoConfirmBeforeRip)
-                HStack(alignment: .top) {
-                    Spacer().frame(width: 130)
-                    Text("After Auto scans a new disc, wait for you to click the Rip Now button before starting. The auto loop still detects the next disc and ejects on completion — but each rip needs explicit confirmation. Useful for reviewing the TMDb identification before committing.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer()
-                }
                 HStack {
                     Text("Recorded discs:").frame(width: 130, alignment: .trailing)
                     Text("\(registryCount)")
@@ -1346,8 +1327,6 @@ private struct AdvancedPane: View {
             "plexMoviesSectionId": config.plexMoviesSectionId,
             "plexTvSectionId": config.plexTvSectionId,
             "jellyfinUrl": config.jellyfinUrl,
-            "skipAlreadyRippedInAuto": config.skipAlreadyRippedInAuto,
-            "autoConfirmBeforeRip": config.autoConfirmBeforeRip,
             // v3.12.1: include the newer settings that have shipped
             // since this exporter was first written. genericWebhookURL
             // is not a secret (it's just a URL) so it's safe in the
@@ -1421,8 +1400,6 @@ private struct AdvancedPane: View {
         if let v = dict["plexTvSectionId"]      as? String { config.plexTvSectionId = v }
         if let v = dict["jellyfinUrl"]          as? String { config.jellyfinUrl = v }
         if let v = dict["jellyfinApiKey"]       as? String { config.jellyfinApiKey = v }
-        if let v = dict["skipAlreadyRippedInAuto"] as? Bool { config.skipAlreadyRippedInAuto = v }
-        if let v = dict["autoConfirmBeforeRip"]    as? Bool { config.autoConfirmBeforeRip = v }
         // v3.12.1: import the newer keys too. Missing keys are silently
         // ignored, so importing an old export file still works fine.
         if let v = dict["genericWebhookURL"]    as? String { config.genericWebhookURL = v }
