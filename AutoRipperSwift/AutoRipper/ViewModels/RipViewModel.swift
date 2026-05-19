@@ -163,8 +163,10 @@ final class RipViewModel: ObservableObject {
     /// observe and update reactively if the user picks a different match mid-rip.
     @Published private(set) var cachedMediaResult: MediaResult?
 
-    /// Called when a rip completes: (discName, rippedFile, elapsed, resolution, card, mediaResult, intent, editionLabel, season, episode, episodeTitle, discFingerprint, ripReadErrors, ripCorruptionEvents, readErrorOffsets, audioTrackOrdinals, subtitleTrackOrdinals)
-    var onRipComplete: ((String, URL, TimeInterval, String, JobCard?, MediaResult?, JobIntent, String?, Int?, Int?, String?, String?, Int, Int, [Int64], [Int]?, [Int]?) -> Void)?
+    /// v4.0.14: called when a rip completes, with the full payload
+    /// the queue needs to enqueue an encode→organize→publish job.
+    /// See `CompletedRip` for field semantics.
+    var onRipComplete: ((CompletedRip) -> Void)?
 
     var minDuration: Int { config.minDuration }
 
@@ -1374,23 +1376,37 @@ final class RipViewModel: ObservableObject {
                     let override = nameOverride(for: tid)
                     let queryName = override.isEmpty ? info.name : override
                     let mediaResult = override.isEmpty ? cachedMediaResult : nil
-                    // TV episode assignment (populated by v3.3.0 picker UI; nil today
+                    // TV episode assignment (populated by the picker UI; nil today
                     // unless the user has manually injected one via titleEpisodeAssignments).
                     let assignment = episodeAssignment(for: tid)
-                    // Compute disc fingerprint from the current scan info
-                    // and thread it through to the queue, so v3.7.1's
-                    // RippedDiscRegistry can record the publish.
+                    // Disc fingerprint threaded through so the queue's publish
+                    // step records the rip in RippedDiscRegistry (the v3.7.1
+                    // "already ripped" guard).
                     let discFp = DiscFingerprintService.fingerprint(info)
-                    // v3.12.0: compute HandBrake ordinals from the
-                    // user's track selection state. nil result means
-                    // "all tracks included" which maps to HandBrake's
-                    // --all-audio / --all-subtitles default.
+                    // v3.12.0: HandBrake ordinals from the user's per-title
+                    // track selection. nil = use HandBrake's --all-audio /
+                    // --all-subtitles default.
                     let audioOrd = self.audioOrdinals(forTitle: tid, in: info)
                     let subOrd = self.subtitleOrdinals(forTitle: tid, in: info)
-                    onRipComplete?(queryName, file, titleElapsed, resolution, card, mediaResult, intent, editionParam,
-                                   assignment?.season, assignment?.episode, assignment?.title, discFp,
-                                   readErrorCount, corruptionEventCount, readErrorOffsets,
-                                   audioOrd, subOrd)
+                    onRipComplete?(CompletedRip(
+                        discName: queryName,
+                        rippedFile: file,
+                        ripElapsed: titleElapsed,
+                        resolution: resolution,
+                        card: card,
+                        mediaResult: mediaResult,
+                        intent: intent,
+                        editionLabel: editionParam,
+                        seasonNumber: assignment?.season,
+                        episodeNumber: assignment?.episode,
+                        episodeTitle: assignment?.title,
+                        discFingerprint: discFp,
+                        ripReadErrors: readErrorCount,
+                        ripCorruptionEvents: corruptionEventCount,
+                        readErrorOffsets: readErrorOffsets,
+                        audioTrackOrdinals: audioOrd,
+                        subtitleTrackOrdinals: subOrd
+                    ))
                 } catch {
                     sizeMonitor.cancel()
                     config.inFlightRip = nil

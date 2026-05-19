@@ -380,7 +380,7 @@ final class TrackOrdinalMappingTests: XCTestCase {
         // onRipComplete closure; here we pin that the public API exists
         // and accepts a handler.
         var handlerCalled = false
-        vm.onRipComplete = { _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ in
+        vm.onRipComplete = { _ in
             handlerCalled = true
         }
         XCTAssertNotNil(vm.onRipComplete,

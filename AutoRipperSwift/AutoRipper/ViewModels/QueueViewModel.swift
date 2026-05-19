@@ -97,6 +97,31 @@ final class QueueViewModel: ObservableObject {
         startWorkerIfNeeded()
     }
 
+    /// v4.0.14: typed-payload overload used by `RipViewModel.onRipComplete`.
+    /// Forwards to the verbose `addJob(discName:...)` so DragDrop and tests
+    /// keep their existing call shape.
+    func addJob(_ rip: CompletedRip) {
+        addJob(
+            discName: rip.discName,
+            rippedFile: rip.rippedFile,
+            ripElapsed: rip.ripElapsed,
+            resolution: rip.resolution,
+            card: rip.card,
+            mediaResult: rip.mediaResult,
+            intent: rip.intent,
+            editionLabel: rip.editionLabel,
+            seasonNumber: rip.seasonNumber,
+            episodeNumber: rip.episodeNumber,
+            episodeTitle: rip.episodeTitle,
+            discFingerprint: rip.discFingerprint,
+            ripReadErrors: rip.ripReadErrors,
+            ripCorruptionEvents: rip.ripCorruptionEvents,
+            readErrorOffsets: rip.readErrorOffsets,
+            audioTrackOrdinals: rip.audioTrackOrdinals,
+            subtitleTrackOrdinals: rip.subtitleTrackOrdinals
+        )
+    }
+
     func abortCurrent() {
         currentTask?.cancel()
         currentTask = nil
