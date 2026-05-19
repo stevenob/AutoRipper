@@ -945,10 +945,14 @@ final class RipViewModel: ObservableObject {
     /// `discCandidates` with the top results so the user can swap the auto-pick.
     /// Used by both manual scan and Full Auto.
     private func lookupTMDb(for info: inout DiscInfo) async {
+        FileLogger.shared.info("rip-vm",
+            "lookupTMDb: entry — info.name='\(info.name)' (type=\(info.type), \(info.titles.count) titles)")
         let tmdb = TMDbService(config: config)
         let results = await tmdb.searchMedia(query: info.name)
         self.discCandidates = Array(results.prefix(5))
         if var match = results.first {
+            FileLogger.shared.info("rip-vm",
+                "lookupTMDb: top match '\(match.displayTitle)' (\(match.mediaType), tmdbId=\(match.tmdbId)) — enriching")
             if match.mediaType == "movie", let details = await tmdb.getMovieDetails(tmdbId: match.tmdbId) {
                 match = details
             } else if match.mediaType == "tv", let details = await tmdb.getTvDetails(tmdbId: match.tmdbId) {
@@ -961,7 +965,11 @@ final class RipViewModel: ObservableObject {
             // the user clicking "Episode" N times for a season disc. v3.3.0's
             // picker UI will then populate season/episode/title per row.
             applyAutoIntent(for: match)
+            FileLogger.shared.info("rip-vm",
+                "lookupTMDb: enriched match set — cachedMediaResult='\(match.displayTitle)' (\(match.mediaType))")
         } else {
+            FileLogger.shared.warn("rip-vm",
+                "lookupTMDb: no results from TMDb for '\(info.name)' — surfacing unidentified-disc banner")
             await discord.notifyError("⚠️ TMDb could not identify disc: \(info.name)")
             NotificationService.shared.notify(title: "Unknown Disc", message: info.name)
             self.cachedMediaResult = nil

@@ -160,9 +160,12 @@ struct TMDbService {
     func searchMedia(query: String) async -> [MediaResult] {
         guard !apiKey.isEmpty else {
             log.warning("TMDb API key not configured")
+            FileLogger.shared.warn("tmdb", "searchMedia: TMDb API key not configured — returning empty")
             return []
         }
         if let cached = TMDbCache.shared.cachedSearch(query) {
+            FileLogger.shared.info("tmdb",
+                "searchMedia: cache hit for '\(query)' → \(cached.count) results")
             return cached
         }
         let (cleaned, discYear) = Self.cleanDiscName(query)
@@ -190,10 +193,14 @@ struct TMDbService {
                     posterPath: item.posterPath, backdropPath: item.backdropPath
                 )
             }
+            FileLogger.shared.info("tmdb",
+                "searchMedia: '\(query)' → cleaned='\(cleaned)' year=\(discYear.map { String($0) } ?? "nil") → \(results.count) result(s), top='\(results.first?.displayTitle ?? "nil")'")
             TMDbCache.shared.storeSearch(query, results)
             return results
         } catch {
             log.error("TMDb search failed: \(error.localizedDescription)")
+            FileLogger.shared.error("tmdb",
+                "searchMedia: '\(query)' → cleaned='\(cleaned)' FAILED: \(error.localizedDescription)")
             return []
         }
     }
