@@ -365,6 +365,41 @@ final class TrackOrdinalMappingTests: XCTestCase {
             XCTAssertEqual(vm.titleIntents[title.id], .episode)
         }
     }
+
+    // MARK: - v4.0.8 fullAutoEnabled lifecycle
+
+    /// Regression test for the "Bluey disc ripped but nothing got
+    /// enqueued" bug. Pre-v4.0.8 behavior: `abort()` set
+    /// `fullAutoEnabled = false` to "exit the auto-loop", but the
+    /// v4.0.5 UI toggle that re-enabled it was removed. So a single
+    /// abort would permanently silence the post-rip encode/organize/
+    /// publish pipeline. The user hit exactly this after aborting an
+    /// earlier rip, then watched 26 Bluey episodes rip to disk
+    /// without any queue jobs being added.
+    func testAbortDoesNotDisablePostRipPipeline() {
+        let vm = RipViewModel()
+        XCTAssertTrue(vm.fullAutoEnabled, "Default state is post-rip pipeline ON")
+        vm.abort()
+        XCTAssertTrue(vm.fullAutoEnabled,
+            "abort() must NOT disable the post-rip pipeline — the v4.0.5 auto-loop is gone and there's no UI toggle to re-enable it")
+    }
+
+    /// Defensive: even if a user upgraded from a build where
+    /// fullAutoEnabled was somehow stuck at false (e.g. abort() in a
+    /// prior version), the next ripSelected() call should resurrect
+    /// the pipeline. ripSelected guards on selectedTitles.isEmpty and
+    /// discInfo, so we can verify the lifecycle by reading the
+    /// published property after a no-op call.
+    func testRipSelectedResetsFullAutoEnabled() {
+        let vm = RipViewModel()
+        vm.fullAutoEnabled = false  // simulate stuck-disabled state
+        // ripSelected guards return early on empty selectedTitles,
+        // but the reset to true happens BEFORE the guard so we still
+        // see the effect.
+        vm.ripSelected()
+        XCTAssertTrue(vm.fullAutoEnabled,
+            "ripSelected() must reset fullAutoEnabled=true so the post-rip pipeline runs even if a prior code path disabled it")
+    }
 }
 
 // MARK: - TVEpisodeMatcher (v4.0.4)

@@ -1134,6 +1134,17 @@ final class RipViewModel: ObservableObject {
     }
 
     func ripSelected() {
+        // v4.0.8: defensive — ensure the post-rip encode/organize/publish
+        // pipeline is enabled BEFORE the early-return guard. v4.0.5
+        // turned `fullAutoEnabled` into an always-true internal gate
+        // (the UI toggle was removed), but legacy code paths (or users
+        // upgrading from an older bundle that disabled it via abort)
+        // may still have it set false. The bug this rescues:
+        // 26-episode Bluey disc ripped but no queue jobs were added
+        // because `if fullAutoEnabled { onRipComplete?(...) }` skipped
+        // silently. This guarantees every deliberate Rip click flows
+        // all the way through to the NAS.
+        fullAutoEnabled = true
         guard !selectedTitles.isEmpty, !isRipping, let info = discInfo else { return }
         // v3.11.2: clearing the pause flag the moment a rip starts means the
         // UI's Rip button can return to its standard disabled-while-ripping
@@ -1857,9 +1868,17 @@ final class RipViewModel: ObservableObject {
             }
         }
         statusText = "Aborted"
-        // Abort always exits the auto loop. The user must explicitly re-enable
-        // Full Auto to resume hands-free behavior.
-        fullAutoEnabled = false
+        // v4.0.8: do NOT disable fullAutoEnabled here. The pre-v4.0.5
+        // behavior was "abort exits the auto-loop, user must re-enable
+        // Full Auto to resume hands-free behavior" — but v4.0.5 removed
+        // the auto-loop and the UI toggle. With this line in place,
+        // a single abort would silence the post-rip encode/organize/
+        // publish pipeline FOREVER (no UI to re-enable it). The user
+        // hit exactly this bug: aborted some rip, then later ripped a
+        // full Bluey disc and got 26 orphaned MKVs in the output dir
+        // because onRipComplete is gated on fullAutoEnabled. Abort
+        // should stop the in-flight rip but leave the pipeline ready
+        // for the next deliberate Scan → Rip cycle.
         awaitingAutoRipConfirm = false  // v3.11.2
         readErrorCount = 0  // v3.11.5
         suggestLowerDriveSpeed = false  // v3.11.5
