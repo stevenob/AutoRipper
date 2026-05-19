@@ -246,24 +246,48 @@ final class AppConfig: ObservableObject {
 
         // Read helpers: cache wins (correct runtime semantics, plays
         // nicely with removeObject), disk only rescues a cold cache.
+        //
+        // v4.0.11 critical fix: when we DO rescue a value from disk,
+        // also write it back to cfprefsd via `d.set(...)`. Without
+        // this, cfprefsd's cache stays missing the rescued keys, and
+        // the NEXT auto-flush to disk overwrites the plist with only
+        // the (incomplete) cache — wiping the user's tmdbApiKey,
+        // discordWebhook, NAS paths, etc. The user hit exactly this:
+        // an updated app launched, AppConfig.init rescued outputDir
+        // from disk but didn't push the other values back; cfprefsd
+        // later flushed and clobbered the plist down to 10 default
+        // keys. This re-arms cfprefsd with the full set so a flush
+        // is a no-op.
         func str(_ key: String, _ def: String) -> String {
             if let v = d.string(forKey: key) { return v }
-            if cacheIsStale, let v = onDisk[key] as? String { return v }
+            if cacheIsStale, let v = onDisk[key] as? String {
+                d.set(v, forKey: key)
+                return v
+            }
             return def
         }
         func int(_ key: String, _ def: Int) -> Int {
             if let v = d.object(forKey: key) as? Int { return v }
-            if cacheIsStale, let v = onDisk[key] as? Int { return v }
+            if cacheIsStale, let v = onDisk[key] as? Int {
+                d.set(v, forKey: key)
+                return v
+            }
             return def
         }
         func bool(_ key: String, _ def: Bool) -> Bool {
             if let v = d.object(forKey: key) as? Bool { return v }
-            if cacheIsStale, let v = onDisk[key] as? Bool { return v }
+            if cacheIsStale, let v = onDisk[key] as? Bool {
+                d.set(v, forKey: key)
+                return v
+            }
             return def
         }
         func data(_ key: String) -> Data? {
             if let v = d.data(forKey: key) { return v }
-            if cacheIsStale, let v = onDisk[key] as? Data { return v }
+            if cacheIsStale, let v = onDisk[key] as? Data {
+                d.set(v, forKey: key)
+                return v
+            }
             return nil
         }
 

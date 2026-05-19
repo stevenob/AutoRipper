@@ -322,4 +322,71 @@ final class AppConfigDiskReadFallbackTests: XCTestCase {
         XCTAssertEqual(config.outputDir, canary,
             "AppConfig should rescue outputDir from disk when cfprefsd cache is empty")
     }
+
+    /// v4.0.11 regression: the disk-rescue path must ALSO push the
+    /// rescued value back into cfprefsd, so the next auto-flush
+    /// doesn't overwrite the plist with an incomplete cache and wipe
+    /// the rescued keys.
+    ///
+    /// This is the bug that wiped the user's tmdbApiKey, discordWebhook,
+    /// NAS paths etc. — v4.0.7 read them from disk into memory but
+    /// never re-armed cfprefsd, so cfprefsd's next disk flush clobbered
+    /// the plist down to just the keys it had cached.
+    func testDiskRescueReArmsCfprefsdCache() throws {
+        let suite = "group.com.autoripper"
+        let plistPath = NSHomeDirectory() + "/Library/Preferences/\(suite).plist"
+        let defaults = UserDefaults(suiteName: suite)!
+
+        // Preserve / restore both disk and cache, like the test above.
+        let originalDiskData = try? Data(contentsOf: URL(fileURLWithPath: plistPath))
+        let originalCacheOutputDir = defaults.string(forKey: "outputDir")
+        let originalCacheApiKey = defaults.string(forKey: "tmdbApiKey")
+        let originalCacheWebhook = defaults.string(forKey: "discordWebhook")
+        defer {
+            if let data = originalDiskData {
+                try? data.write(to: URL(fileURLWithPath: plistPath))
+            }
+            if let v = originalCacheOutputDir { defaults.set(v, forKey: "outputDir") }
+            else { defaults.removeObject(forKey: "outputDir") }
+            if let v = originalCacheApiKey { defaults.set(v, forKey: "tmdbApiKey") }
+            else { defaults.removeObject(forKey: "tmdbApiKey") }
+            if let v = originalCacheWebhook { defaults.set(v, forKey: "discordWebhook") }
+            else { defaults.removeObject(forKey: "discordWebhook") }
+        }
+
+        // Set up the "user has values on disk, cache is cold" scenario
+        // with MULTIPLE keys, not just outputDir.
+        var dict: [String: Any] = [:]
+        if let data = originalDiskData,
+           let existing = try? PropertyListSerialization.propertyList(
+               from: data, options: [], format: nil) as? [String: Any] {
+            dict = existing
+        }
+        let canaryOutput = "/mnt/canary-\(UUID().uuidString)"
+        let canaryApiKey = "canary-key-\(UUID().uuidString)"
+        let canaryWebhook = "https://example.invalid/\(UUID().uuidString)"
+        dict["outputDir"] = canaryOutput
+        dict["tmdbApiKey"] = canaryApiKey
+        dict["discordWebhook"] = canaryWebhook
+        let written = try PropertyListSerialization.data(
+            fromPropertyList: dict, format: .binary, options: 0)
+        try written.write(to: URL(fileURLWithPath: plistPath))
+        // Evict from cache so the rescue path triggers.
+        defaults.removeObject(forKey: "outputDir")
+        defaults.removeObject(forKey: "tmdbApiKey")
+        defaults.removeObject(forKey: "discordWebhook")
+
+        // Construct AppConfig — engages the disk-rescue path.
+        _ = AppConfig()
+
+        // The fix: rescued values MUST now be in cfprefsd's cache too.
+        // Without this, the next cfprefsd flush would write back an
+        // incomplete plist and wipe these keys forever.
+        XCTAssertEqual(defaults.string(forKey: "outputDir"), canaryOutput,
+            "Rescued outputDir must be written back to cfprefsd")
+        XCTAssertEqual(defaults.string(forKey: "tmdbApiKey"), canaryApiKey,
+            "Rescued tmdbApiKey must be written back to cfprefsd (the v4.0.10 wipe bug)")
+        XCTAssertEqual(defaults.string(forKey: "discordWebhook"), canaryWebhook,
+            "Rescued discordWebhook must be written back to cfprefsd")
+    }
 }
