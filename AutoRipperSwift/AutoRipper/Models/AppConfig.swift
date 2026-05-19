@@ -215,48 +215,99 @@ final class AppConfig: ObservableObject {
     }
 
     init() {
-        let d = UserDefaults(suiteName: "group.com.autoripper")!
-        self.outputDir = d.string(forKey: "outputDir") ?? NSHomeDirectory() + "/Desktop/Ripped"
-        self.ripScratchDir = d.string(forKey: "ripScratchDir") ?? ""
-        self.makemkvPath = d.string(forKey: "makemkvPath") ?? "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon"
-        self.handbrakePath = d.string(forKey: "handbrakePath") ?? "/opt/homebrew/bin/HandBrakeCLI"
-        self.tmdbApiKey = d.string(forKey: "tmdbApiKey") ?? ""
-        self.minDuration = d.object(forKey: "minDuration") as? Int ?? 120
-        self.autoEject = d.object(forKey: "autoEject") as? Bool ?? true
-        self.defaultPreset = d.string(forKey: "defaultPreset") ?? "HQ 1080p30 Surround"
-        self.defaultMediaType = d.string(forKey: "defaultMediaType") ?? "movie"
-        self.customPresetsFile = d.string(forKey: "customPresetsFile") ?? ""
+        let suite = "group.com.autoripper"
+        let d = UserDefaults(suiteName: suite)!
+
+        // v4.0.7: detect the "cfprefsd cache cold after update" scenario.
+        // After the in-app updater replaces /Applications/AutoRipper.app,
+        // macOS sometimes returns nil for keys in this suite even though
+        // the on-disk plist still holds the user's values — the symptom
+        // was outputDir reverting to ~/Desktop/Ripped on every update.
+        //
+        // We read the suite plist directly to detect & rescue this. We
+        // only USE the disk values when the cache is clearly stale —
+        // otherwise the cache wins (matters for tests that use
+        // `removeObject(forKey:)` to clear a single key, since the
+        // disk flush is async and would otherwise serve a stale value).
+        let plistPath = NSHomeDirectory() + "/Library/Preferences/\(suite).plist"
+        let onDisk: [String: Any] = {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: plistPath)),
+                  let dict = try? PropertyListSerialization.propertyList(
+                      from: data, options: [], format: nil) as? [String: Any]
+            else { return [:] }
+            return dict
+        }()
+        // Cache looks stale when cfprefsd returns nil for outputDir
+        // but the on-disk plist has it. That's the post-update signal:
+        // a previously-configured app has values on disk but the
+        // running cfprefsd hasn't loaded them yet.
+        let cacheIsStale = d.string(forKey: "outputDir") == nil
+            && onDisk["outputDir"] != nil
+
+        // Read helpers: cache wins (correct runtime semantics, plays
+        // nicely with removeObject), disk only rescues a cold cache.
+        func str(_ key: String, _ def: String) -> String {
+            if let v = d.string(forKey: key) { return v }
+            if cacheIsStale, let v = onDisk[key] as? String { return v }
+            return def
+        }
+        func int(_ key: String, _ def: Int) -> Int {
+            if let v = d.object(forKey: key) as? Int { return v }
+            if cacheIsStale, let v = onDisk[key] as? Int { return v }
+            return def
+        }
+        func bool(_ key: String, _ def: Bool) -> Bool {
+            if let v = d.object(forKey: key) as? Bool { return v }
+            if cacheIsStale, let v = onDisk[key] as? Bool { return v }
+            return def
+        }
+        func data(_ key: String) -> Data? {
+            if let v = d.data(forKey: key) { return v }
+            if cacheIsStale, let v = onDisk[key] as? Data { return v }
+            return nil
+        }
+
+        self.outputDir = str("outputDir", NSHomeDirectory() + "/Desktop/Ripped")
+        self.ripScratchDir = str("ripScratchDir", "")
+        self.makemkvPath = str("makemkvPath", "/Applications/MakeMKV.app/Contents/MacOS/makemkvcon")
+        self.handbrakePath = str("handbrakePath", "/opt/homebrew/bin/HandBrakeCLI")
+        self.tmdbApiKey = str("tmdbApiKey", "")
+        self.minDuration = int("minDuration", 120)
+        self.autoEject = bool("autoEject", true)
+        self.defaultPreset = str("defaultPreset", "HQ 1080p30 Surround")
+        self.defaultMediaType = str("defaultMediaType", "movie")
+        self.customPresetsFile = str("customPresetsFile", "")
         // v3.14.0: load discRules. JSON-encoded array. Defaults to empty
         // when absent or unparseable so a corrupt entry doesn't break
         // startup.
-        if let data = d.data(forKey: "discRules"),
-           let rules = try? JSONDecoder().decode([DiscRule].self, from: data) {
+        if let rulesData = data("discRules"),
+           let rules = try? JSONDecoder().decode([DiscRule].self, from: rulesData) {
             self.discRules = rules
         } else {
             self.discRules = []
         }
         // v4.0.3: extras-to-NAS toggle. Default on for new installs.
-        self.publishExtrasToNAS = d.object(forKey: "publishExtrasToNAS") as? Bool ?? true
-        self.discordWebhook = d.string(forKey: "discordWebhook") ?? ""
-        self.nasMoviesPath = d.string(forKey: "nasMoviesPath") ?? ""
-        self.nasTvPath = d.string(forKey: "nasTvPath") ?? ""
-        self.nasUploadEnabled = d.object(forKey: "nasUploadEnabled") as? Bool ?? false
-        self.historyRetentionDays = d.object(forKey: "historyRetentionDays") as? Int ?? 30
-        self.preventSleep = d.object(forKey: "preventSleep") as? Bool ?? true
-        self.verboseLogging = d.object(forKey: "verboseLogging") as? Bool ?? false
-        self.genericWebhookURL = d.string(forKey: "genericWebhookURL") ?? ""
-        self.plexUrl = d.string(forKey: "plexUrl") ?? ""
-        self.plexToken = d.string(forKey: "plexToken") ?? ""
-        self.plexMoviesSectionId = d.string(forKey: "plexMoviesSectionId") ?? ""
-        self.plexTvSectionId = d.string(forKey: "plexTvSectionId") ?? ""
-        self.jellyfinUrl = d.string(forKey: "jellyfinUrl") ?? ""
-        self.jellyfinApiKey = d.string(forKey: "jellyfinApiKey") ?? ""
-        self.skipAlreadyRippedInAuto = d.object(forKey: "skipAlreadyRippedInAuto") as? Bool ?? true
-        self.autoConfirmBeforeRip = d.object(forKey: "autoConfirmBeforeRip") as? Bool ?? false
+        self.publishExtrasToNAS = bool("publishExtrasToNAS", true)
+        self.discordWebhook = str("discordWebhook", "")
+        self.nasMoviesPath = str("nasMoviesPath", "")
+        self.nasTvPath = str("nasTvPath", "")
+        self.nasUploadEnabled = bool("nasUploadEnabled", false)
+        self.historyRetentionDays = int("historyRetentionDays", 30)
+        self.preventSleep = bool("preventSleep", true)
+        self.verboseLogging = bool("verboseLogging", false)
+        self.genericWebhookURL = str("genericWebhookURL", "")
+        self.plexUrl = str("plexUrl", "")
+        self.plexToken = str("plexToken", "")
+        self.plexMoviesSectionId = str("plexMoviesSectionId", "")
+        self.plexTvSectionId = str("plexTvSectionId", "")
+        self.jellyfinUrl = str("jellyfinUrl", "")
+        self.jellyfinApiKey = str("jellyfinApiKey", "")
+        self.skipAlreadyRippedInAuto = bool("skipAlreadyRippedInAuto", true)
+        self.autoConfirmBeforeRip = bool("autoConfirmBeforeRip", false)
         // v3.11.10: load the force-re-rip set. JSON-encoded sorted array
         // for deterministic on-disk shape. Defaults to empty if absent.
-        if let data = d.data(forKey: "forceRerripFingerprints"),
-           let arr = try? JSONDecoder().decode([String].self, from: data) {
+        if let arrData = data("forceRerripFingerprints"),
+           let arr = try? JSONDecoder().decode([String].self, from: arrData) {
             self.forceRerripFingerprints = Set(arr)
         } else {
             self.forceRerripFingerprints = []
@@ -265,7 +316,8 @@ final class AppConfig: ObservableObject {
         // stored our own value yet. That way an existing user who hand-edited
         // settings.conf sees their current value reflected in the AutoRipper UI
         // instead of a misleading "default" reading.
-        if let ourStored = d.object(forKey: "makemkvReadSpeed") as? Int {
+        if let ourStored = (d.object(forKey: "makemkvReadSpeed") as? Int)
+            ?? (cacheIsStale ? (onDisk["makemkvReadSpeed"] as? Int) : nil) {
             self.makemkvReadSpeed = ourStored
         } else if let fromMakemkv = MakeMKVConfigService.currentDriveReadSpeed() {
             self.makemkvReadSpeed = fromMakemkv
@@ -278,13 +330,22 @@ final class AppConfig: ObservableObject {
         // didn't capture that), so we record phase = .ripping with titleId = -1
         // and let cleanup handle "directory contained partial mkvs" by walking
         // the dir. Old key is removed regardless.
-        if d.data(forKey: "inFlightRip") == nil,
-           let legacy = d.string(forKey: "inFlightRipPath"), !legacy.isEmpty {
+        if data("inFlightRip") == nil,
+           let legacy = (onDisk["inFlightRipPath"] as? String) ?? d.string(forKey: "inFlightRipPath"),
+           !legacy.isEmpty {
             let migrated = InFlightRip(phase: .ripping, titleId: -1, ripFile: legacy, stagingDest: nil)
-            if let data = try? JSONEncoder().encode(migrated) {
-                d.set(data, forKey: "inFlightRip")
+            if let migData = try? JSONEncoder().encode(migrated) {
+                d.set(migData, forKey: "inFlightRip")
             }
         }
         d.removeObject(forKey: "inFlightRipPath")
+
+        // v4.0.7: diagnostic — when we engaged the disk-rescue path
+        // (cache was cold but disk had values), log it so we can
+        // confirm the fix is doing real work in the wild.
+        if cacheIsStale {
+            FileLogger.shared.warn("config",
+                "AppConfig.init: cfprefsd cache cold for suite '\(suite)' — rescued \(onDisk.keys.count) keys from on-disk plist (outputDir=\(onDisk["outputDir"] as? String ?? "nil"))")
+        }
     }
 }

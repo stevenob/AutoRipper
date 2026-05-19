@@ -402,14 +402,57 @@ struct DiscPaneView: View {
                 .width(28)
 
                 TableColumn("Type") { title in
-                    if !title.label.isEmpty {
-                        Text(title.label).font(.caption)
+                    VStack(alignment: .leading, spacing: 1) {
+                        if !title.label.isEmpty {
+                            Text(title.label).font(.caption)
+                        }
+                        // v4.0.7: when this title has a TV episode
+                        // assignment (set by TVEpisodePicker → Apply),
+                        // surface SxxExx right next to the category so
+                        // it's obvious which titles got mapped where.
+                        if let assn = ripVM.titleEpisodeAssignments[title.id] {
+                            Text(String(format: "S%02dE%02d", assn.season, assn.episode))
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(.purple)
+                        }
                     }
                 }
                 .width(110)
 
                 TableColumn("Title") { title in
-                    Text(title.name).fontWeight(.medium)
+                    // v4.0.7: when a TV episode assignment exists,
+                    // show the SxxExx + episode title as the primary
+                    // label (purple) and keep the MakeMKV title name
+                    // as a secondary caption — so the user gets
+                    // immediate visual confirmation that Apply took
+                    // effect, without losing the disc-side metadata.
+                    if let assn = ripVM.titleEpisodeAssignments[title.id], !assn.title.isEmpty {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(assn.title)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.purple)
+                            Text(title.name)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else if let assn = ripVM.titleEpisodeAssignments[title.id] {
+                        // Assignment exists but TMDb episode name is
+                        // blank (sequential fallback). Show "Episode N"
+                        // so the user still sees feedback.
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Episode \(assn.episode)")
+                                .fontWeight(.medium)
+                                .foregroundStyle(.purple)
+                            Text(title.name)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    } else {
+                        Text(title.name).fontWeight(.medium)
+                    }
                 }
 
                 TableColumn("Duration") { title in

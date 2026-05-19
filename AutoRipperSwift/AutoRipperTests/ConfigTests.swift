@@ -261,3 +261,65 @@ final class TrackModelTests: XCTestCase {
         XCTAssertEqual(track.type, "SRT")
     }
 }
+
+// MARK: - AppConfig disk-read fallback (v4.0.7)
+
+/// Regression tests for the "every update resets the output directory"
+/// bug. The root cause was cfprefsd returning nil for keys after an
+/// app-bundle replacement, so `AppConfig.init` fell back to defaults
+/// even when the on-disk plist still held the user's value.
+/// v4.0.7's fix reads the suite plist directly from disk first.
+final class AppConfigDiskReadFallbackTests: XCTestCase {
+
+    func testDiskReadFallbackBypassesCacheMiss() throws {
+        let suite = "group.com.autoripper"
+        let plistPath = NSHomeDirectory() + "/Library/Preferences/\(suite).plist"
+        let defaults = UserDefaults(suiteName: suite)!
+
+        // Preserve and restore both the on-disk file AND the cache
+        // value so the test doesn't disturb the developer's actual
+        // outputDir setting.
+        let originalDiskData = try? Data(contentsOf: URL(fileURLWithPath: plistPath))
+        let originalCacheValue = defaults.string(forKey: "outputDir")
+        defer {
+            if let data = originalDiskData {
+                try? data.write(to: URL(fileURLWithPath: plistPath))
+            }
+            if let v = originalCacheValue {
+                defaults.set(v, forKey: "outputDir")
+            } else {
+                defaults.removeObject(forKey: "outputDir")
+            }
+        }
+
+        // Recreate the post-update scenario: disk holds the user's
+        // saved value, cfprefsd cache is cold for that key.
+        // 1. Write the on-disk plist directly via PropertyListSerialization,
+        //    so cfprefsd doesn't see the change at all.
+        var dict: [String: Any] = [:]
+        if let data = originalDiskData,
+           let existing = try? PropertyListSerialization.propertyList(
+               from: data, options: [], format: nil) as? [String: Any] {
+            dict = existing
+        }
+        let canary = "/mnt/disk-read-canary-\(UUID().uuidString)"
+        dict["outputDir"] = canary
+        let written = try PropertyListSerialization.data(
+            fromPropertyList: dict, format: .binary, options: 0)
+        try written.write(to: URL(fileURLWithPath: plistPath))
+        // 2. Evict outputDir from cfprefsd's cache so a UserDefaults
+        //    read returns nil — exactly the post-update signal that
+        //    AppConfig.init's `cacheIsStale` check looks for.
+        defaults.removeObject(forKey: "outputDir")
+        XCTAssertNil(defaults.string(forKey: "outputDir"),
+            "Precondition: cache was cleared for outputDir")
+
+        // With v4.0.7's disk-rescue path, AppConfig must see the
+        // empty cache + non-empty disk pattern and load values from
+        // disk — recovering the canary instead of falling back to
+        // the ~/Desktop/Ripped default.
+        let config = AppConfig()
+        XCTAssertEqual(config.outputDir, canary,
+            "AppConfig should rescue outputDir from disk when cfprefsd cache is empty")
+    }
+}

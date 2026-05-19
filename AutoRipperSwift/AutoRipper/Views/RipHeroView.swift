@@ -193,9 +193,23 @@ struct RipHeroView: View {
         let edition = ripVM.editionLabel(for: title.id)
         let intent = ripVM.intent(for: title.id)
         var parts = ["Title \(title.id)"]
-        if intent == .edition && !edition.isEmpty { parts.append("(\(edition))") }
-        else if intent == .extra { parts.append("(Extra)") }
-        else if intent == .episode { parts.append("(Episode)") }
+        // v4.0.7: when a TV episode assignment exists, lead with
+        // SxxExx + episode title so the in-flight rip view reflects
+        // the user's mapping, not just "(Episode)".
+        if let assn = ripVM.titleEpisodeAssignments[title.id] {
+            let tag = String(format: "S%02dE%02d", assn.season, assn.episode)
+            if assn.title.isEmpty {
+                parts.append("(\(tag))")
+            } else {
+                parts.append("(\(tag) — \(assn.title))")
+            }
+        } else if intent == .edition && !edition.isEmpty {
+            parts.append("(\(edition))")
+        } else if intent == .extra {
+            parts.append("(Extra)")
+        } else if intent == .episode {
+            parts.append("(Episode)")
+        }
         let override = ripVM.nameOverride(for: title.id)
         if !override.isEmpty { parts.append("→ \(override)") }
         return parts.joined(separator: " ")
