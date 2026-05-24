@@ -128,6 +128,24 @@ final class RipViewModel: ObservableObject {
     /// have run. `nil` when no mismatch detected, no TMDb runtime
     /// available, or the user dismissed it for this scan.
     @Published var mainFeatureRuntimeMismatch: MainFeatureMismatch?
+    /// v4.0.15: pending "Apply known disc map?" prompt. Set by
+    /// `scanDisc` when `KnownDiscRegistry.lookup` matches the scanned
+    /// disc and the user hasn't already declined it for the same
+    /// fingerprint this session. Cleared by `applyKnownDiscMap` (which
+    /// applies the map) or `declineKnownDiscMap` (which records the
+    /// decline).
+    @Published var pendingKnownDiscMap: KnownDiscMap?
+    /// v4.0.15: who currently owns the per-title assignments. When set
+    /// to `.knownMap`, late-arriving async writers (TMDb runtime
+    /// matching, TVEpisodePicker auto-resequence) step aside so the
+    /// curated map isn't clobbered. Reset to `.automatic` at the top
+    /// of every scan and when the user explicitly picks a different
+    /// TMDb match via `selectDiscMatch`.
+    @Published private(set) var assignmentSource: AssignmentSource = .automatic
+    /// v4.0.15: per-session memory of "user declined the known map for
+    /// this disc fingerprint". Suppresses re-prompts on re-scan after
+    /// drive hiccups. Key format: `<fingerprint>::<mapId>`.
+    private var declinedKnownDiscMaps: Set<String> = []
     /// v3.12.0: per-title audio track selection. Outer key is title id,
     /// inner set holds the MakeMKV stream IDs of audio tracks the user
     /// wants included in the encode. Empty set means "use HandBrake
@@ -478,7 +496,17 @@ final class RipViewModel: ObservableObject {
     }
 
     /// v4.0.2 sequential fallback: number disc titles by title id order.
+    ///
+    /// v4.0.15: no-op when `assignmentSource != .automatic` — a curated
+    /// known-disc map (or manual override) owns the assignments and we
+    /// must not clobber them with shuffled-disc-incorrect sequential
+    /// numbering.
     private func applySequentialAssignment(episodeTitles: [TitleInfo], info: DiscInfo) {
+        guard assignmentSource.isAutomatic else {
+            FileLogger.shared.info("rip-vm",
+                "applySequentialAssignment: skipped — assignmentSource=\(assignmentSource)")
+            return
+        }
         let sorted = episodeTitles.sorted { $0.id < $1.id }
         for (idx, title) in sorted.enumerated() {
             guard titleEpisodeAssignments[title.id] == nil else { continue }
@@ -498,7 +526,17 @@ final class RipViewModel: ObservableObject {
     /// that didn't find a match within the matcher's tolerance keep
     /// their sequential fallback (so they still flow through the TV
     /// publish pipeline rather than silently disappearing).
+    ///
+    /// v4.0.15: no-op when `assignmentSource != .automatic`. This is
+    /// the race fix — the async Task that calls this can complete
+    /// AFTER the user has clicked Apply on a known-disc banner; without
+    /// the guard, it would overwrite the curated mapping.
     private func applyRuntimeMatchedAssignment(episodeTitles: [TitleInfo], episodes: [EpisodeInfo]) {
+        guard assignmentSource.isAutomatic else {
+            FileLogger.shared.info("rip-vm",
+                "applyRuntimeMatchedAssignment: skipped — assignmentSource=\(assignmentSource)")
+            return
+        }
         let matches = TVEpisodeMatcher.match(titles: episodeTitles, episodes: episodes)
         guard !matches.isEmpty else { return }
         for match in matches {
@@ -956,7 +994,18 @@ final class RipViewModel: ObservableObject {
     /// Replace the auto-picked TMDb match with one of the alternatives, or with
     /// a result from a manual search. Updates `discInfo.mediaTitle` so the UI
     /// header reflects the choice and the rip uses the right folder name.
+    ///
+    /// v4.0.15: if a known-disc map is in force, the user explicitly
+    /// choosing a different TMDb match means they're overriding our
+    /// curated mapping. Drop back to `.automatic` source so subsequent
+    /// auto-assignments can flow.
     func selectDiscMatch(_ match: MediaResult) {
+        if !assignmentSource.isAutomatic {
+            FileLogger.shared.info("rip-vm",
+                "selectDiscMatch: user picked alternate match — releasing assignmentSource (\(assignmentSource) -> .automatic)")
+            assignmentSource = .automatic
+            pendingKnownDiscMap = nil
+        }
         Task {
             let tmdb = TMDbService(config: config)
             var enriched = match
@@ -974,6 +1023,89 @@ final class RipViewModel: ObservableObject {
             }
             FileLogger.shared.info("rip-vm", "user picked disc match: \(enriched.displayTitle)")
         }
+    }
+
+    /// v4.0.15: apply a curated known-disc map (e.g. Bluey BBC slipcover
+    /// BD). Computed by `KnownDiscRegistry.resolve` as a pure plan, then
+    /// installed atomically on the viewmodel state. Switches
+    /// `assignmentSource` to `.knownMap` so the existing async
+    /// assignment writers (sequential + TMDb runtime) step aside.
+    ///
+    /// Skipped titles (e.g. French-only duplicates on Bluey BDs) are
+    /// removed from `selectedTitles`, their `titleEpisodeAssignments`
+    /// entry cleared, and their `titleIntents` demoted to `.extra` so
+    /// they show up correctly in the titles table even when deselected.
+    ///
+    /// Also overrides `cachedMediaResult.displayTitle` with the map's
+    /// `showName` (and `info.mediaTitle`) so the publish pipeline uses
+    /// the curated name regardless of what TMDb returned.
+    func applyKnownDiscMap(_ map: KnownDiscMap) {
+        guard let info = discInfo else {
+            FileLogger.shared.warn("rip-vm",
+                "applyKnownDiscMap: no discInfo — ignoring")
+            return
+        }
+        let plan = KnownDiscRegistry.resolve(for: info, map: map)
+
+        // Install assignments + intents for mapped titles.
+        for (titleId, assignment) in plan.assignments {
+            titleEpisodeAssignments[titleId] = assignment
+        }
+        for (titleId, intent) in plan.intents {
+            titleIntents[titleId] = intent
+        }
+        // Deselect skipped titles and clear any stale assignment entries
+        // that the sequential fallback may have inserted earlier.
+        for titleId in plan.deselectedTitleIds {
+            selectedTitles.remove(titleId)
+            titleEpisodeAssignments.removeValue(forKey: titleId)
+        }
+        // Override the disc display name with the curated show name.
+        if var updated = discInfo {
+            updated.mediaTitle = map.showName
+            discInfo = updated
+        }
+
+        assignmentSource = .knownMap(id: map.id)
+        pendingKnownDiscMap = nil
+
+        let appliedCount = plan.assignments.count
+        let skippedCount = plan.deselectedTitleIds.count
+        let unmappedCount = plan.unmappedTitleIds.count
+        FileLogger.shared.info("rip-vm",
+            "applyKnownDiscMap: '\(map.id)' applied — \(appliedCount) episodes, \(skippedCount) skipped, \(unmappedCount) unmapped (left as-is), \(plan.missingTitleIds.count) missing title ids")
+        if !plan.missingTitleIds.isEmpty {
+            FileLogger.shared.warn("rip-vm",
+                "applyKnownDiscMap: \(plan.missingTitleIds.count) mapped title ids not present on disc — \(plan.missingTitleIds.sorted())")
+        }
+    }
+
+    /// v4.0.15: user dismissed the known-disc banner. Records the
+    /// decline so a re-scan of the same physical disc doesn't re-prompt.
+    func declineKnownDiscMap() {
+        guard let map = pendingKnownDiscMap, let info = discInfo else {
+            pendingKnownDiscMap = nil
+            return
+        }
+        let fp = DiscFingerprintService.fingerprint(info)
+        declinedKnownDiscMaps.insert("\(fp)::\(map.id)")
+        pendingKnownDiscMap = nil
+        FileLogger.shared.info("rip-vm",
+            "declineKnownDiscMap: '\(map.id)' dismissed for fingerprint \(fp) — will not re-prompt this session")
+    }
+
+    /// v4.0.15: user already applied a known-disc map but wants to fall
+    /// back to the standard automatic flow. Drops `assignmentSource` back
+    /// to `.automatic` and clears the cached assignments so the picker
+    /// can repopulate them. Does NOT touch `selectedTitles` — if the
+    /// user wants the French dupes back, they can re-select them
+    /// manually.
+    func releaseKnownDiscMap() {
+        guard !assignmentSource.isAutomatic else { return }
+        FileLogger.shared.info("rip-vm",
+            "releaseKnownDiscMap: switching from \(assignmentSource) back to .automatic — clearing curated assignments")
+        assignmentSource = .automatic
+        titleEpisodeAssignments = [:]
     }
 
     /// When a TV match is selected, default every selected (or scanned-eligible)
@@ -1021,6 +1153,8 @@ final class RipViewModel: ObservableObject {
         titleEpisodeAssignments = [:]  // v4.0.2 — clear stale TV assignments
         titleIntents = [:]  // v4.0.2 — clear stale intent overrides
         mainFeatureRuntimeMismatch = nil  // v4.0.6 — clear prior banner
+        pendingKnownDiscMap = nil  // v4.0.15 — clear prior known-disc prompt
+        assignmentSource = .automatic  // v4.0.15 — reset assignment ownership
 
         runningTask = Task {
             // Best-effort: if the user left the tray open with a disc on it,
@@ -1102,6 +1236,21 @@ final class RipViewModel: ObservableObject {
                 if forcedRerrip {
                     FileLogger.shared.info("rip-vm",
                         "scan: dup banner suppressed because fingerprint is in forceRerripFingerprints (\(info.name))")
+                }
+                // v4.0.15: now that we have a fingerprint, see if this is a
+                // curated known disc (e.g. shuffled Bluey BBC slipcover BDs).
+                // Don't re-prompt if the user already declined this map for
+                // this physical disc this session.
+                if let map = KnownDiscRegistry.lookup(discName: info.name) {
+                    let declineKey = "\(fp)::\(map.id)"
+                    if !declinedKnownDiscMaps.contains(declineKey) {
+                        self.pendingKnownDiscMap = map
+                        FileLogger.shared.info("rip-vm",
+                            "known-disc map matched: '\(map.id)' for '\(info.name)' — awaiting user confirmation")
+                    } else {
+                        FileLogger.shared.info("rip-vm",
+                            "known-disc map matched '\(map.id)' but previously declined for this fingerprint — not re-prompting")
+                    }
                 }
                 let displayName = info.mediaTitle.isEmpty ? info.name : info.mediaTitle
                 statusText = "Scanned: \(displayName) — \(info.titles.count) titles"

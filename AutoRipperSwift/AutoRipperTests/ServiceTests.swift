@@ -3532,3 +3532,208 @@ final class MakeMKVConfigServiceTests: XCTestCase {
         XCTAssertTrue(out.contains("io_SingleDriveReadSpeed = \"4\""))
     }
 }
+
+// MARK: - KnownDiscRegistry tests (v4.0.15)
+
+/// Verifies the Bluey curated-disc data is internally consistent (no
+/// duplicate season+episode pairs, every disc has the expected count,
+/// all skip entries have a reason) and that the pure resolver produces
+/// the expected plan shape for a synthetic disc.
+final class KnownDiscRegistryTests: XCTestCase {
+
+    // MARK: lookup / normalization
+
+    func testLookupExactMatch() {
+        let map = KnownDiscRegistry.lookup(discName: "Bluey: Season Two - The Second Half")
+        XCTAssertNotNil(map)
+        XCTAssertEqual(map?.id, "bluey-s2-second-half")
+    }
+
+    func testLookupCaseInsensitive() {
+        let map = KnownDiscRegistry.lookup(discName: "bluey: SEASON two - the second HALF")
+        XCTAssertNotNil(map)
+        XCTAssertEqual(map?.id, "bluey-s2-second-half")
+    }
+
+    func testLookupWhitespaceCollapsed() {
+        // Extra whitespace should still match.
+        let map = KnownDiscRegistry.lookup(discName: "  Bluey:  Season Two  -  The Second Half  ")
+        XCTAssertNotNil(map)
+        XCTAssertEqual(map?.id, "bluey-s2-second-half")
+    }
+
+    func testLookupNoMatchReturnsNil() {
+        XCTAssertNil(KnownDiscRegistry.lookup(discName: "Some Random Disc"))
+        XCTAssertNil(KnownDiscRegistry.lookup(discName: ""))
+    }
+
+    func testNormalizeCollapsesInternalWhitespace() {
+        XCTAssertEqual(KnownDiscRegistry.normalize("  Hello   World  "), "hello world")
+        XCTAssertEqual(KnownDiscRegistry.normalize("Hello\tWorld"), "hello world")
+    }
+
+    // MARK: Bluey data integrity
+
+    func testBlueyAllDiscsRegistered() {
+        let blueyIds = Set(BlueyDiscMaps.all.map(\.id))
+        XCTAssertEqual(blueyIds.count, 6, "Expected 6 Bluey disc maps")
+        XCTAssertTrue(blueyIds.contains("bluey-s1-first-half"))
+        XCTAssertTrue(blueyIds.contains("bluey-s1-second-half"))
+        XCTAssertTrue(blueyIds.contains("bluey-s2-first-half"))
+        XCTAssertTrue(blueyIds.contains("bluey-s2-second-half"))
+        XCTAssertTrue(blueyIds.contains("bluey-s3-first-half"))
+        XCTAssertTrue(blueyIds.contains("bluey-s3-second-half"))
+    }
+
+    func testBlueyExpectedEpisodeCountIs154() {
+        let totalEpisodes = BlueyDiscMaps.all
+            .flatMap { $0.titleMappings.values }
+            .filter { !$0.isSkip }
+            .count
+        XCTAssertEqual(totalEpisodes, 154, "BBC slipcover Bluey S1-S3 set has 154 episodes")
+    }
+
+    func testBlueyExpectedSkipCount() {
+        // Per the source forum thread: discs 1, 2, 5, 6 each have one
+        // French-only duplicate. Disc 3 and Disc 4 have no skip entries.
+        // → 4 total skip entries.
+        let totalSkips = BlueyDiscMaps.all
+            .flatMap { $0.titleMappings.values }
+            .filter { $0.isSkip }
+            .count
+        XCTAssertEqual(totalSkips, 4)
+    }
+
+    func testBlueySkipsHaveReason() {
+        for map in BlueyDiscMaps.all {
+            for (_, entry) in map.titleMappings where entry.isSkip {
+                XCTAssertNotNil(entry.skipReason)
+                XCTAssertFalse(entry.skipReason!.isEmpty)
+            }
+        }
+    }
+
+    func testBlueyNoDuplicateEpisodesWithinSeason() {
+        // Group every non-skip entry by (season, episode); each combo
+        // must appear exactly once across the whole 6-disc registry.
+        var seen: [String: String] = [:]
+        for map in BlueyDiscMaps.all {
+            for (titleId, entry) in map.titleMappings where !entry.isSkip {
+                let key = "S\(entry.season)E\(entry.episode)"
+                if let prior = seen[key] {
+                    XCTFail("Duplicate \(key) in '\(map.id)' title \(titleId): \(entry.name) (already in \(prior))")
+                }
+                seen[key] = "\(map.id) title \(titleId): \(entry.name)"
+            }
+        }
+    }
+
+    func testBlueyDiscEpisodeCounts() {
+        // Per forum: 26+26+25+27+26+24 = 154
+        let countsById: [String: Int] = [
+            "bluey-s1-first-half": 26,
+            "bluey-s1-second-half": 26,
+            "bluey-s2-first-half": 25,
+            "bluey-s2-second-half": 27,
+            "bluey-s3-first-half": 26,
+            "bluey-s3-second-half": 24,
+        ]
+        for map in BlueyDiscMaps.all {
+            let count = map.titleMappings.values.filter { !$0.isSkip }.count
+            XCTAssertEqual(count, countsById[map.id], "Wrong episode count for \(map.id)")
+        }
+    }
+
+    func testBlueyAllExpectedTmdbIdIs82728() {
+        for map in BlueyDiscMaps.all {
+            XCTAssertEqual(map.expectedTmdbId, 82728, "All Bluey discs should reference TMDb id 82728")
+        }
+    }
+
+    // MARK: Pure resolver
+
+    private func makeTitle(id: Int) -> TitleInfo {
+        TitleInfo(id: id, name: "Title \(id)", duration: "0:25:00",
+                  sizeBytes: 1_000_000, chapters: 5, fileOutput: "title_t\(String(format: "%02d", id)).mkv")
+    }
+
+    func testResolveAssignsMappedTitles() {
+        let info = DiscInfo(name: "Bluey: Season One - The First Half", type: "bluray",
+                            titles: (1...27).map { makeTitle(id: $0) })
+        let map = KnownDiscRegistry.lookup(discName: info.name)!
+        let plan = KnownDiscRegistry.resolve(for: info, map: map)
+
+        // 26 real episodes, 1 French skip
+        XCTAssertEqual(plan.assignments.count, 26)
+        XCTAssertEqual(plan.deselectedTitleIds.count, 1)
+        XCTAssertTrue(plan.deselectedTitleIds.contains(26))  // French Markets is t26
+        XCTAssertTrue(plan.missingTitleIds.isEmpty)
+        // No unmapped — all 27 titles are in the map
+        XCTAssertTrue(plan.unmappedTitleIds.isEmpty)
+    }
+
+    func testResolveTaxiIsS01E25() {
+        // t01 = Taxi (S01E25) per the forum table — first sanity check
+        // that the title id -> episode mapping is correct.
+        let info = DiscInfo(name: "Bluey: Season One - The First Half", type: "bluray",
+                            titles: [makeTitle(id: 1)])
+        let map = KnownDiscRegistry.lookup(discName: info.name)!
+        let plan = KnownDiscRegistry.resolve(for: info, map: map)
+        let taxi = plan.assignments[1]
+        XCTAssertNotNil(taxi)
+        XCTAssertEqual(taxi?.season, 1)
+        XCTAssertEqual(taxi?.episode, 25)
+        XCTAssertEqual(taxi?.title, "Taxi")
+    }
+
+    func testResolveDeselectsFrenchDup() {
+        let info = DiscInfo(name: "Bluey: Season One - The First Half", type: "bluray",
+                            titles: [makeTitle(id: 26)])  // just the French dup
+        let map = KnownDiscRegistry.lookup(discName: info.name)!
+        let plan = KnownDiscRegistry.resolve(for: info, map: map)
+        XCTAssertTrue(plan.deselectedTitleIds.contains(26))
+        XCTAssertNil(plan.assignments[26])
+        XCTAssertEqual(plan.intents[26], .extra)
+    }
+
+    func testResolveTracksUnmappedTitlesAsExtras() {
+        // Disc has titles 1, 2, and 100 (made up bonus content). The
+        // map covers 1 and 2, so 100 must land in unmappedTitleIds.
+        var info = DiscInfo(name: "Bluey: Season One - The First Half", type: "bluray",
+                            titles: [makeTitle(id: 1), makeTitle(id: 2)])
+        info.titles.append(makeTitle(id: 100))
+        let map = KnownDiscRegistry.lookup(discName: info.name)!
+        let plan = KnownDiscRegistry.resolve(for: info, map: map)
+        XCTAssertTrue(plan.unmappedTitleIds.contains(100))
+        XCTAssertEqual(plan.assignments.count, 2)
+        XCTAssertNil(plan.assignments[100])
+    }
+
+    func testResolveReportsMissingTitleIds() {
+        // Map expects 27 titles but the disc only has 5.
+        let info = DiscInfo(name: "Bluey: Season One - The First Half", type: "bluray",
+                            titles: (1...5).map { makeTitle(id: $0) })
+        let map = KnownDiscRegistry.lookup(discName: info.name)!
+        let plan = KnownDiscRegistry.resolve(for: info, map: map)
+        // Map has entries 1..27 = 27 entries, disc has 1..5 → 22 missing
+        XCTAssertEqual(plan.missingTitleIds.count, 22)
+        XCTAssertEqual(plan.assignments.count, 5)
+    }
+
+    func testResolveS2SecondHalfHasNoT01() {
+        // Disc 4 omits t01 (forum-verified). If our data were wrong it
+        // would show up here.
+        let map = BlueyDiscMaps.season2SecondHalf
+        XCTAssertNil(map.titleMappings[1], "Disc 4 should NOT have a t01 entry")
+        XCTAssertNotNil(map.titleMappings[2])
+        XCTAssertNotNil(map.titleMappings[28], "Disc 4 extends to t28 (Easter)")
+    }
+
+    // MARK: AssignmentSource
+
+    func testAssignmentSourceIsAutomaticOnlyForAutomatic() {
+        XCTAssertTrue(AssignmentSource.automatic.isAutomatic)
+        XCTAssertFalse(AssignmentSource.knownMap(id: "x").isAutomatic)
+        XCTAssertFalse(AssignmentSource.manual.isAutomatic)
+    }
+}

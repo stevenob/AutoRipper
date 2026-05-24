@@ -65,6 +65,12 @@ struct DiscInfoColumn: View {
                     DiscMainFeatureMismatchBanner(ripVM: ripVM, mismatch: mismatch)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                // v4.0.15: curated known-disc map prompt (Bluey BBC slipcover
+                // BDs, etc.). Sits above TVDetectBanner because if applied it
+                // makes that banner moot.
+                if let knownMap = ripVM.pendingKnownDiscMap {
+                    KnownDiscBanner(ripVM: ripVM, map: knownMap)
+                }
                 if info.looksLikeTVSeason && !ripVM.titleIntents.values.contains(.episode) {
                     TVDetectBanner(ripVM: ripVM)
                         .clipShape(RoundedRectangle(cornerRadius: 6))

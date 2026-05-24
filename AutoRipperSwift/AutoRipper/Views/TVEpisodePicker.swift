@@ -7,6 +7,12 @@ import SwiftUI
 ///
 /// Episode names are pre-fetched from TMDb's getSeasonEpisodes (cached, so
 /// changing the season is fast).
+///
+/// v4.0.15: when a known-disc map is in force (`assignmentSource ==
+/// .knownMap`), this view replaces its auto-recompute controls with a
+/// read-only summary plus a "Switch to manual" affordance. The picker's
+/// sequential numbering would otherwise destroy the curated shuffled
+/// mapping.
 struct TVEpisodePicker: View {
     @ObservedObject var ripVM: RipViewModel
     @State private var season: Int = 1
@@ -24,7 +30,46 @@ struct TVEpisodePicker: View {
 
     private var showName: String { ripVM.cachedMediaResult?.title ?? "?" }
 
+    private var knownMapId: String? {
+        if case .knownMap(let id) = ripVM.assignmentSource { return id }
+        return nil
+    }
+
     var body: some View {
+        if let mapId = knownMapId {
+            knownMapBanner(mapId: mapId)
+        } else {
+            sequentialPicker
+        }
+    }
+
+    @ViewBuilder
+    private func knownMapBanner(mapId: String) -> some View {
+        let appliedCount = ripVM.titleEpisodeAssignments.count
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Known-disc map applied")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Text("\(appliedCount) episodes mapped from curated registry (\(mapId)). Sequential auto-numbering disabled.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Switch to manual") {
+                ripVM.releaseKnownDiscMap()
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.green.opacity(0.08))
+    }
+
+    @ViewBuilder
+    private var sequentialPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "tv")
@@ -113,7 +158,13 @@ struct TVEpisodePicker: View {
 
     /// Push the current picker state into RipViewModel.titleEpisodeAssignments.
     /// On rip start, RipViewModel reads this dict and forwards to onRipComplete.
+    ///
+    /// v4.0.15: no-op when a known-disc map is active. The picker's body
+    /// renders the read-only banner in that case, so user can't see the
+    /// stepper controls — but `.task` / `.onChange` callbacks still fire
+    /// and would clobber the curated map without this guard.
     private func apply() {
+        guard knownMapId == nil else { return }
         var fresh: [Int: TitleEpisodeAssignment] = [:]
         for (index, tid) in episodeTitleIds.enumerated() {
             let ep = startEpisode + index
