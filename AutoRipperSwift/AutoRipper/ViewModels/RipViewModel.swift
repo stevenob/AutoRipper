@@ -1047,12 +1047,28 @@ final class RipViewModel: ObservableObject {
         }
         let plan = KnownDiscRegistry.resolve(for: info, map: map)
 
+        // v4.0.16: the known map is now authoritative — wipe any
+        // sequential-assigned or TMDb-runtime-matched assignments first
+        // so unmapped titles can't keep stale S01EXX labels written by
+        // the async writers between scan completion and Apply click.
+        // Then re-install only what the map says.
+        titleEpisodeAssignments = [:]
+
         // Install assignments + intents for mapped titles.
         for (titleId, assignment) in plan.assignments {
             titleEpisodeAssignments[titleId] = assignment
         }
         for (titleId, intent) in plan.intents {
             titleIntents[titleId] = intent
+        }
+        // v4.0.16: claim authority over which titles are episodes.
+        // Any title currently classified as .episode that the map
+        // doesn't cover gets demoted to .extra — otherwise the disc's
+        // bonus content that the auto-classifier promoted to .episode
+        // would carry a stale S01EXX label (from sequential-assign or
+        // runtime-match) into the rip queue and Plex library.
+        for titleId in plan.unmappedTitleIds where titleIntents[titleId] == .episode {
+            titleIntents[titleId] = .extra
         }
         // Deselect skipped titles and clear any stale assignment entries
         // that the sequential fallback may have inserted earlier.
@@ -1072,8 +1088,9 @@ final class RipViewModel: ObservableObject {
         let appliedCount = plan.assignments.count
         let skippedCount = plan.deselectedTitleIds.count
         let unmappedCount = plan.unmappedTitleIds.count
+        let demotedCount = plan.unmappedTitleIds.filter { titleIntents[$0] == .extra }.count
         FileLogger.shared.info("rip-vm",
-            "applyKnownDiscMap: '\(map.id)' applied — \(appliedCount) episodes, \(skippedCount) skipped, \(unmappedCount) unmapped (left as-is), \(plan.missingTitleIds.count) missing title ids")
+            "applyKnownDiscMap: '\(map.id)' applied — \(appliedCount) episodes, \(skippedCount) skipped, \(unmappedCount) unmapped (\(demotedCount) demoted from .episode → .extra), \(plan.missingTitleIds.count) missing title ids")
         if !plan.missingTitleIds.isEmpty {
             FileLogger.shared.warn("rip-vm",
                 "applyKnownDiscMap: \(plan.missingTitleIds.count) mapped title ids not present on disc — \(plan.missingTitleIds.sorted())")

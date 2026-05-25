@@ -3729,6 +3729,74 @@ final class KnownDiscRegistryTests: XCTestCase {
         XCTAssertNotNil(map.titleMappings[28], "Disc 4 extends to t28 (Easter)")
     }
 
+    // MARK: applyKnownDiscMap demotion (v4.0.16 regression coverage)
+
+    @MainActor
+    func testApplyKnownDiscMapDemotesUnmappedEpisodesToExtra() {
+        // Setup: simulate the scenario where the auto-classifier promoted
+        // some out-of-map disc titles to .episode (e.g. Disc 4 had a t01
+        // segment the forum's table didn't document; scanMode=.tv pushed
+        // it into the episode bucket; sequential-assigned wrote S01EXX to
+        // it before the user clicked Apply). After Apply, that stale
+        // S01EXX must NOT survive — should be demoted to .extra.
+        let vm = RipViewModel()
+        let titles = (1...30).map { id in
+            TitleInfo(id: id, name: "Title \(id)", duration: "0:07:00",
+                      sizeBytes: 100_000_000, chapters: 5, fileOutput: "t\(id).mkv")
+        }
+        var info = DiscInfo(name: "Bluey: Season Two - The Second Half", type: "bluray", titles: titles)
+        info.mediaTitle = "Bluey"
+        vm.discInfo = info
+        // Simulate sequential-assigned having pre-populated S01EXX for
+        // every title and pushed them all to .episode intent.
+        for title in titles {
+            vm.titleIntents[title.id] = .episode
+            vm.titleEpisodeAssignments[title.id] = TitleEpisodeAssignment(season: 1, episode: title.id, title: "")
+            vm.selectedTitles.insert(title.id)
+        }
+
+        vm.applyKnownDiscMap(BlueyDiscMaps.season2SecondHalf)
+
+        // 27 mapped titles (ids 2..28) should have S02EXX from the map.
+        for tid in 2...28 {
+            XCTAssertEqual(vm.titleEpisodeAssignments[tid]?.season, 2,
+                           "Title \(tid) should be assigned season 2 by the known-disc map")
+            XCTAssertEqual(vm.titleIntents[tid], .episode)
+        }
+        // Unmapped titles (1, 29, 30) had .episode + S01EXX. After Apply
+        // they should be DEMOTED to .extra AND have no episode assignment.
+        for tid in [1, 29, 30] {
+            XCTAssertEqual(vm.titleIntents[tid], .extra,
+                           "Title \(tid) was an unmapped .episode and should be demoted to .extra")
+            XCTAssertNil(vm.titleEpisodeAssignments[tid],
+                         "Title \(tid) should have no stale episode assignment")
+        }
+    }
+
+    @MainActor
+    func testApplyKnownDiscMapWipesStaleS01EXX() {
+        // Even mapped titles can carry stale assignments from the async
+        // writers; verify that the apply step installs the curated value
+        // (not a merged one).
+        let vm = RipViewModel()
+        let title1 = TitleInfo(id: 1, name: "x", duration: "0:25:00",
+                               sizeBytes: 1_000_000_000, chapters: 5, fileOutput: "t1.mkv")
+        var info = DiscInfo(name: "Bluey: Season One - The First Half", type: "bluray", titles: [title1])
+        info.mediaTitle = "Bluey"
+        vm.discInfo = info
+        // Pre-populate as if sequential-assigned wrote S01E01 here.
+        vm.titleIntents[1] = .episode
+        vm.titleEpisodeAssignments[1] = TitleEpisodeAssignment(season: 1, episode: 1, title: "stale")
+        vm.selectedTitles.insert(1)
+
+        vm.applyKnownDiscMap(BlueyDiscMaps.season1FirstHalf)
+
+        // Per the forum: t01 → S01E25 (Taxi). NOT S01E01.
+        XCTAssertEqual(vm.titleEpisodeAssignments[1]?.season, 1)
+        XCTAssertEqual(vm.titleEpisodeAssignments[1]?.episode, 25)
+        XCTAssertEqual(vm.titleEpisodeAssignments[1]?.title, "Taxi")
+    }
+
     // MARK: AssignmentSource
 
     func testAssignmentSourceIsAutomaticOnlyForAutomatic() {
