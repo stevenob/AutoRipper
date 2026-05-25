@@ -3804,4 +3804,203 @@ final class KnownDiscRegistryTests: XCTestCase {
         XCTAssertFalse(AssignmentSource.knownMap(id: "x").isAutomatic)
         XCTAssertFalse(AssignmentSource.manual.isAutomatic)
     }
+
+    // MARK: User-loadable pack tests (v4.0.17)
+
+    /// Pure JSON DTO conversion tests — no filesystem required.
+    func testConvertEpisodeWithValidFields() {
+        let dto = KnownDiscEpisodeJSON(season: 1, episode: 2, name: "Pilot", skipReason: nil)
+        guard case .success(let entry) = KnownDiscMapLoader.convertEpisode(dto) else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertEqual(entry.season, 1)
+        XCTAssertEqual(entry.episode, 2)
+        XCTAssertEqual(entry.name, "Pilot")
+        XCTAssertFalse(entry.isSkip)
+    }
+
+    func testConvertEpisodeWithSkipReason() {
+        let dto = KnownDiscEpisodeJSON(season: nil, episode: nil, name: nil, skipReason: "French dup")
+        guard case .success(let entry) = KnownDiscMapLoader.convertEpisode(dto) else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertTrue(entry.isSkip)
+        XCTAssertEqual(entry.skipReason, "French dup")
+    }
+
+    func testConvertEpisodeFailsWithoutSeasonAndNoSkipReason() {
+        let dto = KnownDiscEpisodeJSON(season: nil, episode: 5, name: "x", skipReason: nil)
+        guard case .failure = KnownDiscMapLoader.convertEpisode(dto) else {
+            XCTFail("Expected failure"); return
+        }
+    }
+
+    func testConvertMapValidates() {
+        let dto = KnownDiscMapJSON(
+            id: "test-show-disc-1",
+            discNameAliases: ["TEST_SHOW_D1"],
+            displayName: "Test Show · Disc 1",
+            showName: "Test Show",
+            expectedTmdbId: nil,
+            titleMappings: [
+                "1": KnownDiscEpisodeJSON(season: 1, episode: 1, name: "Pilot", skipReason: nil),
+                "2": KnownDiscEpisodeJSON(season: nil, episode: nil, name: nil, skipReason: "Spanish dub")
+            ]
+        )
+        guard case .success(let map) = KnownDiscMapLoader.convert(dto) else {
+            XCTFail("Expected success"); return
+        }
+        XCTAssertEqual(map.id, "test-show-disc-1")
+        XCTAssertEqual(map.titleMappings.count, 2)
+        XCTAssertEqual(map.titleMappings[1]?.name, "Pilot")
+        XCTAssertTrue(map.titleMappings[2]?.isSkip ?? false)
+    }
+
+    func testConvertMapFailsWhenIdIsEmpty() {
+        let dto = KnownDiscMapJSON(
+            id: "",
+            discNameAliases: ["X"],
+            displayName: "x",
+            showName: "Show",
+            expectedTmdbId: nil,
+            titleMappings: ["1": KnownDiscEpisodeJSON(season: 1, episode: 1, name: "x", skipReason: nil)]
+        )
+        guard case .failure = KnownDiscMapLoader.convert(dto) else {
+            XCTFail("Expected failure"); return
+        }
+    }
+
+    func testConvertMapFailsOnNonIntegerKey() {
+        let dto = KnownDiscMapJSON(
+            id: "x", discNameAliases: ["A"], displayName: "x", showName: "x",
+            expectedTmdbId: nil,
+            titleMappings: ["abc": KnownDiscEpisodeJSON(season: 1, episode: 1, name: "x", skipReason: nil)]
+        )
+        guard case .failure = KnownDiscMapLoader.convert(dto) else {
+            XCTFail("Expected failure"); return
+        }
+    }
+
+    func testLoadFromTempFile() throws {
+        // Write a sample pack to a temp file, then load it.
+        let json = KnownDiscMapLoader.sampleJSONString()
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("test-pack-\(UUID().uuidString).json")
+        try json.write(to: tmp, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let result = KnownDiscMapLoader.load(from: tmp)
+        XCTAssertEqual(result.maps.count, 2, "Sample contains 2 disc maps")
+        XCTAssertTrue(result.errors.isEmpty)
+        XCTAssertEqual(result.maps.first?.showName, "Example Show")
+    }
+
+    func testLoadHandlesBadJSON() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("bad-pack-\(UUID().uuidString).json")
+        try "not json at all".write(to: tmp, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let result = KnownDiscMapLoader.load(from: tmp)
+        XCTAssertEqual(result.maps.count, 0)
+        XCTAssertFalse(result.errors.isEmpty)
+    }
+
+    func testLoadRejectsUnsupportedVersion() throws {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("v9-pack-\(UUID().uuidString).json")
+        try #"{"version": 9, "discMaps": []}"#.write(to: tmp, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let result = KnownDiscMapLoader.load(from: tmp)
+        XCTAssertTrue(result.maps.isEmpty)
+        XCTAssertEqual(result.errors.count, 1)
+        XCTAssertTrue(result.errors[0].contains("Unsupported schema version"))
+    }
+
+    func testLoadAllScansDirectory() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("kdm-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // Two valid pack files, one ignored .txt.
+        try KnownDiscMapLoader.sampleJSONString()
+            .write(to: dir.appendingPathComponent("a.json"), atomically: true, encoding: .utf8)
+        try KnownDiscMapLoader.sampleJSONString()
+            .write(to: dir.appendingPathComponent("b.json"), atomically: true, encoding: .utf8)
+        try "not json".write(to: dir.appendingPathComponent("c.txt"), atomically: true, encoding: .utf8)
+
+        let results = KnownDiscMapLoader.loadAll(in: dir)
+        XCTAssertEqual(results.count, 2, "Should ignore non-.json files")
+    }
+
+    func testRegistryRefreshAddsUserMapsOverBuiltIn() throws {
+        // Save state, run the test, restore.
+        let originalFolder = ""
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("kdm-registry-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            KnownDiscRegistry.refresh(userMapsFolder: originalFolder)
+        }
+
+        // Drop a pack that overrides bluey-s1-first-half (same id as built-in)
+        // and adds a brand-new id.
+        let json = """
+        {
+          "version": 1,
+          "discMaps": [
+            {
+              "id": "bluey-s1-first-half",
+              "discNameAliases": ["My Custom Bluey Disc 1"],
+              "displayName": "Custom override",
+              "showName": "Bluey",
+              "titleMappings": {
+                "1": { "season": 1, "episode": 99, "name": "Custom" }
+              }
+            },
+            {
+              "id": "my-new-show",
+              "discNameAliases": ["My New Show"],
+              "displayName": "My New Show",
+              "showName": "Show",
+              "titleMappings": {
+                "1": { "season": 1, "episode": 1, "name": "P" }
+              }
+            }
+          ]
+        }
+        """
+        try json.write(to: dir.appendingPathComponent("custom.json"),
+                       atomically: true, encoding: .utf8)
+
+        let stats = KnownDiscRegistry.refresh(userMapsFolder: dir.path)
+        XCTAssertEqual(stats.userMapCount, 2)
+        XCTAssertEqual(stats.builtInCount, 6)
+        XCTAssertTrue(stats.errors.isEmpty)
+
+        // The built-in bluey-s1-first-half should now be replaced by the user version.
+        let snapshot = KnownDiscRegistry.entries
+        let blueyEntries = snapshot.filter { $0.id == "bluey-s1-first-half" }
+        XCTAssertEqual(blueyEntries.count, 1, "User map should override built-in by id")
+        XCTAssertEqual(blueyEntries.first?.discNameAliases.first, "My Custom Bluey Disc 1")
+        XCTAssertEqual(blueyEntries.first?.titleMappings[1]?.episode, 99)
+
+        // New show should be present.
+        XCTAssertTrue(snapshot.contains(where: { $0.id == "my-new-show" }))
+
+        // Lookup should find the user-overridden alias.
+        let lookup = KnownDiscRegistry.lookup(discName: "My Custom Bluey Disc 1")
+        XCTAssertEqual(lookup?.titleMappings[1]?.episode, 99)
+    }
+
+    func testRegistryRefreshWithEmptyFolderRestoresBuiltIn() {
+        KnownDiscRegistry.refresh(userMapsFolder: "")
+        let stats = KnownDiscRegistry.lastLoadStats
+        XCTAssertEqual(stats.userMapCount, 0)
+        XCTAssertEqual(stats.builtInCount, 6)
+        XCTAssertEqual(KnownDiscRegistry.entries.count, 6)
+    }
 }

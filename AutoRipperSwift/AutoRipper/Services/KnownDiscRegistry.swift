@@ -3,11 +3,89 @@ import Foundation
 /// v4.0.15: lookup + pure-function resolution of `KnownDiscMap` entries.
 /// Decoupled from `RipViewModel` so the resolver is unit-testable without
 /// a real disc.
+///
+/// v4.0.17: also supports user-loadable JSON packs via
+/// `refresh(userMapsFolder:)`. Built-in maps (Bluey) are merged with
+/// any user packs found in the configured folder; user maps with the
+/// same `id` as a built-in win.
 enum KnownDiscRegistry {
-    /// All known disc maps. To add a new release, append its `KnownDiscMap`
-    /// here (or to one of the per-show data files) and the registry picks
-    /// it up automatically.
-    static let entries: [KnownDiscMap] = BlueyDiscMaps.all
+    /// Built-in maps shipped with the app. Read-only.
+    static let builtIn: [KnownDiscMap] = BlueyDiscMaps.all
+
+    /// Combined registry — built-in + user maps from the last refresh.
+    /// Mutated only via `refresh(userMapsFolder:)`. Reads are lock-
+    /// protected so concurrent lookups (e.g. from `RipViewModel.scanDisc`
+    /// running on its Task) see a consistent snapshot.
+    nonisolated(unsafe) private static var _entries: [KnownDiscMap] = BlueyDiscMaps.all
+    nonisolated(unsafe) private static let lock = NSLock()
+    nonisolated(unsafe) private static var _lastLoadStats: LoadStats =
+        LoadStats(builtInCount: BlueyDiscMaps.all.count, userMapCount: 0, fileCount: 0, errors: [])
+
+    /// Current snapshot. Safe to call concurrently.
+    static var entries: [KnownDiscMap] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _entries
+    }
+
+    /// Stats about the last refresh — surfaced in the Settings UI.
+    static var lastLoadStats: LoadStats {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastLoadStats
+    }
+
+    /// v4.0.17: re-scan the user maps folder and rebuild the merged
+    /// registry. Safe to call repeatedly. Empty / missing folder = use
+    /// built-in only.
+    ///
+    /// User maps with `id` matching a built-in override that built-in
+    /// entry. Within user packs, later files do NOT override earlier
+    /// files on duplicate id — the first one wins (deterministic order
+    /// by filename). Duplicates are reported in the stats.
+    @discardableResult
+    static func refresh(userMapsFolder: String?) -> LoadStats {
+        var combined = builtIn
+        let builtInIds = Set(builtIn.map(\.id))
+        var fileCount = 0
+        var userMaps: [KnownDiscMap] = []
+        var errors: [String] = []
+        var seenUserIds: Set<String> = []
+        if let folder = userMapsFolder?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !folder.isEmpty {
+            let url = URL(fileURLWithPath: folder, isDirectory: true)
+            let results = KnownDiscMapLoader.loadAll(in: url)
+            fileCount = results.count
+            for result in results {
+                errors.append(contentsOf: result.errors.map { "\(result.path): \($0)" })
+                for map in result.maps {
+                    if seenUserIds.contains(map.id) {
+                        errors.append("\(result.path): duplicate id '\(map.id)' ignored")
+                        continue
+                    }
+                    seenUserIds.insert(map.id)
+                    userMaps.append(map)
+                }
+            }
+            // User maps override built-ins by id: remove built-ins that
+            // share an id with any user map.
+            if !seenUserIds.isEmpty {
+                combined.removeAll { seenUserIds.contains($0.id) && builtInIds.contains($0.id) }
+            }
+            combined.append(contentsOf: userMaps)
+        }
+        let stats = LoadStats(
+            builtInCount: builtIn.count,
+            userMapCount: userMaps.count,
+            fileCount: fileCount,
+            errors: errors
+        )
+        lock.lock()
+        _entries = combined
+        _lastLoadStats = stats
+        lock.unlock()
+        return stats
+    }
 
     /// Find a matching map by disc volume label (CINFO attr 2). Matching is
     /// normalized — case-insensitive, leading/trailing whitespace trimmed,
@@ -16,7 +94,8 @@ enum KnownDiscRegistry {
     static func lookup(discName: String) -> KnownDiscMap? {
         let needle = normalize(discName)
         guard !needle.isEmpty else { return nil }
-        for map in entries {
+        let snapshot = entries
+        for map in snapshot {
             for alias in map.discNameAliases where normalize(alias) == needle {
                 return map
             }
@@ -89,4 +168,14 @@ enum KnownDiscRegistry {
             .joined(separator: " ")
         return collapsed
     }
+
+    /// Summary of the most recent `refresh` for the Settings UI.
+    struct LoadStats: Sendable, Equatable {
+        let builtInCount: Int
+        let userMapCount: Int
+        let fileCount: Int
+        let errors: [String]
+        var totalCount: Int { builtInCount + userMapCount }
+    }
 }
+

@@ -55,6 +55,21 @@ final class AppConfig: ObservableObject {
     /// editor (way better tooling than we could build in SwiftUI), then
     /// exports it as JSON and imports the file here. Empty string =
     /// no custom presets active.
+    /// v4.0.17: folder containing user-loadable known-disc map JSON
+    /// packs. Each `*.json` file is parsed as a `KnownDiscMapPackJSON`
+    /// envelope (one file = one show or release; the file contains an
+    /// array of disc maps for that release). Empty string = no user
+    /// maps loaded; only the built-in Bluey data is active.
+    ///
+    /// On change, `KnownDiscRegistry.refresh(userMapsFolder:)` is
+    /// invoked to re-scan + rebuild the merged registry.
+    @Published var knownDiscMapsFolder: String {
+        didSet {
+            defaults.set(knownDiscMapsFolder, forKey: "knownDiscMapsFolder")
+            KnownDiscRegistry.refresh(userMapsFolder: knownDiscMapsFolder)
+        }
+    }
+
     @Published var customPresetsFile: String {
         didSet { defaults.set(customPresetsFile, forKey: "customPresetsFile") }
     }
@@ -308,6 +323,8 @@ final class AppConfig: ObservableObject {
         self.plexTvSectionId = str("plexTvSectionId", "")
         self.jellyfinUrl = str("jellyfinUrl", "")
         self.jellyfinApiKey = str("jellyfinApiKey", "")
+        // v4.0.17: known-disc maps folder.
+        self.knownDiscMapsFolder = str("knownDiscMapsFolder", "")
         // v3.11.10: load the force-re-rip set. JSON-encoded sorted array
         // for deterministic on-disk shape. Defaults to empty if absent.
         if let arrData = data("forceRerripFingerprints"),
@@ -351,5 +368,11 @@ final class AppConfig: ObservableObject {
             FileLogger.shared.warn("config",
                 "AppConfig.init: cfprefsd cache cold for suite '\(suite)' — rescued \(onDisk.keys.count) keys from on-disk plist (outputDir=\(onDisk["outputDir"] as? String ?? "nil"))")
         }
+        // v4.0.17: prime the known-disc registry from the saved user
+        // maps folder. didSet on the @Published var doesn't fire during
+        // init, so we trigger refresh explicitly here.
+        let stats = KnownDiscRegistry.refresh(userMapsFolder: knownDiscMapsFolder)
+        FileLogger.shared.info("config",
+            "KnownDiscRegistry primed: \(stats.builtInCount) built-in + \(stats.userMapCount) user maps from \(stats.fileCount) file(s)\(stats.errors.isEmpty ? "" : " (\(stats.errors.count) errors)")")
     }
 }

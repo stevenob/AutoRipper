@@ -270,8 +270,123 @@ private struct ToolsPane: View {
             // it's available in AutoRipper's preset picker.
             Divider()
             customPresetsSection
+            // v4.0.17: user-loadable known-disc map packs.
+            Divider()
+            knownDiscMapsSection
         }
         .formStyle(.grouped)
+    }
+
+    @State private var discMapStats: KnownDiscRegistry.LoadStats = KnownDiscRegistry.lastLoadStats
+    @State private var discMapStatusMessage: String = ""
+
+    @ViewBuilder
+    private var knownDiscMapsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Disc maps folder:").frame(width: 130, alignment: .trailing)
+                if config.knownDiscMapsFolder.isEmpty {
+                    Text("Not set — only built-in maps active")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text(config.knownDiscMapsFolder)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+            }
+            HStack {
+                Spacer().frame(width: 130)
+                Button("Choose folder…") {
+                    browseFolder(binding: $config.knownDiscMapsFolder)
+                    refreshDiscMapStats()
+                }
+                .controlSize(.small)
+                if !config.knownDiscMapsFolder.isEmpty {
+                    Button("Reload") {
+                        KnownDiscRegistry.refresh(userMapsFolder: config.knownDiscMapsFolder)
+                        refreshDiscMapStats()
+                    }
+                    .controlSize(.small)
+                    Button("Clear") {
+                        config.knownDiscMapsFolder = ""
+                        refreshDiscMapStats()
+                    }
+                    .controlSize(.small)
+                }
+                Button("Export sample…") { exportSampleDiscMap() }
+                    .controlSize(.small)
+                Spacer()
+            }
+            HStack {
+                Spacer().frame(width: 130)
+                let s = discMapStats
+                Text("Loaded \(s.totalCount) map\(s.totalCount == 1 ? "" : "s"): \(s.builtInCount) built-in + \(s.userMapCount) user (from \(s.fileCount) file\(s.fileCount == 1 ? "" : "s"))\(s.errors.isEmpty ? "" : " — \(s.errors.count) error\(s.errors.count == 1 ? "" : "s")")")
+                    .font(.caption2)
+                    .foregroundStyle(s.errors.isEmpty ? Color.secondary : Color.orange)
+                Spacer()
+            }
+            if !discMapStats.errors.isEmpty {
+                HStack(alignment: .top) {
+                    Spacer().frame(width: 130)
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(discMapStats.errors.prefix(5).enumerated()), id: \.offset) { _, err in
+                            Text("• \(err)")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                        }
+                        if discMapStats.errors.count > 5 {
+                            Text("…and \(discMapStats.errors.count - 5) more")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    Spacer()
+                }
+            }
+            if !discMapStatusMessage.isEmpty {
+                HStack {
+                    Spacer().frame(width: 130)
+                    Text(discMapStatusMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                    Spacer()
+                }
+            }
+            HStack {
+                Spacer().frame(width: 130)
+                Text("Drop a `<show>.json` pack file in the folder above. Each pack contains an array of `discMaps` with title-id → episode mappings. AutoRipper offers to apply a matching pack on every disc scan. User maps override built-in entries with the same id. Click \"Export sample…\" to start from a template.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+        }
+        .onAppear { refreshDiscMapStats() }
+    }
+
+    private func refreshDiscMapStats() {
+        discMapStats = KnownDiscRegistry.lastLoadStats
+    }
+
+    private func exportSampleDiscMap() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = "example-disc-map.json"
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                try KnownDiscMapLoader.sampleJSONString().write(
+                    to: url, atomically: true, encoding: .utf8)
+                discMapStatusMessage = "Wrote sample to \(url.lastPathComponent)"
+            } catch {
+                discMapStatusMessage = "Failed to write sample: \(error.localizedDescription)"
+            }
+        }
     }
 
     @ViewBuilder
