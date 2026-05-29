@@ -433,7 +433,16 @@ struct DiscPaneView: View {
                     .frame(width: 240, height: 200)
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(ripVM.detectedDiscType.isEmpty)
+                // v4.0.18: removed `.disabled(detectedDiscType.isEmpty)`.
+                // detectedDiscType is populated by `drutil status` polling;
+                // when the kernel attaches an optical drive in the wrong
+                // IOKit class (sometimes happens after USB sleep), drutil
+                // returns nothing even though MakeMKV's libmakemkv can see
+                // the drive fine. Gating the button on drutil's view left
+                // the user completely stuck — auto-detect blind AND scan
+                // button unclickable. The scanDisc path uses makemkvcon
+                // directly and handles "no disc" gracefully, so leaving
+                // the button always clickable is strictly better.
 
                 if ripVM.detectedDiscType.isEmpty {
                     Text("Insert a DVD or Blu-ray to begin.")
