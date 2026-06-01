@@ -114,6 +114,15 @@ final class AppConfig: ObservableObject {
     @Published var verboseLogging: Bool {
         didSet { defaults.set(verboseLogging, forKey: "verboseLogging") }
     }
+    /// v4.1.0: when enabled, each scan is matched against TheDiscDB
+    /// (https://thediscdb.com) to pull authoritative per-title
+    /// classification (main feature / extra / deleted scene / episode),
+    /// names, and season/episode numbers. Only conservatively-trusted
+    /// matches are applied; everything else falls back to AutoRipper's
+    /// own heuristics. Public endpoint, no API key required.
+    @Published var discDbMatchEnabled: Bool {
+        didSet { defaults.set(discDbMatchEnabled, forKey: "discDbMatchEnabled") }
+    }
     /// Optional generic outbound webhook URL — called with a JSON payload on
     /// job completion/failure. Useful for Home Assistant, Slack, n8n, etc.
     @Published var genericWebhookURL: String {
@@ -316,6 +325,7 @@ final class AppConfig: ObservableObject {
         self.historyRetentionDays = int("historyRetentionDays", 30)
         self.preventSleep = bool("preventSleep", true)
         self.verboseLogging = bool("verboseLogging", false)
+        self.discDbMatchEnabled = bool("discDbMatchEnabled", true)
         self.genericWebhookURL = str("genericWebhookURL", "")
         self.plexUrl = str("plexUrl", "")
         self.plexToken = str("plexToken", "")

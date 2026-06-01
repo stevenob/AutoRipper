@@ -35,9 +35,18 @@ struct TVEpisodePicker: View {
         return nil
     }
 
+    /// v4.1.0: a trusted TheDiscDB match owns the assignments, same as a
+    /// known-disc map — show a read-only banner, not the sequential picker.
+    private var discDbRelease: String? {
+        if case .discDb(let release) = ripVM.assignmentSource { return release }
+        return nil
+    }
+
     var body: some View {
         if let mapId = knownMapId {
             knownMapBanner(mapId: mapId)
+        } else if let release = discDbRelease {
+            discDbBanner(release: release)
         } else {
             sequentialPicker
         }
@@ -66,6 +75,31 @@ struct TVEpisodePicker: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color.green.opacity(0.08))
+    }
+
+    @ViewBuilder
+    private func discDbBanner(release: String) -> some View {
+        let appliedCount = ripVM.titleEpisodeAssignments.count
+        HStack(spacing: 8) {
+            Image(systemName: "opticaldisc.fill")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("TheDiscDB match applied")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Text("\(appliedCount) episodes mapped from TheDiscDB (\(release)). Sequential auto-numbering disabled.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Switch to manual") {
+                ripVM.releaseKnownDiscMap()
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.blue.opacity(0.08))
     }
 
     @ViewBuilder

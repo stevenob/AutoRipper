@@ -185,6 +185,17 @@ private struct GeneralPane: View {
 
             Toggle(isOn: $config.autoEject) { Text("Auto-eject after rip") }
 
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle(isOn: $config.discDbMatchEnabled) {
+                    Text("Match titles against TheDiscDB")
+                }
+                Text("Pulls authoritative per-title names, main-feature/extra/deleted-scene classification, and episode numbers from thediscdb.com when a confident match is found. Falls back to AutoRipper's heuristics otherwise. No account needed.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 2)
+            }
+
             // v3.11.3: drive read-speed slider — writes to MakeMKV's
             // settings.conf io_SingleDriveReadSpeed key. Lower = quieter
             // drive at the cost of slower rips. Discrete steps so users
@@ -1438,6 +1449,7 @@ private struct AdvancedPane: View {
             "historyRetentionDays": config.historyRetentionDays,
             "preventSleep": config.preventSleep,
             "verboseLogging": config.verboseLogging,
+            "discDbMatchEnabled": config.discDbMatchEnabled,
             "plexUrl": config.plexUrl,
             "plexMoviesSectionId": config.plexMoviesSectionId,
             "plexTvSectionId": config.plexTvSectionId,
@@ -1507,6 +1519,7 @@ private struct AdvancedPane: View {
         if let v = dict["historyRetentionDays"] as? Int    { config.historyRetentionDays = v }
         if let v = dict["preventSleep"]         as? Bool   { config.preventSleep = v }
         if let v = dict["verboseLogging"]       as? Bool   { config.verboseLogging = v }
+        if let v = dict["discDbMatchEnabled"]   as? Bool   { config.discDbMatchEnabled = v }
         if let v = dict["tmdbApiKey"]           as? String { config.tmdbApiKey = v }
         if let v = dict["discordWebhook"]       as? String { config.discordWebhook = v }
         if let v = dict["plexUrl"]              as? String { config.plexUrl = v }

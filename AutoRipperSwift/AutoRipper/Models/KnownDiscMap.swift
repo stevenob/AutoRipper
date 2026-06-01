@@ -90,6 +90,8 @@ struct KnownDiscApplyPlan: Sendable, Equatable {
 enum AssignmentSource: Sendable, Equatable {
     case automatic
     case knownMap(id: String)
+    /// v4.1.0: a trusted TheDiscDB match is in force; auto writers no-op.
+    case discDb(release: String)
     case manual
 
     var isAutomatic: Bool {

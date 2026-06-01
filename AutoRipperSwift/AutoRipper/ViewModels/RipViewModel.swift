@@ -1125,6 +1125,135 @@ final class RipViewModel: ObservableObject {
         titleEpisodeAssignments = [:]
     }
 
+    // MARK: - v4.1.0 — TheDiscDB integration
+
+    /// Look the scanned disc up on TheDiscDB and, if a conservatively-
+    /// trusted match comes back, apply its per-title classification on
+    /// top of the heuristic labelling. Best-effort and non-fatal: any
+    /// miss (toggle off, no candidates, untrusted plan) simply leaves the
+    /// existing heuristic state untouched.
+    ///
+    /// Strategy mirrors the proven PoC: try an exact content-hash lookup
+    /// first (cheap, unambiguous when present), then fall back to the
+    /// TMDb-id + per-title duration-signature match.
+    func applyDiscDbMatch(to info: DiscInfo) async {
+        guard config.discDbMatchEnabled else { return }
+        // Only act while we still own the assignments — a user action or
+        // known-disc map taking over mid-lookup must win.
+        guard assignmentSource.isAutomatic else {
+            FileLogger.shared.info("rip-vm",
+                "discdb: skipped — assignmentSource=\(assignmentSource)")
+            return
+        }
+
+        let service = TheDiscDBService()
+        var candidates: [TheDiscDBDisc] = []
+        var exactHash = false
+
+        // Best-effort content hash from the mounted volume. The on-disc
+        // file ordering is unverified, so a miss here just falls through.
+        let volume = URL(fileURLWithPath: "/Volumes/\(info.name)")
+        if let hash = TheDiscDBContentHash.contentHash(forVolumeAt: volume) {
+            candidates = await service.lookup(contentHash: hash)
+            exactHash = !candidates.isEmpty
+            if exactHash {
+                FileLogger.shared.info("rip-vm",
+                    "discdb: content-hash \(hash) matched \(candidates.count) disc(s)")
+            }
+        }
+
+        // Fall back to TMDb id (the proven path — most entries have a
+        // null content hash).
+        if candidates.isEmpty, let media = cachedMediaResult {
+            candidates = await service.lookup(tmdbId: media.tmdbId, mediaType: media.mediaType)
+        }
+        guard !candidates.isEmpty else {
+            FileLogger.shared.info("rip-vm", "discdb: no candidates for '\(info.name)'")
+            return
+        }
+
+        let plan = TheDiscDBMatcher.match(discInfo: info, candidates: candidates, exactHashMatch: exactHash)
+
+        // Re-check ownership AFTER the network awaits — a user/known-map
+        // action (or a re-scan) may have intervened.
+        guard assignmentSource.isAutomatic, discInfo?.name == info.name, !Task.isCancelled else {
+            FileLogger.shared.info("rip-vm",
+                "discdb: plan discarded — state changed during lookup (source=\(assignmentSource))")
+            return
+        }
+        guard plan.trusted else {
+            FileLogger.shared.info("rip-vm",
+                "discdb: match not trusted for '\(info.name)' — \(plan.reason); keeping heuristics")
+            return
+        }
+        applyDiscDbPlan(plan, info: info)
+    }
+
+    /// Install a trusted TheDiscDB plan over the heuristic state. Becomes
+    /// authoritative for episode numbering (clears stale sequential
+    /// assignments and demotes unmatched episode titles to `.extra` so
+    /// nothing collides on the same SxxExx). Names are only written for
+    /// extras — overriding a movie/episode title's name would null the
+    /// cached TMDb result the publish pipeline relies on.
+    func applyDiscDbPlan(_ plan: TheDiscDBMatcher.Plan, info: DiscInfo) {
+        // Claim ownership first so the pending async TMDb-runtime writer
+        // (scheduled by autoAssignTvEpisodeNumbers) no-ops when it fires.
+        assignmentSource = .discDb(release: plan.candidate?.releaseSlug ?? "?")
+
+        // Wipe heuristic/sequential episode numbers — DiscDB is now the
+        // source of truth and will reinstall only what it matched.
+        titleEpisodeAssignments = [:]
+
+        let matchedIds = Set(plan.matches.map { $0.discTitleId })
+        let haveCachedMedia = cachedMediaResult != nil
+        var named = 0, episodes = 0
+
+        for match in plan.matches {
+            let tid = match.discTitleId
+            titleIntents[tid] = match.intent
+
+            if match.intent == .episode {
+                if let assignment = plan.episodeAssignments[tid] {
+                    titleEpisodeAssignments[tid] = TitleEpisodeAssignment(
+                        season: assignment.season,
+                        episode: assignment.episode,
+                        title: assignment.name
+                    )
+                    episodes += 1
+                } else {
+                    // Episode intent without a usable number — demote
+                    // rather than risk an unnumbered phantom episode.
+                    titleIntents[tid] = .extra
+                }
+            }
+
+            // Names: extras always; movie/edition only when there's no
+            // cached TMDb result to flow through (an override nulls it).
+            if let name = plan.titleNames[tid], !name.isEmpty {
+                let intent = titleIntents[tid] ?? match.intent
+                if intent == .extra || ((intent == .movie || intent == .edition) && !haveCachedMedia) {
+                    titleNameOverrides[tid] = name
+                    named += 1
+                }
+            }
+        }
+
+        // Any title still classified as an episode that DiscDB didn't
+        // match has no number now — demote it to a generic extra so it
+        // can't collide with a DiscDB-numbered episode.
+        var demoted = 0
+        for title in info.titles where !matchedIds.contains(title.id) && titleIntents[title.id] == .episode {
+            titleIntents[title.id] = .extra
+            titleEpisodeAssignments.removeValue(forKey: title.id)
+            demoted += 1
+        }
+
+        FileLogger.shared.info("rip-vm",
+            "discdb: applied '\(plan.candidate?.releaseSlug ?? "?")' — \(plan.matches.count) matched (\(episodes) episodes, \(named) named), \(demoted) unmatched episode(s) demoted; \(plan.reason)")
+        for warning in plan.warnings {
+            FileLogger.shared.warn("rip-vm", "discdb: \(warning)")
+        }
+    }
     /// When a TV match is selected, default every selected (or scanned-eligible)
     /// title's intent to `.episode`. When a movie match is selected, switch any
     /// previously-classified episode intents back to `.movie`. Doesn't override
@@ -1239,6 +1368,14 @@ final class RipViewModel: ObservableObject {
                 // as bare _tNN.mkv files in scratch. The user can still
                 // override season/episode numbers via TVEpisodePicker.
                 autoAssignTvEpisodeNumbers(from: info)
+                // v4.1.0: consult TheDiscDB for authoritative per-title
+                // classification/names/episode numbers. Runs after the
+                // heuristic auto-assignment so a trusted match has the
+                // final word (and makes the async TMDb-runtime writer
+                // defer by flipping assignmentSource). No-op when the
+                // toggle is off, the lookup misses, or the match isn't
+                // trusted — the heuristic labelling then stands.
+                await applyDiscDbMatch(to: info)
                 // Check duplicate-rip registry. Compute fingerprint and look
                 // it up; surface the prior entry on the model so the UI can
                 // banner-warn the user.
