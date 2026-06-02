@@ -196,6 +196,28 @@ private struct GeneralPane: View {
                     .padding(.leading, 2)
             }
 
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle(isOn: $config.discDbContributeEnabled) {
+                    Text("Contribute unknown discs to TheDiscDB")
+                }
+                Text("When a scanned disc isn't already in thediscdb.com, submit its fingerprint and AutoRipper's title layout (main feature / extras / episode guesses) to help grow the community database. Only discs not already present are sent; submissions are reviewed by maintainers before publication. Performs network lookups/submissions even if matching above is off. Default off.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 2)
+                if config.discDbContributeEnabled {
+                    Toggle(isOn: $config.discDbContributeScanLog) {
+                        Text("Also upload the MakeMKV scan log")
+                    }
+                    .padding(.leading, 16)
+                    Text("Includes the full title/track structure to help reviewers. The log may also contain your drive's model/firmware and raw stream metadata.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 18)
+                }
+            }
+
             // v3.11.3: drive read-speed slider — writes to MakeMKV's
             // settings.conf io_SingleDriveReadSpeed key. Lower = quieter
             // drive at the cost of slower rips. Discrete steps so users
@@ -1450,6 +1472,8 @@ private struct AdvancedPane: View {
             "preventSleep": config.preventSleep,
             "verboseLogging": config.verboseLogging,
             "discDbMatchEnabled": config.discDbMatchEnabled,
+            "discDbContributeEnabled": config.discDbContributeEnabled,
+            "discDbContributeScanLog": config.discDbContributeScanLog,
             "plexUrl": config.plexUrl,
             "plexMoviesSectionId": config.plexMoviesSectionId,
             "plexTvSectionId": config.plexTvSectionId,
@@ -1520,6 +1544,8 @@ private struct AdvancedPane: View {
         if let v = dict["preventSleep"]         as? Bool   { config.preventSleep = v }
         if let v = dict["verboseLogging"]       as? Bool   { config.verboseLogging = v }
         if let v = dict["discDbMatchEnabled"]   as? Bool   { config.discDbMatchEnabled = v }
+        if let v = dict["discDbContributeEnabled"] as? Bool { config.discDbContributeEnabled = v }
+        if let v = dict["discDbContributeScanLog"] as? Bool { config.discDbContributeScanLog = v }
         if let v = dict["tmdbApiKey"]           as? String { config.tmdbApiKey = v }
         if let v = dict["discordWebhook"]       as? String { config.discordWebhook = v }
         if let v = dict["plexUrl"]              as? String { config.plexUrl = v }

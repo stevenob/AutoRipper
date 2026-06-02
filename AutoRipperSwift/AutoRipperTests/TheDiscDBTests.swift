@@ -412,3 +412,182 @@ final class TheDiscDBServiceTests: XCTestCase {
         XCTAssertFalse(TheDiscDBService.isValidContentHash("GGGGGGGG"))          // non-hex
     }
 }
+
+// MARK: - TheDiscDBContributor (Engram contribute-back)
+
+final class TheDiscDBContributorTests: XCTestCase {
+
+    private func title(_ id: Int, _ duration: String, _ size: Int64,
+                       _ category: TitleCategory, chapters: Int = 12,
+                       file: String = "") -> TitleInfo {
+        var t = TitleInfo(id: id, name: "T\(id)", duration: duration, sizeBytes: size,
+                          chapters: chapters, fileOutput: file.isEmpty ? "title_t\(id).mkv" : file)
+        t.category = category
+        return t
+    }
+
+    // MARK: content_type mapping
+
+    func testContentTypeMapping() {
+        XCTAssertEqual(TheDiscDBContributor.engramContentType(for: "dvd"), "dvd")
+        XCTAssertEqual(TheDiscDBContributor.engramContentType(for: "DVD"), "dvd")
+        XCTAssertEqual(TheDiscDBContributor.engramContentType(for: "bluray"), "blu-ray")
+        XCTAssertEqual(TheDiscDBContributor.engramContentType(for: "anything-else"), "blu-ray")
+    }
+
+    // MARK: title_type mapping
+
+    func testTitleTypeMapping() {
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .mainFeature), "MainMovie")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .episode), "Episode")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .trailer), "Trailer")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .featurette), "Featurette")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .shortExtra), "Short")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .extra), "Extra")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .bonusFeature), "Extra")
+        // Alternate cut/audio must NOT become a second MainMovie.
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .alternateCut), "Other")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .alternateAudio), "Other")
+        XCTAssertEqual(TheDiscDBContributor.engramTitleType(for: .unknown), "Other")
+    }
+
+    func testNoDuplicateMainMovieForAlternateCut() {
+        let info = DiscInfo(name: "MOVIE_BD", type: "bluray", titles: [
+            title(0, "1:48:00", 35_000_000_000, .mainFeature),
+            title(1, "2:06:00", 38_000_000_000, .alternateCut),
+        ])
+        let sub = TheDiscDBContributor.buildSubmission(
+            info: info, contentHash: "abc123def456", tmdbId: nil,
+            detectedTitle: nil, episodeAssignments: [:])
+        let mains = sub.titles.filter { $0.titleType == "MainMovie" }
+        XCTAssertEqual(mains.count, 1)
+    }
+
+    // MARK: JSON shape (snake_case, matches Engram integration-test payload)
+
+    func testSubmissionEncodesSnakeCase() throws {
+        let info = DiscInfo(name: "HUNDREDSOFBEAVERS", type: "bluray", titles: [
+            title(0, "1:48:23", 35_902_580_736, .mainFeature, chapters: 24,
+                  file: "00004.mpls"),
+        ])
+        let sub = TheDiscDBContributor.buildSubmission(
+            info: info, contentHash: "4088c93324be54f94ab2f3667800bc21",
+            tmdbId: 1212073, detectedTitle: "Hundreds of Beavers",
+            episodeAssignments: [:])
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let data = try encoder.encode(sub)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        XCTAssertEqual(json["engram_version"] as? String, "1.0.0")
+        XCTAssertEqual(json["export_version"] as? String, "1")
+        XCTAssertEqual(json["contribution_tier"] as? Int, 1)
+
+        let disc = try XCTUnwrap(json["disc"] as? [String: Any])
+        // content_hash is upper-cased even when the caller passed lowercase.
+        XCTAssertEqual(disc["content_hash"] as? String, "4088C93324BE54F94AB2F3667800BC21")
+        XCTAssertEqual(disc["volume_label"] as? String, "HUNDREDSOFBEAVERS")
+        XCTAssertEqual(disc["content_type"] as? String, "blu-ray")
+        XCTAssertEqual(disc["disc_number"] as? Int, 1)
+
+        let ident = try XCTUnwrap(json["identification"] as? [String: Any])
+        XCTAssertEqual(ident["tmdb_id"] as? Int, 1212073)
+        XCTAssertEqual(ident["detected_title"] as? String, "Hundreds of Beavers")
+
+        let titles = try XCTUnwrap(json["titles"] as? [[String: Any]])
+        XCTAssertEqual(titles.count, 1)
+        let t0 = titles[0]
+        XCTAssertEqual(t0["index"] as? Int, 0)
+        XCTAssertEqual(t0["source_filename"] as? String, "00004.mpls")
+        XCTAssertEqual(t0["duration_seconds"] as? Int, 6503)
+        XCTAssertEqual((t0["size_bytes"] as? NSNumber)?.int64Value, 35_902_580_736)
+        XCTAssertEqual(t0["chapter_count"] as? Int, 24)
+        XCTAssertEqual(t0["title_type"] as? String, "MainMovie")
+        // No invented season/episode on a movie title.
+        XCTAssertNil(t0["season"])
+        XCTAssertNil(t0["episode"])
+    }
+
+    func testEpisodeSeasonEpisodeIncludedOnlyForEpisodes() throws {
+        let info = DiscInfo(name: "SHOW_S1_D1", type: "bluray", titles: [
+            title(0, "0:22:00", 5_000_000_000, .episode),
+            title(1, "0:22:00", 5_000_000_000, .episode),
+            title(2, "0:05:00", 800_000_000, .extra),
+        ])
+        let assignments: [Int: TitleEpisodeAssignment] = [
+            0: TitleEpisodeAssignment(season: 1, episode: 1, title: ""),
+            1: TitleEpisodeAssignment(season: 1, episode: 2, title: ""),
+        ]
+        let sub = TheDiscDBContributor.buildSubmission(
+            info: info, contentHash: "deadbeefcafe", tmdbId: 42,
+            detectedTitle: "Some Show", episodeAssignments: assignments)
+
+        XCTAssertEqual(sub.titles[0].titleType, "Episode")
+        XCTAssertEqual(sub.titles[0].season, 1)
+        XCTAssertEqual(sub.titles[0].episode, 1)
+        XCTAssertEqual(sub.titles[1].episode, 2)
+        // Extra title gets no episode numbers even if one leaked into the map.
+        XCTAssertEqual(sub.titles[2].titleType, "Extra")
+        XCTAssertNil(sub.titles[2].season)
+        XCTAssertNil(sub.titles[2].episode)
+    }
+
+    func testIdentificationOmittedWhenNoTmdbOrTitle() throws {
+        let info = DiscInfo(name: "UNKNOWN_DISC", type: "dvd", titles: [
+            title(0, "1:30:00", 4_000_000_000, .mainFeature),
+        ])
+        let sub = TheDiscDBContributor.buildSubmission(
+            info: info, contentHash: "abcabcabc1", tmdbId: nil,
+            detectedTitle: nil, episodeAssignments: [:])
+        XCTAssertNil(sub.identification)
+
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try encoder.encode(sub)) as? [String: Any])
+        XCTAssertNil(json["identification"])
+    }
+}
+
+// MARK: - DiscDBContributionLedger throttling
+
+final class DiscDBContributionLedgerTests: XCTestCase {
+
+    private func freshDefaults() -> UserDefaults {
+        let name = "discdb.ledger.test.\(UUID().uuidString)"
+        let d = UserDefaults(suiteName: name)!
+        d.removePersistentDomain(forName: name)
+        return d
+    }
+
+    func testFirstSubmissionAllowed() {
+        let ledger = DiscDBContributionLedger(defaults: freshDefaults())
+        XCTAssertTrue(ledger.shouldSubmit(contentHash: "ABC123"))
+    }
+
+    func testThrottledAfterRecentSubmission() {
+        let ledger = DiscDBContributionLedger(defaults: freshDefaults())
+        let now = Date()
+        ledger.record(contentHash: "abc123", now: now)
+        // Same hash, one day later → still throttled (30-day window).
+        XCTAssertFalse(ledger.shouldSubmit(contentHash: "ABC123",
+                                           now: now.addingTimeInterval(24 * 3600)))
+    }
+
+    func testAllowedAfterThrottleWindow() {
+        let ledger = DiscDBContributionLedger(defaults: freshDefaults())
+        let now = Date()
+        ledger.record(contentHash: "abc123", now: now)
+        // 31 days later → window elapsed, allowed again.
+        XCTAssertTrue(ledger.shouldSubmit(contentHash: "abc123",
+                                          now: now.addingTimeInterval(31 * 24 * 3600)))
+    }
+
+    func testCaseInsensitiveHashKey() {
+        let ledger = DiscDBContributionLedger(defaults: freshDefaults())
+        let now = Date()
+        ledger.record(contentHash: "deadBEEF", now: now)
+        XCTAssertFalse(ledger.shouldSubmit(contentHash: "DEADBEEF", now: now))
+    }
+}

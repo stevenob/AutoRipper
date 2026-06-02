@@ -33,6 +33,23 @@ private final class TheDiscDBCache: @unchecked Sendable {
     }
 }
 
+/// Outcome of a content-hash existence probe. Keeps "the server confirmed it
+/// has no such disc" (`notFound`) distinct from "the request didn't succeed"
+/// (`error`) so the contribute-back path never resubmits a known disc just
+/// because the network blipped.
+enum ContentHashStatus: Equatable {
+    case found
+    case notFound
+    case error
+    /// The hash didn't match `^[a-fA-F0-9]{8,128}$`.
+    case invalid
+}
+
+enum TheDiscDBError: Error {
+    case invalidEndpoint
+    case httpStatus(Int)
+}
+
 /// Read-only client for TheDiscDB's GraphQL API. Returns AutoRipper domain
 /// models (`TheDiscDBDisc`), flattening the GraphQL
 /// mediaItem → release → disc → title shape.
@@ -100,6 +117,44 @@ struct TheDiscDBService {
         return discs
     }
 
+    /// Look up a content hash's existence with the network outcome made
+    /// explicit. Unlike `lookup(contentHash:)` (which collapses every failure
+    /// mode to `[]`), this distinguishes a genuine "the server has no disc with
+    /// this hash" from "the request failed". The contribute-back path relies on
+    /// that distinction so a transient outage never causes a known disc to be
+    /// re-submitted as if it were new.
+    func contentHashStatus(_ hash: String) async -> ContentHashStatus {
+        let normalized = hash.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard Self.isValidContentHash(normalized) else { return .invalid }
+
+        // A non-empty cache entry is an authoritative "found"; an empty entry
+        // is NOT trusted (lookup caches `[]` on failure too), so re-probe.
+        if let cached = TheDiscDBCache.shared.cachedHash(normalized), !cached.isEmpty {
+            return .found
+        }
+
+        let query = """
+        query($h: String) {
+          mediaItems(where: { releases: { some: { discs: { some: { contentHash: { eq: $h } } } } } }) {
+            nodes { ...MediaFields }
+          }
+        }
+        \(Self.mediaFragment)
+        """
+        do {
+            let items = try await executeThrowing(query: query, variables: ["h": normalized])
+            let discs = Self.flatten(items).filter {
+                ($0.contentHash?.uppercased() ?? "") == normalized
+            }
+            if !discs.isEmpty { TheDiscDBCache.shared.storeHash(normalized, discs) }
+            return discs.isEmpty ? .notFound : .found
+        } catch {
+            FileLogger.shared.warn("thediscdb",
+                "contentHashStatus: probe failed for \(normalized): \(error.localizedDescription)")
+            return .error
+        }
+    }
+
     /// Uppercase hex, 8–128 chars (MD5 is 32; widened to match the server's
     /// own `^[a-fA-F0-9]{8,128}$` validation).
     static func isValidContentHash(_ hash: String) -> Bool {
@@ -138,22 +193,31 @@ struct TheDiscDBService {
     """
 
     private func execute(query: String, variables: [String: String]) async -> [GQLMediaItem] {
-        guard let url = URL(string: graphQLEndpoint) else { return [] }
+        (try? await executeThrowing(query: query, variables: variables)) ?? []
+    }
+
+    /// Throwing GraphQL executor. Throws on transport failure, non-2xx status,
+    /// or decode failure so callers that need to tell "empty result" apart from
+    /// "request failed" (e.g. `contentHashStatus`) can. `execute` wraps this and
+    /// swallows the error into `[]` for the read-only lookup paths.
+    private func executeThrowing(query: String, variables: [String: String]) async throws -> [GQLMediaItem] {
+        guard let url = URL(string: graphQLEndpoint) else {
+            throw TheDiscDBError.invalidEndpoint
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 25
 
         let body: [String: Any] = ["query": query, "variables": variables]
-        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return [] }
-        request.httpBody = data
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         do {
             let (responseData, response) = try await session.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 FileLogger.shared.warn("thediscdb",
                     "GraphQL HTTP \(http.statusCode) for query")
-                return []
+                throw TheDiscDBError.httpStatus(http.statusCode)
             }
             let decoded = try JSONDecoder().decode(GQLResponse.self, from: responseData)
             if let errors = decoded.errors, !errors.isEmpty {
@@ -165,7 +229,7 @@ struct TheDiscDBService {
             log.warning("GraphQL request failed: \(error.localizedDescription)")
             FileLogger.shared.warn("thediscdb",
                 "GraphQL request failed: \(error.localizedDescription)")
-            return []
+            throw error
         }
     }
 

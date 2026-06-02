@@ -123,6 +123,22 @@ final class AppConfig: ObservableObject {
     @Published var discDbMatchEnabled: Bool {
         didSet { defaults.set(discDbMatchEnabled, forKey: "discDbMatchEnabled") }
     }
+    /// v4.2.0: opt-in contribute-back. When enabled, a scanned disc that
+    /// TheDiscDB doesn't already know is submitted to its public "Engram"
+    /// contribution API (fingerprint + heuristic title layout) so the
+    /// community database grows. Submissions are human-reviewed before they
+    /// appear in the live database, so this never changes a scan's own
+    /// result. Default OFF — it sends disc metadata to a third party.
+    @Published var discDbContributeEnabled: Bool {
+        didSet { defaults.set(discDbContributeEnabled, forKey: "discDbContributeEnabled") }
+    }
+    /// v4.2.0: when contributing, also upload the raw MakeMKV scan log so
+    /// reviewers see the full title/track structure. A larger privacy
+    /// surface (the log can include drive model/firmware and raw stream
+    /// metadata), so it's a separate opt-in, default OFF.
+    @Published var discDbContributeScanLog: Bool {
+        didSet { defaults.set(discDbContributeScanLog, forKey: "discDbContributeScanLog") }
+    }
     /// Optional generic outbound webhook URL — called with a JSON payload on
     /// job completion/failure. Useful for Home Assistant, Slack, n8n, etc.
     @Published var genericWebhookURL: String {
@@ -326,6 +342,8 @@ final class AppConfig: ObservableObject {
         self.preventSleep = bool("preventSleep", true)
         self.verboseLogging = bool("verboseLogging", false)
         self.discDbMatchEnabled = bool("discDbMatchEnabled", true)
+        self.discDbContributeEnabled = bool("discDbContributeEnabled", false)
+        self.discDbContributeScanLog = bool("discDbContributeScanLog", false)
         self.genericWebhookURL = str("genericWebhookURL", "")
         self.plexUrl = str("plexUrl", "")
         self.plexToken = str("plexToken", "")

@@ -1254,6 +1254,76 @@ final class RipViewModel: ObservableObject {
             FileLogger.shared.warn("rip-vm", "discdb: \(warning)")
         }
     }
+
+    /// Opt-in contribute-back: when a scanned disc isn't already in TheDiscDB,
+    /// submit its fingerprint + heuristic title layout to TheDiscDB's Engram
+    /// API so the community database grows to cover it. Independent of
+    /// `discDbMatchEnabled` — a user may want to contribute without auto-apply,
+    /// or vice versa. Best-effort and non-fatal: every failure is logged and
+    /// swallowed. Never mutates view-model state.
+    ///
+    /// Runs after `applyDiscDbMatch`, reading the heuristic episode numbers it
+    /// leaves in place for unmatched discs. All state needed for the payload is
+    /// snapshotted BEFORE the first network await, then ownership is
+    /// revalidated before the POST so a later scan can't have its metadata
+    /// submitted under this disc.
+    func maybeContributeToDiscDb(to info: DiscInfo) async {
+        guard config.discDbContributeEnabled else { return }
+
+        // content_hash is required by Engram and is the upsert key. Best-effort
+        // from the mounted volume; a nil here means we simply can't contribute.
+        let volume = URL(fileURLWithPath: "/Volumes/\(info.name)")
+        guard let hash = TheDiscDBContentHash.contentHash(forVolumeAt: volume) else {
+            FileLogger.shared.info("rip-vm",
+                "engram: no content hash for '\(info.name)' — cannot contribute")
+            return
+        }
+
+        let ledger = DiscDBContributionLedger()
+        guard ledger.shouldSubmit(contentHash: hash) else {
+            FileLogger.shared.info("rip-vm",
+                "engram: '\(info.name)' (\(hash)) submitted recently — throttled")
+            return
+        }
+
+        // Only contribute when the server CONFIRMS it has no disc with this
+        // fingerprint. A network error must not be read as "unknown" — that
+        // would resubmit known discs whenever the API blips.
+        let status = await TheDiscDBService().contentHashStatus(hash)
+        guard status == .notFound else {
+            FileLogger.shared.info("rip-vm",
+                "engram: skip contribute for '\(info.name)' — hash status \(status)")
+            return
+        }
+
+        // Snapshot everything the payload needs, then revalidate ownership.
+        let tmdbId = cachedMediaResult?.tmdbId
+        let detectedTitle = cachedMediaResult?.title ?? (info.mediaTitle.isEmpty ? nil : info.mediaTitle)
+        let episodeAssignments = titleEpisodeAssignments
+        let scanLog = config.discDbContributeScanLog ? logLines.joined(separator: "\n") : ""
+
+        guard discInfo?.name == info.name, !Task.isCancelled, config.discDbContributeEnabled else {
+            FileLogger.shared.info("rip-vm",
+                "engram: aborting contribute — state changed during lookup")
+            return
+        }
+
+        let submission = TheDiscDBContributor.buildSubmission(
+            info: info,
+            contentHash: hash,
+            tmdbId: tmdbId,
+            detectedTitle: detectedTitle,
+            episodeAssignments: episodeAssignments
+        )
+
+        let contributor = TheDiscDBContributor()
+        guard await contributor.submitDisc(submission) else { return }
+        ledger.record(contentHash: hash)
+
+        if !scanLog.isEmpty {
+            _ = await contributor.uploadScanLog(contentHash: hash, log: scanLog)
+        }
+    }
     /// When a TV match is selected, default every selected (or scanned-eligible)
     /// title's intent to `.episode`. When a movie match is selected, switch any
     /// previously-classified episode intents back to `.movie`. Doesn't override
@@ -1376,6 +1446,11 @@ final class RipViewModel: ObservableObject {
                 // toggle is off, the lookup misses, or the match isn't
                 // trusted — the heuristic labelling then stands.
                 await applyDiscDbMatch(to: info)
+                // v4.2.0: opt-in contribute-back. If the disc isn't already in
+                // TheDiscDB, submit its fingerprint + heuristic title layout so
+                // the community database grows. No-op unless the user opted in;
+                // best-effort and never blocks or fails the scan.
+                await maybeContributeToDiscDb(to: info)
                 // Check duplicate-rip registry. Compute fingerprint and look
                 // it up; surface the prior entry on the model so the UI can
                 // banner-warn the user.
