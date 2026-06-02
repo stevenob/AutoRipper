@@ -13,12 +13,20 @@ struct DiscIdentifyPanel: View {
     let discName: String
     @State private var searchQuery: String = ""
     @State private var showAlternatives: Bool = false
+    /// When true, a free-text TMDb search box + full result grid is shown even
+    /// though a match already exists — the escape hatch for when the auto-match
+    /// is wrong and none of the pre-fetched alternatives are right (e.g. a junk
+    /// disc label like "FATHER" that mis-resolves to "Father Brown").
+    @State private var searchMode: Bool = false
 
     private var current: MediaResult? {
-        ripVM.discInfo?.mediaTitle.isEmpty == false
-            ? ripVM.discCandidates.first(where: { $0.displayTitle == ripVM.discInfo?.mediaTitle })
-                ?? ripVM.discCandidates.first
-            : nil
+        // The applied identification is the source of truth (set on both
+        // auto-match and manual selection); fall back to the candidate list
+        // only if it's somehow absent.
+        if let applied = ripVM.cachedMediaResult { return applied }
+        guard ripVM.discInfo?.mediaTitle.isEmpty == false else { return nil }
+        return ripVM.discCandidates.first(where: { $0.displayTitle == ripVM.discInfo?.mediaTitle })
+            ?? ripVM.discCandidates.first
     }
     private var alternatives: [MediaResult] {
         ripVM.discCandidates.filter { $0.tmdbId != current?.tmdbId }.prefix(4).map { $0 }
@@ -28,9 +36,12 @@ struct DiscIdentifyPanel: View {
         VStack(spacing: 0) {
             if let current = current {
                 matchedHeader(current: current)
-                if showAlternatives && !alternatives.isEmpty {
+                if searchMode {
                     Divider()
-                    alternativesGrid
+                    searchSection()
+                } else if showAlternatives && !alternatives.isEmpty {
+                    Divider()
+                    candidatesGrid(alternatives)
                 }
             } else {
                 unmatchedHeader
@@ -67,19 +78,62 @@ struct DiscIdentifyPanel: View {
                     .lineLimit(1)
             }
             Spacer()
-            if !alternatives.isEmpty {
+            HStack(spacing: 10) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { showAlternatives.toggle() }
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        searchMode.toggle()
+                        if searchMode {
+                            showAlternatives = false
+                            if searchQuery.isEmpty { searchQuery = current.title }
+                        }
+                    }
                 } label: {
                     HStack(spacing: 3) {
-                        Text(showAlternatives ? "Hide" : "Wrong? Pick another")
-                            .font(.caption)
-                        Image(systemName: showAlternatives ? "chevron.up" : "chevron.down")
-                            .font(.caption2)
+                        Image(systemName: "magnifyingglass").font(.caption2)
+                        Text(searchMode ? "Close" : "Search by name").font(.caption)
                     }
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.accentColor)
+                .help("Type the correct title to search TMDb")
+
+                if !alternatives.isEmpty {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            showAlternatives.toggle()
+                            if showAlternatives { searchMode = false }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(showAlternatives ? "Hide" : "Wrong? Pick another")
+                                .font(.caption)
+                            Image(systemName: showAlternatives ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Search (matched but wrong)
+
+    @ViewBuilder
+    private func searchSection() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                TextField("Search TMDb (e.g. \"father of the bride 1991\")", text: $searchQuery)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { ripVM.searchDiscMatches(query: searchQuery) }
+                Button("Search") { ripVM.searchDiscMatches(query: searchQuery) }
+                    .disabled(searchQuery.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if !ripVM.discCandidates.isEmpty {
+                candidatesGrid(ripVM.discCandidates)
             }
         }
         .padding(.horizontal, 16)
@@ -115,23 +169,24 @@ struct DiscIdentifyPanel: View {
                     .disabled(searchQuery.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if !ripVM.discCandidates.isEmpty {
-                alternativesGrid
+                candidatesGrid(ripVM.discCandidates)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
-    // MARK: - Alternatives grid
+    // MARK: - Candidates grid
 
     @ViewBuilder
-    private var alternativesGrid: some View {
+    private func candidatesGrid(_ matches: [MediaResult]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(current == nil ? ripVM.discCandidates : alternatives, id: \.tmdbId) { match in
+                ForEach(matches, id: \.tmdbId) { match in
                     Button {
                         ripVM.selectDiscMatch(match)
                         showAlternatives = false
+                        searchMode = false
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             poster(path: match.posterPath, size: 60)
