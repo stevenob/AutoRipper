@@ -10,6 +10,7 @@ import SwiftUI
 /// `DOLPHIN_TALE_2_FS`) and TMDb's first guess is often wrong.
 struct DiscIdentifyPanel: View {
     @ObservedObject var ripVM: RipViewModel
+    @ObservedObject private var watchlist = LetterboxdWatchlistStore.shared
     let discName: String
     @State private var searchQuery: String = ""
     @State private var showAlternatives: Bool = false
@@ -70,6 +71,14 @@ struct DiscIdentifyPanel: View {
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Color.purple.opacity(0.18))
                             .clipShape(Capsule())
+                    }
+                    if watchlist.contains(current.tmdbId) && current.mediaType == "movie" {
+                        Text("⭐ Watchlist")
+                            .font(.caption2)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.20))
+                            .clipShape(Capsule())
+                            .help("On your imported Letterboxd watchlist")
                     }
                 }
                 Text("Disc label: \(discName)")

@@ -275,12 +275,63 @@ struct TMDbService {
             return []
         }
     }
+
+    /// Search TMDb for movies using a clean, canonical title (no disc-label
+    /// normalization), optionally constrained by release year.
+    ///
+    /// Used by Letterboxd watchlist resolution, where titles are already
+    /// canonical (e.g. "2001: A Space Odyssey") and must NOT be run through
+    /// `cleanDiscName`, which would strip embedded numbers/years.
+    func searchMovies(title: String, year: Int?) async -> [MediaResult] {
+        guard !apiKey.isEmpty else { return [] }
+        guard var url = URL(string: "\(baseURL)/search/movie") else { return [] }
+        var items = [
+            URLQueryItem(name: "api_key", value: apiKey),
+            URLQueryItem(name: "query", value: title),
+        ]
+        if let year { items.append(URLQueryItem(name: "year", value: String(year))) }
+        url.append(queryItems: items)
+        do {
+            let (data, _) = try await session.data(from: url)
+            let response = try JSONDecoder().decode(TMDbMovieSearchResponse.self, from: data)
+            return response.results.prefix(10).map { item -> MediaResult in
+                let y = item.releaseDate.flatMap { $0.count >= 4 ? Int($0.prefix(4)) : nil }
+                return MediaResult(
+                    title: item.title ?? "", year: y, mediaType: "movie",
+                    tmdbId: item.id, overview: item.overview ?? "",
+                    posterPath: item.posterPath, backdropPath: item.backdropPath)
+            }
+        } catch {
+            log.error("TMDb movie search failed: \(error.localizedDescription)")
+            return []
+        }
+    }
 }
 
 // MARK: - Codable Response Models
 
 private struct TMDbSearchResponse: Codable {
     let results: [TMDbSearchItem]
+}
+
+private struct TMDbMovieSearchResponse: Codable {
+    let results: [TMDbMovieSearchItem]
+}
+
+private struct TMDbMovieSearchItem: Codable {
+    let id: Int
+    let title: String?
+    let releaseDate: String?
+    let overview: String?
+    let posterPath: String?
+    let backdropPath: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, overview
+        case releaseDate = "release_date"
+        case posterPath = "poster_path"
+        case backdropPath = "backdrop_path"
+    }
 }
 
 private struct TMDbSearchItem: Codable {

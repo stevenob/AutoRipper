@@ -18,6 +18,8 @@ struct SettingsView: View {
                 .tabItem { Label("Tools", systemImage: "wrench.and.screwdriver") }
             TMDbPane(config: config)
                 .tabItem { Label("TMDb", systemImage: "magnifyingglass") }
+            LetterboxdPane(config: config)
+                .tabItem { Label("Letterboxd", systemImage: "star") }
             NASPane(config: config)
                 .tabItem { Label("NAS", systemImage: "externaldrive.connected.to.line.below") }
             LibraryRefreshPane(config: config)
@@ -539,6 +541,95 @@ private struct TMDbPane: View {
         testStatus = results.isEmpty
             ? "✗ No results — check API key"
             : "✓ Connected — \(results.count) results for 'the matrix'"
+    }
+}
+
+// MARK: - Letterboxd
+
+private struct LetterboxdPane: View {
+    @ObservedObject var config: AppConfig
+    @ObservedObject private var watchlist = LetterboxdWatchlistStore.shared
+
+    var body: some View {
+        Form {
+            Section {
+                Text("Import your Letterboxd watchlist to flag scanned discs you want to rip. A ⭐ Watchlist badge appears on the Identify panel when an inserted disc matches a film on your list. Read-only — nothing is sent back to Letterboxd.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                HStack {
+                    Button("Import watchlist CSV…") { importCSV() }
+                        .disabled(watchlist.isImporting)
+                    if watchlist.isImporting {
+                        Button("Cancel") { watchlist.cancelImport() }
+                    } else if watchlist.hasWatchlist {
+                        Button("Clear") { watchlist.clear() }
+                    }
+                    Spacer()
+                    if watchlist.isImporting {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+
+                if watchlist.isImporting {
+                    Text(watchlist.progress.isEmpty ? "Working…" : watchlist.progress)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    if !watchlist.status.isEmpty {
+                        Text(watchlist.status)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let last = watchlist.lastImported {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(watchlist.resolvedCount) of \(watchlist.importedCount) films matched to TMDb")
+                                .font(.caption)
+                            Text("Last imported \(last.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if watchlist.status.isEmpty {
+                        Text("No watchlist imported yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if config.tmdbApiKey.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Label("Set a TMDb API key in the TMDb tab so films can be matched.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section {
+                Button("How to export your watchlist →") {
+                    NSWorkspace.shared.open(URL(string: "https://letterboxd.com/settings/data/")!)
+                }
+                .buttonStyle(.link)
+                Text("On letterboxd.com go to Settings → Data → Export your data, unzip the download, and choose watchlist.csv here.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func importCSV() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.commaSeparatedText, .plainText]
+        panel.message = "Choose your Letterboxd watchlist.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        watchlist.beginImport(at: url, config: config)
     }
 }
 
