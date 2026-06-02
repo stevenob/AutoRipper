@@ -253,6 +253,45 @@ final class TheDiscDBMatcherTests: XCTestCase {
         let plan = TheDiscDBMatcher.match(discInfo: gardenStateScan(), candidates: [])
         XCTAssertFalse(plan.trusted)
     }
+
+    /// Real-world Blu-ray case (Requiem for a Dream 2020 BD, tmdb 641): MakeMKV
+    /// exposes the main-feature playlist twice (same runtime + size). Only one
+    /// copy may become `.movie`; the duplicate must degrade to a safe extra
+    /// rather than a second main feature. Named extras/trailers/deleted scenes
+    /// still resolve. Data mirrors the live TheDiscDB response.
+    func testDuplicateMainFeaturePlaylistDegradesToExtra() {
+        let scan = DiscInfo(name: "REQUIEM FOR A DREAM", type: "bluray", titles: [
+            discTitle(0, "1:41:25", 32172263424),  // main feature
+            discTitle(1, "1:41:25", 32172263424),  // duplicate playlist
+            discTitle(3, "0:35:23", 2300289024),   // The Making of
+            discTitle(5, "0:01:37", 105375744),    // Teaser Trailer
+            discTitle(7, "0:02:03", 137631744),    // a deleted scene
+        ])
+        let cand = disc(format: "Blu-Ray", titles: [
+            dbTitle(0, 6085, 32000000000, .mainMovie, "Requiem for a Dream"),
+            dbTitle(1, 6085, nil, .none, ""),                              // duplicate target, unnamed
+            dbTitle(14, 2123, 2300000000, .extra, "The Making of Requiem"),
+            dbTitle(17, 97, nil, .trailer, "Teaser Trailer"),
+            dbTitle(25, 123, nil, .deletedScene, "Tyrone's Confession"),
+        ])
+        let plan = TheDiscDBMatcher.match(discInfo: scan, candidates: [cand])
+        XCTAssertTrue(plan.trusted, "\(plan.reason) \(plan.warnings)")
+
+        // Exactly one main feature, named.
+        let mains = plan.matches.filter { $0.intent == .movie }
+        XCTAssertEqual(mains.count, 1)
+        XCTAssertEqual(mains.first?.discTitleId, 0)
+        XCTAssertEqual(mains.first?.name, "Requiem for a Dream")
+        // The duplicate playlist is a safe, unnamed extra (matched the unnamed
+        // 6085s segment) — never a second movie.
+        let dup = plan.matches.first { $0.discTitleId == 1 }
+        XCTAssertEqual(dup?.intent, .extra)
+        XCTAssertNil(dup?.name)
+        // Named bonus content resolves with the right kinds.
+        XCTAssertEqual(plan.titleNames[3], "The Making of Requiem")
+        XCTAssertEqual(plan.titleNames[5], "Teaser Trailer")
+        XCTAssertEqual(plan.titleNames[7], "Tyrone's Confession")
+    }
 }
 
 // MARK: - RipViewModel application (Slice 2 wiring)
