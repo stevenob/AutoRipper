@@ -75,7 +75,7 @@ final class LoudounCatalogServiceTests: XCTestCase {
     func testDetailURLBuiltFromBaseURL() {
         let results = LoudounCatalogService.parse(sampleJSON, baseURL: "https://catalog.library.loudoun.gov/")
         XCTAssertEqual(results[0].detailURL?.absoluteString,
-                       "https://catalog.library.loudoun.gov/#section=resource&resourceid=100")
+                       "https://catalog.library.loudoun.gov/?section=resource&resourceid=100")
     }
 
     func testDisplayTitleIncludesYear() {

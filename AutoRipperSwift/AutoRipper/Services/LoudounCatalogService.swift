@@ -110,7 +110,7 @@ struct LoudounCatalogService {
                 year: raw.publicationDate?.publicationDate ?? "",
                 format: raw.format ?? "",
                 holdings: holdings,
-                detailURL: URL(string: "\(root)/#section=resource&resourceid=\(id)"))
+                detailURL: URL(string: "\(root)/?section=resource&resourceid=\(id)"))
         }
     }
 
