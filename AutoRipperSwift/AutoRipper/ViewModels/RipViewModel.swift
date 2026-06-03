@@ -1348,7 +1348,7 @@ final class RipViewModel: ObservableObject {
         Task {
             let tmdb = TMDbService(config: config)
             let results = await tmdb.searchMedia(query: query)
-            discCandidates = Array(results.prefix(5))
+            discCandidates = Array(results.prefix(10))
         }
     }
 

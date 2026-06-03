@@ -1029,6 +1029,44 @@ final class TMDbCleanDiscNameExtendedTests: XCTestCase {
         XCTAssertTrue(cleaned.query.lowercased().contains("dirty grandpa"))
     }
 
+    // MARK: - Year re-ranking (v4.0.23)
+
+    private func mr(_ title: String, _ year: Int?, _ type: String = "movie", id: Int) -> MediaResult {
+        MediaResult(title: title, year: year, mediaType: type, tmdbId: id)
+    }
+
+    func testRankByYearSurfacesMatchingYear() {
+        // Mirrors the live TMDb order for "batman": the 1989 film is buried.
+        let results = [
+            mr("Batman", 1966, "tv", id: 1),
+            mr("The Batman", 2022, id: 2),
+            mr("Batman Begins", 2005, id: 3),
+            mr("Batman", 1989, id: 4),
+            mr("Batman & Robin", 1997, id: 5),
+        ]
+        let ranked = TMDbService.rankByYear(results, year: 1989)
+        XCTAssertEqual(ranked.first?.tmdbId, 4)
+        XCTAssertEqual(ranked.first?.year, 1989)
+    }
+
+    func testRankByYearIsStableWithinGroups() {
+        let results = [
+            mr("A", 2000, id: 1),
+            mr("B", 1999, id: 2),
+            mr("C", 2000, id: 3),
+            mr("D", 1999, id: 4),
+        ]
+        let ranked = TMDbService.rankByYear(results, year: 1999)
+        // Matching year first (in original order), then the rest (in order).
+        XCTAssertEqual(ranked.map { $0.tmdbId }, [2, 4, 1, 3])
+    }
+
+    func testRankByYearNoOpWhenYearNilOrNoMatch() {
+        let results = [mr("A", 2000, id: 1), mr("B", 1999, id: 2)]
+        XCTAssertEqual(TMDbService.rankByYear(results, year: nil).map { $0.tmdbId }, [1, 2])
+        XCTAssertEqual(TMDbService.rankByYear(results, year: 1975).map { $0.tmdbId }, [1, 2])
+    }
+
     // MARK: - v4.0.9 TV-on-disc marker stripping
 
     /// Bluey ships volume labels like "Bluey S1 Second Half" — TMDb's

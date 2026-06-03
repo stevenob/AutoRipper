@@ -156,6 +156,21 @@ struct TMDbService {
         return (cleaned.capitalized, extractedYear)
     }
 
+    /// Stably re-rank search results so any whose release year matches the
+    /// requested `year` come first, preserving TMDb's relevance order within
+    /// each group. No-op when `year` is nil or nothing matches. This is what
+    /// lets a disc/label like "Batman 1989" resolve to the 1989 film even
+    /// though TMDb's multi-search ranks newer same-name titles higher.
+    static func rankByYear(_ results: [MediaResult], year: Int?) -> [MediaResult] {
+        guard let year else { return results }
+        return results.enumerated().sorted { lhs, rhs in
+            let lMatch = lhs.element.year == year
+            let rMatch = rhs.element.year == year
+            if lMatch != rMatch { return lMatch }
+            return lhs.offset < rhs.offset
+        }.map { $0.element }
+    }
+
     /// Search TMDb for movies and TV shows.
     func searchMedia(query: String) async -> [MediaResult] {
         guard !apiKey.isEmpty else {
@@ -170,13 +185,15 @@ struct TMDbService {
         }
         let (cleaned, discYear) = Self.cleanDiscName(query)
         guard var url = URL(string: "\(baseURL)/search/multi") else { return [] }
-        var queryItems = [
+        // NOTE: /search/multi silently ignores the `year` parameter (unlike
+        // /search/movie's primary_release_year), so we do NOT send it. Instead
+        // we re-rank results client-side below to surface the year the user
+        // asked for — otherwise titles like "Batman 1989" stay buried beneath
+        // more-recent same-name films and TV shows.
+        let queryItems = [
             URLQueryItem(name: "api_key", value: apiKey),
             URLQueryItem(name: "query", value: cleaned),
         ]
-        if let year = discYear {
-            queryItems.append(URLQueryItem(name: "year", value: String(year)))
-        }
         url.append(queryItems: queryItems)
 
         do {
@@ -193,10 +210,11 @@ struct TMDbService {
                     posterPath: item.posterPath, backdropPath: item.backdropPath
                 )
             }
+            let ranked = Self.rankByYear(results, year: discYear)
             FileLogger.shared.info("tmdb",
-                "searchMedia: '\(query)' → cleaned='\(cleaned)' year=\(discYear.map { String($0) } ?? "nil") → \(results.count) result(s), top='\(results.first?.displayTitle ?? "nil")'")
-            TMDbCache.shared.storeSearch(query, results)
-            return results
+                "searchMedia: '\(query)' → cleaned='\(cleaned)' year=\(discYear.map { String($0) } ?? "nil") → \(ranked.count) result(s), top='\(ranked.first?.displayTitle ?? "nil")'")
+            TMDbCache.shared.storeSearch(query, ranked)
+            return ranked
         } catch {
             log.error("TMDb search failed: \(error.localizedDescription)")
             FileLogger.shared.error("tmdb",

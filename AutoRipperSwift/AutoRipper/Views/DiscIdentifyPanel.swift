@@ -189,7 +189,7 @@ struct DiscIdentifyPanel: View {
 
     @ViewBuilder
     private func candidatesGrid(_ matches: [MediaResult]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: true) {
             HStack(spacing: 8) {
                 ForEach(matches, id: \.tmdbId) { match in
                     Button {
