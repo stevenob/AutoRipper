@@ -10,9 +10,15 @@ final class LibraryCatalogViewModel: ObservableObject {
     @Published private(set) var isSearching: Bool = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var hasSearched: Bool = false
+    /// Transient note shown after an `.externalLink` search opens the browser.
+    @Published private(set) var infoMessage: String?
 
     private var searchTask: Task<Void, Never>?
     private var generation = 0
+
+    /// How external links are opened. Injectable so tests can assert the URL
+    /// without launching a browser.
+    var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
     /// Results after applying the discs-only filter.
     var visibleResults: [CatalogResult] {
@@ -24,17 +30,49 @@ final class LibraryCatalogViewModel: ObservableObject {
 
     func search(config: AppConfig = .shared) {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return }
-        generation += 1
-        let gen = generation
-        searchTask?.cancel()
-        searchTask = Task { await runSearch(term: term, config: config, gen: gen) }
+        guard !term.isEmpty, let catalog = config.selectedLibraryCatalog else { return }
+        switch catalog.kind {
+        case .externalLink:
+            openExternal(catalog: catalog, term: term)
+        case .carlConnect:
+            generation += 1
+            let gen = generation
+            searchTask?.cancel()
+            searchTask = Task { await runSearch(term: term, baseURL: catalog.url, gen: gen) }
+        }
     }
 
-    private func runSearch(term: String, config: AppConfig, gen: Int) async {
+    /// Reset search state when the selected catalog changes so stale results
+    /// from one catalog don't linger under another.
+    func catalogChanged() {
+        searchTask?.cancel()
+        generation += 1
+        results = []
+        errorMessage = nil
+        infoMessage = nil
+        hasSearched = false
+        isSearching = false
+    }
+
+    private func openExternal(catalog: LibraryCatalog, term: String) {
+        searchTask?.cancel()
+        results = []
+        hasSearched = false
+        errorMessage = nil
+        guard let url = LibraryCatalog.externalSearchURL(template: catalog.url, query: term) else {
+            infoMessage = nil
+            errorMessage = "Couldn't build a search link for \(catalog.name). Check its URL has a \(LibraryCatalog.queryPlaceholder) placeholder."
+            return
+        }
+        openURL(url)
+        infoMessage = "Opened \(catalog.name) in your browser."
+    }
+
+    private func runSearch(term: String, baseURL: String, gen: Int) async {
         isSearching = true
         errorMessage = nil
-        let service = LoudounCatalogService(config: config)
+        infoMessage = nil
+        let service = LoudounCatalogService(baseURL: baseURL)
         do {
             let found = try await service.search(term: term, limit: 30)
             guard gen == generation else { return }
@@ -65,7 +103,10 @@ final class LibraryCatalogViewModel: ObservableObject {
 struct LibraryCatalogView: View {
     @ObservedObject var config: AppConfig
     @StateObject private var vm = LibraryCatalogViewModel()
-    @State private var showSource = false
+    @State private var showManager = false
+
+    private var selectedCatalog: LibraryCatalog? { config.selectedLibraryCatalog }
+    private var isExternal: Bool { selectedCatalog?.kind == .externalLink }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -78,6 +119,17 @@ struct LibraryCatalogView: View {
     private var searchBar: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
+                catalogPicker
+                Button { showManager.toggle() } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderless)
+                .help("Manage library catalogs")
+                .popover(isPresented: $showManager, arrowEdge: .bottom) {
+                    CatalogManager(config: config)
+                }
+            }
+            HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search the library catalog by title…", text: $vm.query)
                     .textFieldStyle(.plain)
@@ -88,41 +140,48 @@ struct LibraryCatalogView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Button("Search") { vm.search(config: config) }
+                Button(isExternal ? "Search in browser" : "Search") { vm.search(config: config) }
                     .disabled(vm.query.trimmingCharacters(in: .whitespaces).isEmpty || vm.isSearching)
-                Button { showSource.toggle() } label: {
-                    Image(systemName: "gearshape")
-                }
-                .buttonStyle(.borderless)
-                .help("Change which library catalog is searched")
-                .popover(isPresented: $showSource, arrowEdge: .bottom) {
-                    sourceEditor
-                }
             }
             .padding(8)
             .background(.quaternary.opacity(0.5))
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            HStack {
-                Toggle("Discs only (DVD / Blu-ray)", isOn: $vm.discsOnly)
-                    .toggleStyle(.checkbox)
-                    .font(.caption)
-                Spacer()
-                if vm.isSearching {
-                    ProgressView().controlSize(.small)
-                } else if vm.hasSearched {
-                    Text("\(vm.visibleResults.count) result\(vm.visibleResults.count == 1 ? "" : "s")")
+            if !isExternal {
+                HStack {
+                    Toggle("Discs only (DVD / Blu-ray)", isOn: $vm.discsOnly)
+                        .toggleStyle(.checkbox)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if vm.isSearching {
+                        ProgressView().controlSize(.small)
+                    } else if vm.hasSearched {
+                        Text("\(vm.visibleResults.count) result\(vm.visibleResults.count == 1 ? "" : "s")")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
         .padding(12)
+        .onChange(of: config.selectedLibraryCatalogID) { _, _ in vm.catalogChanged() }
+    }
+
+    private var catalogPicker: some View {
+        Picker("Catalog", selection: $config.selectedLibraryCatalogID) {
+            ForEach(config.libraryCatalogs) { catalog in
+                Text(catalog.name).tag(catalog.id.uuidString)
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
     private var content: some View {
-        if let error = vm.errorMessage {
+        if isExternal {
+            externalContent
+        } else if let error = vm.errorMessage {
             centeredMessage(icon: "exclamationmark.triangle", title: "Search failed", subtitle: error)
         } else if vm.isSearching && vm.visibleResults.isEmpty {
             centeredMessage(icon: "hourglass", title: "Searching…", subtitle: nil)
@@ -156,6 +215,19 @@ struct LibraryCatalogView: View {
     }
 
     @ViewBuilder
+    private var externalContent: some View {
+        if let error = vm.errorMessage {
+            centeredMessage(icon: "exclamationmark.triangle", title: "Couldn't open catalog", subtitle: error)
+        } else {
+            centeredMessage(
+                icon: "safari",
+                title: "\(selectedCatalog?.name ?? "This catalog") opens in your browser",
+                subtitle: vm.infoMessage
+                    ?? "This library's catalog doesn't support in-app results. Type a title and click \u{201C}Search in browser\u{201D} to look it up on their website.")
+        }
+    }
+
+    @ViewBuilder
     private func centeredMessage(icon: String, title: String, subtitle: String?) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 34)).foregroundStyle(.tertiary)
@@ -168,19 +240,77 @@ struct LibraryCatalogView: View {
         .frame(maxWidth: 360)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    private var sourceEditor: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Library catalog URL").font(.caption).fontWeight(.semibold)
-            TextField("https://catalog.example.gov", text: $config.libraryCatalogBaseURL)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 300)
-            Text("Only works with libraries running the TLC CARL•Connect Discovery catalog platform.")
-                .font(.caption2).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 300, alignment: .leading)
+/// Add / edit / remove the catalogs shown in the Library tab.
+private struct CatalogManager: View {
+    @ObservedObject var config: AppConfig
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Library catalogs").font(.headline)
+            ForEach($config.libraryCatalogs) { $catalog in
+                catalogEditor($catalog)
+                Divider()
+            }
+            Button {
+                config.libraryCatalogs.append(
+                    LibraryCatalog(name: "New catalog",
+                                   url: "https://catalog.example.org",
+                                   kind: .carlConnect))
+            } label: {
+                Label("Add catalog", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
         }
-        .padding(12)
+        .padding(14)
+        .frame(width: 380)
+    }
+
+    @ViewBuilder
+    private func catalogEditor(_ catalog: Binding<LibraryCatalog>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                TextField("Name", text: catalog.name)
+                    .textFieldStyle(.roundedBorder)
+                Button(role: .destructive) {
+                    config.libraryCatalogs.removeAll { $0.id == catalog.wrappedValue.id }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .disabled(config.libraryCatalogs.count <= 1)
+                .help(config.libraryCatalogs.count <= 1
+                      ? "Keep at least one catalog" : "Remove this catalog")
+            }
+            Picker("Type", selection: catalog.kind) {
+                Text("In-app search (CARL•Connect Discovery)").tag(LibraryCatalog.Kind.carlConnect)
+                Text("Open in browser (other platforms)").tag(LibraryCatalog.Kind.externalLink)
+            }
+            .labelsHidden()
+            TextField(catalog.wrappedValue.kind == .carlConnect
+                        ? "https://catalog.example.gov"
+                        : "https://catalog.example.gov/search?term=\(LibraryCatalog.queryPlaceholder)",
+                      text: catalog.url)
+                .textFieldStyle(.roundedBorder)
+            switch catalog.wrappedValue.kind {
+            case .carlConnect:
+                Text("Only works with libraries running the TLC CARL•Connect Discovery platform.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .externalLink:
+                if LibraryCatalog.isValidExternalTemplate(catalog.wrappedValue.url) {
+                    Text("Searching opens this URL in your browser, with \(LibraryCatalog.queryPlaceholder) replaced by your search.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Label("URL must include \(LibraryCatalog.queryPlaceholder) and start with http(s).",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption2).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }
 

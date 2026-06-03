@@ -139,12 +139,26 @@ final class AppConfig: ObservableObject {
     @Published var discDbContributeScanLog: Bool {
         didSet { defaults.set(discDbContributeScanLog, forKey: "discDbContributeScanLog") }
     }
-    /// Base URL of a TLC CARL•Connect Discovery library catalog (the "LS2 PAC"
-    /// platform). Powers the in-app Library catalog search. Defaults to Loudoun
-    /// County Public Library. Only catalogs running this exact platform will
-    /// work, since the search uses its private JSON endpoint.
-    @Published var libraryCatalogBaseURL: String {
-        didSet { defaults.set(libraryCatalogBaseURL, forKey: "libraryCatalogBaseURL") }
+    /// Library catalogs available in the Library tab. `.carlConnect` catalogs
+    /// are searched in-app via the CARL•Connect Discovery JSON endpoint;
+    /// `.externalLink` catalogs open their web search in the browser. Persisted
+    /// as JSON (mirrors `discRules`).
+    @Published var libraryCatalogs: [LibraryCatalog] {
+        didSet {
+            if let data = try? JSONEncoder().encode(libraryCatalogs) {
+                defaults.set(data, forKey: "libraryCatalogs")
+            }
+        }
+    }
+    /// The `id` (UUID string) of the catalog currently selected in the Library
+    /// tab. Resolved leniently via `selectedLibraryCatalog`.
+    @Published var selectedLibraryCatalogID: String {
+        didSet { defaults.set(selectedLibraryCatalogID, forKey: "selectedLibraryCatalogID") }
+    }
+    /// The currently-selected catalog, falling back to the first if the stored
+    /// id no longer matches any catalog.
+    var selectedLibraryCatalog: LibraryCatalog? {
+        LibraryCatalog.resolveSelection(id: selectedLibraryCatalogID, in: libraryCatalogs)
     }
     /// Optional generic outbound webhook URL — called with a JSON payload on
     /// job completion/failure. Useful for Home Assistant, Slack, n8n, etc.
@@ -351,7 +365,30 @@ final class AppConfig: ObservableObject {
         self.discDbMatchEnabled = bool("discDbMatchEnabled", true)
         self.discDbContributeEnabled = bool("discDbContributeEnabled", false)
         self.discDbContributeScanLog = bool("discDbContributeScanLog", false)
-        self.libraryCatalogBaseURL = str("libraryCatalogBaseURL", "https://catalog.library.loudoun.gov")
+        // v4.0.25: multi-catalog support. Decode the stored catalog list, or
+        // seed the built-ins — migrating any custom URL from the old
+        // single-catalog `libraryCatalogBaseURL` setting.
+        let loadedCatalogs: [LibraryCatalog]
+        if let catData = data("libraryCatalogs"),
+           let cats = try? JSONDecoder().decode([LibraryCatalog].self, from: catData),
+           !cats.isEmpty {
+            loadedCatalogs = cats
+        } else {
+            loadedCatalogs = LibraryCatalog.builtInSeeds(
+                legacyLoudounURL: d.string(forKey: "libraryCatalogBaseURL"))
+        }
+        self.libraryCatalogs = loadedCatalogs
+        let savedSelection = str("selectedLibraryCatalogID", "")
+        let resolvedSelection = LibraryCatalog
+            .resolveSelection(id: savedSelection, in: loadedCatalogs)?.id.uuidString ?? ""
+        self.selectedLibraryCatalogID = resolvedSelection
+        // Property observers don't fire during init, so persist the seeded
+        // list + selection explicitly the first time.
+        if data("libraryCatalogs") == nil,
+           let enc = try? JSONEncoder().encode(loadedCatalogs) {
+            d.set(enc, forKey: "libraryCatalogs")
+        }
+        d.set(resolvedSelection, forKey: "selectedLibraryCatalogID")
         self.genericWebhookURL = str("genericWebhookURL", "")
         self.plexUrl = str("plexUrl", "")
         self.plexToken = str("plexToken", "")

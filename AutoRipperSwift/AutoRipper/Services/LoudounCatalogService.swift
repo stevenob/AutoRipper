@@ -52,8 +52,8 @@ struct LoudounCatalogService {
     let baseURL: String
     private let session: URLSession
 
-    init(config: AppConfig = .shared, session: URLSession = .shared) {
-        self.baseURL = config.libraryCatalogBaseURL
+    init(baseURL: String, session: URLSession = .shared) {
+        self.baseURL = baseURL
         self.session = session
     }
 
