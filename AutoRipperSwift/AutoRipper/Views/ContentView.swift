@@ -5,6 +5,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     case disc = "Disc"
     case queue = "Queue"
     case history = "History"
+    case library = "Library"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -13,6 +14,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .disc: return "opticaldisc"
         case .queue: return "list.bullet.rectangle"
         case .history: return "clock.arrow.circlepath"
+        case .library: return "books.vertical"
         case .settings: return "gearshape"
         }
     }
@@ -31,7 +33,7 @@ struct ContentView: View {
         NavigationSplitView {
             List(selection: $selectedTab) {
                 Section {
-                    ForEach([AppTab.disc, .queue, .history], id: \.self) { tab in
+                    ForEach([AppTab.disc, .queue, .history, .library], id: \.self) { tab in
                         sidebarLabel(tab: tab)
                             .tag(tab)
                     }
@@ -55,6 +57,7 @@ struct ContentView: View {
                     case .disc:     DiscPaneView(ripVM: ripVM, queueVM: queueVM, updateService: updateService, config: config)
                     case .queue:    QueueView(queueVM: queueVM)
                     case .history:  HistoryView(queueVM: queueVM)
+                    case .library:  LibraryCatalogView(config: config)
                     case .settings: SettingsView(config: AppConfig.shared)
                     }
                 }

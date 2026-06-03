@@ -139,6 +139,13 @@ final class AppConfig: ObservableObject {
     @Published var discDbContributeScanLog: Bool {
         didSet { defaults.set(discDbContributeScanLog, forKey: "discDbContributeScanLog") }
     }
+    /// Base URL of a TLC CARL•Connect Discovery library catalog (the "LS2 PAC"
+    /// platform). Powers the in-app Library catalog search. Defaults to Loudoun
+    /// County Public Library. Only catalogs running this exact platform will
+    /// work, since the search uses its private JSON endpoint.
+    @Published var libraryCatalogBaseURL: String {
+        didSet { defaults.set(libraryCatalogBaseURL, forKey: "libraryCatalogBaseURL") }
+    }
     /// Optional generic outbound webhook URL — called with a JSON payload on
     /// job completion/failure. Useful for Home Assistant, Slack, n8n, etc.
     @Published var genericWebhookURL: String {
@@ -344,6 +351,7 @@ final class AppConfig: ObservableObject {
         self.discDbMatchEnabled = bool("discDbMatchEnabled", true)
         self.discDbContributeEnabled = bool("discDbContributeEnabled", false)
         self.discDbContributeScanLog = bool("discDbContributeScanLog", false)
+        self.libraryCatalogBaseURL = str("libraryCatalogBaseURL", "https://catalog.library.loudoun.gov")
         self.genericWebhookURL = str("genericWebhookURL", "")
         self.plexUrl = str("plexUrl", "")
         self.plexToken = str("plexToken", "")
