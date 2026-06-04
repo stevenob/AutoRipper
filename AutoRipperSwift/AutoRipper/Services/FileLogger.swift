@@ -11,6 +11,9 @@ final class FileLogger: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.autoripper.app.filelogger")
     private let osLog = Logger(subsystem: "com.autoripper.app", category: "file")
     private let url: URL
+    /// Public read-only access to the active log file location, used by the
+    /// one-time failed-disc backfill to scan historical rip failures.
+    var logFileURL: URL { url }
     private let formatter: DateFormatter
     private let maxBytes: Int = 5 * 1024 * 1024  // rotate at 5 MB
 

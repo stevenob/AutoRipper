@@ -930,6 +930,24 @@ private struct DiscordPane: View {
                     Spacer()
                 }
 
+                HStack {
+                    Text("Rip progress:").frame(width: 130, alignment: .trailing)
+                    Stepper(value: $config.discordRipProgressMinutes, in: 0...60) {
+                        Text(config.discordRipProgressMinutes == 0
+                             ? "Off"
+                             : "Every \(config.discordRipProgressMinutes) min")
+                    }
+                    .frame(width: 160)
+                    Spacer()
+                }
+                HStack {
+                    Spacer().frame(width: 130)
+                    Text("Refreshes the job card with bytes written + elapsed (and % / ETA when MakeMKV reports it) during long rips. 0 disables.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+
                 if !stageStatus.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(stages, id: \.self) { stage in
@@ -1579,6 +1597,7 @@ private struct AdvancedPane: View {
             "makemkvReadSpeed": config.makemkvReadSpeed,
             "customPresetsFile": config.customPresetsFile,
             "publishExtrasToNAS": config.publishExtrasToNAS,
+            "discordRipProgressMinutes": config.discordRipProgressMinutes,
         ]
         if includeSecretsInExport {
             dict["tmdbApiKey"] = config.tmdbApiKey
@@ -1651,5 +1670,6 @@ private struct AdvancedPane: View {
         if let v = dict["makemkvReadSpeed"]     as? Int    { config.makemkvReadSpeed = v }
         if let v = dict["customPresetsFile"]    as? String { config.customPresetsFile = v }
         if let v = dict["publishExtrasToNAS"]   as? Bool   { config.publishExtrasToNAS = v }
+        if let v = dict["discordRipProgressMinutes"] as? Int { config.discordRipProgressMinutes = v }
     }
 }

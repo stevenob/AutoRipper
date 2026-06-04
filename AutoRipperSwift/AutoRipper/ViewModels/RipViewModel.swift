@@ -1617,7 +1617,7 @@ final class RipViewModel: ObservableObject {
                     while !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(2))
                         // Skip if PRGV updated within the last 4 seconds — it's authoritative.
-                        if Date().timeIntervalSince(lastPRGV.timestamp) < 4 { continue }
+                        if Date().timeIntervalSince(lastPRGV.timestamp()) < 4 { continue }
                         guard expectedSize > 0,
                               let files = try? fm.contentsOfDirectory(atPath: outputDir) else { continue }
                         let newFiles = files.filter { !preexisting.contains($0) && $0.hasSuffix(".mkv") }
@@ -1640,13 +1640,53 @@ final class RipViewModel: ObservableObject {
                     }
                 }
 
+                // v4.1.0: periodic Discord card refresh so remote users can
+                // confirm a long rip is still progressing even when MakeMKV
+                // emits no PRGV ticks (the in-app bar can sit at 0%). Edits the
+                // existing job card in place every `discordRipProgressMinutes`,
+                // reporting bytes written + elapsed (+ MakeMKV % / ETA if known).
+                let progressIntervalMin = config.discordRipProgressMinutes
+                let discordProgressMonitor: Task<Void, Never>? = {
+                    guard progressIntervalMin > 0, !config.discordWebhook.isEmpty else { return nil }
+                    let intervalSecs = progressIntervalMin * 60
+                    return Task.detached {
+                        let fm = FileManager.default
+                        let byteFmt = ByteCountFormatter()
+                        byteFmt.countStyle = .file
+                        while !Task.isCancelled {
+                            try? await Task.sleep(for: .seconds(intervalSecs))
+                            if Task.isCancelled { break }
+                            var sz: Int64 = 0
+                            if let files = try? fm.contentsOfDirectory(atPath: outputDir) {
+                                for f in files where !preexisting.contains(f) && f.hasSuffix(".mkv") {
+                                    let p = (outputDir as NSString).appendingPathComponent(f)
+                                    if let attrs = try? fm.attributesOfItem(atPath: p),
+                                       let s = attrs[.size] as? Int64 { sz += s }
+                                }
+                            }
+                            let elapsed = Int(Date().timeIntervalSince(titleStart))
+                            let mins = elapsed / 60, secs = elapsed % 60
+                            let elapsedStr = mins > 0 ? "\(mins)m \(secs)s" : "\(secs)s"
+                            var parts: [String] = []
+                            let prgv = lastPRGV.snapshot()
+                            if prgv.percent > 0 { parts.append("\(prgv.percent)%") }
+                            if sz > 0 { parts.append(byteFmt.string(fromByteCount: sz)) }
+                            parts.append("\(elapsedStr) elapsed")
+                            if let etaRange = prgv.detail.range(of: "ETA") {
+                                parts.append(String(prgv.detail[etaRange.lowerBound...]))
+                            }
+                            await card.progress("rip", detail: parts.joined(separator: " • "))
+                        }
+                    }
+                }()
+
                 do {
                     let rippedFile = try await makemkv.ripTitle(
                         titleId: tid,
                         outputDir: outputDir,
                         volumeLabel: detectedDiscName.isEmpty ? info.name : detectedDiscName,
-                        progressCallback: { [weak self] pct, _ in
-                            lastPRGV.touch()
+                        progressCallback: { [weak self] pct, detail in
+                            lastPRGV.record(percent: pct, detail: detail)
                             Task { @MainActor in
                                 guard let self else { return }
                                 let overall = (Double(titleIndex) + Double(pct) / 100.0) / Double(totalTitles)
@@ -1660,6 +1700,8 @@ final class RipViewModel: ObservableObject {
                         }
                     )
                     sizeMonitor.cancel()
+                    discordProgressMonitor?.cancel()
+                    await discordProgressMonitor?.value
 
                     // Stage to outputDir ONLY for .extra titles — they keep
                     // their raw rip and never enter the queue pipeline.
@@ -1787,6 +1829,8 @@ final class RipViewModel: ObservableObject {
                     ))
                 } catch {
                     sizeMonitor.cancel()
+                    discordProgressMonitor?.cancel()
+                    await discordProgressMonitor?.value
                     config.inFlightRip = nil
                     titleRipStatuses[tid] = .failed(message: error.localizedDescription)
                     statusText = "Rip failed: \(error.localizedDescription)"
@@ -1794,6 +1838,30 @@ final class RipViewModel: ObservableObject {
                     log.error("Rip failed for title \(tid): \(error.localizedDescription)")
                     await card.fail("rip", detail: error.localizedDescription)
                     NotificationService.shared.notify(title: "Rip Failed", message: "\(folderName): \(error.localizedDescription)")
+
+                    // Persist to the durable failed-disc list. Rip-stage
+                    // failures never become queue jobs, so without this the
+                    // disc is lost to a transient notification. The list feeds
+                    // the Failed tab + Radarr/CSV exports for later lookup.
+                    let label = detectedDiscName.isEmpty ? info.name : detectedDiscName
+                    // Guard against a degenerate fingerprint from a sparse scan
+                    // collapsing every unmatched failure into one key.
+                    let failKey = info.titles.isEmpty
+                        ? "vol:\(label)"
+                        : DiscFingerprintService.fingerprint(info)
+                    let match = cachedMediaResult
+                    await FailedDiscRegistry.shared.record(key: failKey, entry: FailedDiscEntry(
+                        date: Date(),
+                        volumeLabel: label,
+                        title: match?.title,
+                        year: match?.year,
+                        mediaType: match?.mediaType,
+                        tmdbId: match?.tmdbId,
+                        reason: error.localizedDescription,
+                        failedTitleIds: [tid],
+                        readErrors: readErrorCount,
+                        corruptionEvents: corruptionEventCount
+                    ))
                 }
             }
 
@@ -2063,12 +2131,27 @@ struct MainFeatureMismatch: Equatable, Sendable {
 private final class LastPRGV: @unchecked Sendable {
     private let lock = NSLock()
     private var _ts: Date = .distantPast
-    var timestamp: Date {
+    private var _percent: Int = 0
+    private var _detail: String = ""
+    func timestamp() -> Date {
         lock.lock(); defer { lock.unlock() }
         return _ts
     }
     func touch() {
         lock.lock(); defer { lock.unlock() }
         _ts = Date()
+    }
+    /// Record a PRGV tick: refreshes the timestamp and stores percent + detail.
+    func record(percent: Int, detail: String) {
+        lock.lock(); defer { lock.unlock() }
+        _ts = Date()
+        _percent = percent
+        _detail = detail
+    }
+    /// Atomically read percent + detail together so the two can't be torn
+    /// across separate PRGV ticks.
+    func snapshot() -> (percent: Int, detail: String) {
+        lock.lock(); defer { lock.unlock() }
+        return (_percent, _detail)
     }
 }

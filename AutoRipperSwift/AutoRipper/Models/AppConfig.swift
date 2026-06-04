@@ -96,6 +96,11 @@ final class AppConfig: ObservableObject {
     @Published var discordWebhook: String {
         didSet { defaults.set(discordWebhook, forKey: "discordWebhook") }
     }
+    /// How often (in minutes) to refresh the Discord job card with live rip
+    /// progress while a title is being ripped. 0 disables periodic updates.
+    @Published var discordRipProgressMinutes: Int {
+        didSet { defaults.set(discordRipProgressMinutes, forKey: "discordRipProgressMinutes") }
+    }
     @Published var nasMoviesPath: String {
         didSet { defaults.set(nasMoviesPath, forKey: "nasMoviesPath") }
     }
@@ -356,6 +361,7 @@ final class AppConfig: ObservableObject {
         // v4.0.3: extras-to-NAS toggle. Default on for new installs.
         self.publishExtrasToNAS = bool("publishExtrasToNAS", true)
         self.discordWebhook = str("discordWebhook", "")
+        self.discordRipProgressMinutes = int("discordRipProgressMinutes", 5)
         self.nasMoviesPath = str("nasMoviesPath", "")
         self.nasTvPath = str("nasTvPath", "")
         self.nasUploadEnabled = bool("nasUploadEnabled", false)

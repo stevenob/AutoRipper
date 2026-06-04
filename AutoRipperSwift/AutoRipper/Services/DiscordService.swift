@@ -122,6 +122,16 @@ class JobCard: @unchecked Sendable {
         await sendOrEdit(color: 0x5865F2)
     }
 
+    /// Refresh a stage's detail line in place without changing its status.
+    /// Used for periodic live progress (e.g. rip % / bytes every few minutes).
+    /// Edit-only: no-op until the stage is active AND the card's initial
+    /// message exists, so it can never POST a duplicate card.
+    func progress(_ stage: String, detail: String) async {
+        guard stages[stage] == "active", messageId != nil else { return }
+        stageDetails[stage] = detail
+        await sendOrEdit(color: 0x5865F2)
+    }
+
     func fail(_ stage: String, detail: String = "") async {
         stages[stage] = "failed"
         if !detail.isEmpty { stageDetails[stage] = detail }

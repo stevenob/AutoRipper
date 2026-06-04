@@ -57,7 +57,8 @@ struct AutoRipperApp: App {
     }
 
     init() {
-        FileLogger.shared.info("app", "AutoRipper 4.0.25 starting")
-        log.info("AutoRipper 4.0.25 starting")
+        FileLogger.shared.info("app", "AutoRipper 4.0.26 starting")
+        log.info("AutoRipper 4.0.26 starting")
+        FailedDiscRegistry.runLogBackfillIfNeeded()
     }
 }
